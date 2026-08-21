@@ -1,0 +1,83 @@
+[gd_scene format=3 uid="uid://b7qn5xyxoj23q"]
+
+[node name="TableScene" type="Node2D"]
+
+[node name="Background" type="TextureRect" parent="."]
+offset_right = 1150.0
+offset_bottom = 651.0
+
+[node name="GameUI" type="Control" parent="."]
+layout_mode = 3
+anchors_preset = 0
+offset_right = 1155.0
+offset_bottom = 648.0
+
+[node name="Player1Side" type="Control" parent="GameUI"]
+anchors_preset = 0
+offset_right = 1153.0
+offset_bottom = 644.0
+
+[node name="ScoreLabel" type="Label" parent="GameUI/Player1Side"]
+layout_mode = 0
+offset_right = 40.0
+offset_bottom = 23.0
+
+[node name="StatusLabel" type="Label" parent="GameUI/Player1Side"]
+layout_mode = 0
+offset_right = 40.0
+offset_bottom = 23.0
+
+[node name="BoardSlotsContainer" type="HBoxContainer" parent="GameUI/Player1Side"]
+layout_mode = 0
+offset_right = 40.0
+offset_bottom = 40.0
+
+[node name="HandContainer" type="HBoxContainer" parent="GameUI/Player1Side"]
+layout_mode = 0
+offset_right = 40.0
+offset_bottom = 40.0
+
+[node name="Player2Side" type="Control" parent="GameUI"]
+anchors_preset = 0
+offset_right = 1153.0
+offset_bottom = 644.0
+
+[node name="ScoreLabel" type="Label" parent="GameUI/Player2Side"]
+layout_mode = 0
+offset_right = 40.0
+offset_bottom = 23.0
+
+[node name="StatusLabel" type="Label" parent="GameUI/Player2Side"]
+layout_mode = 0
+offset_right = 40.0
+offset_bottom = 23.0
+
+[node name="BoardSlotsContainer" type="HBoxContainer" parent="GameUI/Player2Side"]
+layout_mode = 0
+offset_right = 40.0
+offset_bottom = 40.0
+
+[node name="HandContainer" type="HBoxContainer" parent="GameUI/Player2Side"]
+layout_mode = 0
+offset_right = 40.0
+offset_bottom = 40.0
+
+[node name="SharedControlPanel" type="Control" parent="GameUI"]
+anchors_preset = 0
+offset_right = 1147.0
+offset_bottom = 643.0
+
+[node name="EndTurnButton" type="Button" parent="GameUI/SharedControlPanel"]
+layout_mode = 0
+offset_right = 8.0
+offset_bottom = 8.0
+
+[node name="HoldButton" type="Button" parent="GameUI/SharedControlPanel"]
+layout_mode = 0
+offset_right = 8.0
+offset_bottom = 8.0
+
+[node name="RoundInfoLabel" type="Label" parent="GameUI/SharedControlPanel"]
+layout_mode = 0
+offset_right = 40.0
+offset_bottom = 23.0
