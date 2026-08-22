@@ -11,8 +11,10 @@ public partial class GameManager : Node
 
 	private Label _p1ScoreLabel;
 	private Label _p1StatusLabel;
+	private Label _p1WinsLabel;
 	private Label _p2ScoreLabel;
 	private Label _p2StatusLabel;
+	private Label _p2WinsLabel;
 	private Label _roundInfoLabel;
 
 	private Button _endTurnButton;
@@ -32,8 +34,10 @@ public partial class GameManager : Node
 		//Fetch UI node references based on table_scene.tscn paths
 		_p1ScoreLabel = GetNode<Label>("GameUI/Player1Side/ScoreLabel");
 		_p1StatusLabel = GetNode<Label>("GameUI/Player1Side/StatusLabel");
+		_p1WinsLabel = GetNodeOrNull<Label>("GameIU/Player1Side/WinsLabel");
 		_p2ScoreLabel = GetNode<Label>("GameUI/Player2Side/ScoreLabel");
 		_p2StatusLabel = GetNode<Label>("GameUI/Player2Side/StatusLabel");
+		_p2WinsLabel = GetNodeOrNull<Label>("GameUI/Player2Side/WinsLabel");
 		_roundInfoLabel = GetNode<Label>("GameUI/SharedControlPanel/RoundInfoLabel");
 
 		_endTurnButton = GetNode<Button>("GameUI/SharedControlPanel/EndTurnButton");
@@ -198,6 +202,10 @@ public partial class GameManager : Node
 
 		_p1StatusLabel.Text = _player1.IsHolding ? "Holding" : (_player1.IsActiveTurn ? "Active Turn" : "Waiting");
 		_p2StatusLabel.Text = _player2.IsHolding ? "Holding" : (_player2.IsActiveTurn ? "Active Turn" : "Waiting");
+
+		//Update Best of 3 Scoreboard counters if the labels exist
+		if (_p1WinsLabel != null) _p1WinsLabel.Text = $"Round Wins: {_gameState.RoundsWonPlayer1}";
+		if (_p2WinsLabel != null) _p2WinsLabel.Text = $"Round Wins: {_gameState.RoundsWonPlayer2}";
 
 		_roundInfoLabel.Text = $"Round {_gameState.CurrentRound} - Target: {_gameState.TargetScore} | Turn: P{_currentActivePlayer}";
 	}

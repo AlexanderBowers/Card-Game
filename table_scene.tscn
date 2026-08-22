@@ -49,6 +49,14 @@ offset_right = 200.0
 offset_bottom = 75.0
 text = "Waiting"
 
+[node name="WinsLabel" type="Label" parent="GameUI/Player2Side"]
+layout_mode = 0
+offset_left = 50.0
+offset_top = 80.0
+offset_right = 200.0
+offset_bottom = 110.0
+text = "Round Wins: 0"
+
 [node name="BoardSlotsContainer" type="HBoxContainer" parent="GameUI/Player2Side"]
 layout_mode = 0
 offset_left = 300.0
@@ -148,6 +156,14 @@ offset_top = 115.0
 offset_right = 200.0
 offset_bottom = 145.0
 text = "Active Turn"
+
+[node name="WinsLabel" type="Label" parent="GameUI/Player1Side"]
+layout_mode = 0
+offset_left = 50.0
+offset_top = 80.0
+offset_right = 200.0
+offset_bottom = 110.0
+text = "Round Wins: 0"
 
 [node name="BoardSlotsContainer" type="HBoxContainer" parent="GameUI/Player1Side"]
 layout_mode = 0
