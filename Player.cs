@@ -17,8 +17,28 @@ public partial class Player : RefCounted
     public Player(string name)
     {
         PlayerName = name;
+        InitializeDefaultModifierHand();
     }
     
+    private void InitializeDefaultModifierHand()
+    {
+        ModifierHand.Add(new Card(1, CardType.Modifier, "+1"));
+        ModifierHand.Add(new Card(2, CardType.Modifier, "+2"));
+        ModifierHand.Add(new Card(-1, CardType.Modifier, "-1"));
+        ModifierHand.Add(new Card(-2, CardType.Modifier, "-2"));
+
+    }
+
+    public bool PlayModifierCard(Card card, GameState gameState)
+    {
+        if (!ModifierHand.Contains(card)) return false;
+
+        ModifierHand.Remove(card);
+        ActiveModifiersOnBoard.Add(card);
+
+        CurrentScore += card.Value;
+        return true;
+    }
     public void ResetForNewRound()
     {
         CurrentScore = 0;
