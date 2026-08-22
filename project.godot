@@ -11,6 +11,7 @@ config_version=5
 [application]
 
 config/name="CardGame2"
+run/main_scene="uid://b7qn5xyxoj23q"
 config/features=PackedStringArray("4.5", "C#", "Mobile")
 config/icon="res://icon.svg"
 

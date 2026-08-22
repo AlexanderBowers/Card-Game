@@ -8,7 +8,7 @@ public partial class GameState : Node
 	public int RoundsWonPlayer2 { get; set; } = 0;
 	public int CurrentRound { get; set; } = 1;
 
-	public bool IsgameOver { get; set; } = false;
+	public bool IsGameOver { get; set; } = false;
 
 	public void RecordRoundWinner(int winningPlayer)
 	{
@@ -22,13 +22,13 @@ public partial class GameState : Node
 		if (RoundsWonPlayer1 >= 2)
 		{
 			matchWinner = 1;
-			IsgameOver = true;
+			IsGameOver = true;
 			return true;
 		}
 		if (RoundsWonPlayer1 >= 2)
 		{
 			matchWinner = 2;
-			IsgameOver = true;
+			IsGameOver = true;
 			return true;
 		}
 		return false;
