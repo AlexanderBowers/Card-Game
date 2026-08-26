@@ -1,0 +1,11 @@
+[gd_scene format=3 uid="uid://ccpmles2ma35a"]
+
+[node name="Panel" type="Panel"]
+custom_minimum_size = Vector2(50, 70)
+offset_right = 40.0
+offset_bottom = 40.0
+
+[node name="Label" type="Label" parent="."]
+layout_mode = 0
+offset_right = 40.0
+offset_bottom = 23.0

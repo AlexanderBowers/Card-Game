@@ -3,7 +3,6 @@ using System;
 
 public partial class GameManager : Node
 {
-    // References to our scene nodes
     private GameState _gameState;
     private Player _player1;
     private Player _player2;
@@ -16,21 +15,22 @@ public partial class GameManager : Node
     private Label _p2WinsLabel;
     private Label _roundInfoLabel;
 
+    private Button _startButton;
     private Button _endTurnButton;
     private Button _holdButton;
 
-    // Track active turn (1 for player1, 2 for player2)
     private int _currentActivePlayer = 1;
     private Random _random = new Random();
+    private PackedScene _cardViewScene = GD.Load<PackedScene>("res://CardView.tscn");
+    private bool _isGameStarted = false;
 
     public override void _Ready()
     {
-        // Initialize data structures
         _gameState = new GameState();
         _player1 = new Player("Player 1");
         _player2 = new Player("Player 2");
 
-        // Fetch UI node references based on table_scene.tscn paths
+        // Fetch UI node references
         _p1ScoreLabel = GetNode<Label>("GameUI/Player1Side/ScoreLabel");
         _p1StatusLabel = GetNode<Label>("GameUI/Player1Side/StatusLabel");
         _p1WinsLabel = GetNodeOrNull<Label>("GameUI/Player1Side/WinsLabel");
@@ -39,12 +39,27 @@ public partial class GameManager : Node
         _p2WinsLabel = GetNodeOrNull<Label>("GameUI/Player2Side/WinsLabel");
         _roundInfoLabel = GetNode<Label>("GameUI/SharedControlPanel/RoundInfoLabel");
 
+        _startButton = GetNode<Button>("GameUI/SharedControlPanel/StartButton");
         _endTurnButton = GetNode<Button>("GameUI/SharedControlPanel/EndTurnButton");
         _holdButton = GetNode<Button>("GameUI/SharedControlPanel/HoldButton");
 
-        // Connect Button signals
+        // Connect button signals
+        _startButton.Pressed += OnStartButtonPressed;
         _endTurnButton.Pressed += OnEndTurnPressed;
         _holdButton.Pressed += OnHoldPressed;
+
+        // Set initial waiting message
+        _roundInfoLabel.Text = "Press Start Game to Begin";
+        _endTurnButton.Disabled = true;
+        _holdButton.Disabled = true;
+    }
+
+    private void OnStartButtonPressed()
+    {
+        _isGameStarted = true;
+        _startButton.Visible = false; 
+        _endTurnButton.Disabled = false;
+        _holdButton.Disabled = false;
 
         StartNewRound();
     }
@@ -54,10 +69,16 @@ public partial class GameManager : Node
         _player1.ResetForNewRound();
         _player2.ResetForNewRound();
 
+        Control p1BoardContainer = GetNode<Control>("GameUI/Player1Side/BoardSlotsContainer");
+        Control p2BoardContainer = GetNode<Control>("GameUI/Player2Side/BoardSlotsContainer");
+        foreach (Node child in p1BoardContainer.GetChildren()) child.QueueFree();
+        foreach (Node child in p2BoardContainer.GetChildren()) child.QueueFree();
+
         _currentActivePlayer = 1;
         _player1.IsActiveTurn = true;
+        _player2.IsActiveTurn = false;
 
-        // Draw initial card for Player 1 to kick off the round
+        // Draw Player 1's opening card immediately and update UI in correct order
         DrawCardForActivePlayer();
         UpdateUI();
     }
@@ -68,42 +89,55 @@ public partial class GameManager : Node
         
         if (activePlayer.IsHolding) return;
 
-        // Draw random main deck card from 1 to 10
         int cardValue = _random.Next(1, 11);
         activePlayer.CurrentScore += cardValue;
         
+        Card drawnMainCard = new Card(cardValue, CardType.Main, cardValue.ToString());
+        activePlayer.ActiveCardsOnBoard.Add(drawnMainCard);
+        
         GD.Print($"{activePlayer.PlayerName} drew a {cardValue}. Score: {activePlayer.CurrentScore}");
 
+        Control boardContainer = (_currentActivePlayer == 1)
+            ? GetNode<Control>("GameUI/Player1Side/BoardSlotsContainer")
+            : GetNode<Control>("GameUI/Player2Side/BoardSlotsContainer");
+            
+        InstantiateCardView(drawnMainCard, boardContainer);
     }
 
     private void OnEndTurnPressed()
     {
+        if (!_isGameStarted) return;
+
         Player activePlayer = (_currentActivePlayer == 1) ? _player1 : _player2;
         if (activePlayer.IsHolding) return;
 
-        // Check for bust on end turn
         if (activePlayer.CurrentScore > _gameState.TargetScore)
         {
             HandlePlayerBust(activePlayer);
         }
-		else
-		{
-        	// Switch turns if the other player is not holding
-        	SwitchTurn();
-			
-		}
+        else
+        {
+            SwitchTurn();
+        }
     }
 
     private void OnHoldPressed()
     {
+        if (!_isGameStarted) return;
+
         Player activePlayer = (_currentActivePlayer == 1) ? _player1 : _player2;
+        if (activePlayer.IsHolding) return;
+
         activePlayer.IsHolding = true;
         activePlayer.IsActiveTurn = false;
 
         GD.Print($"{activePlayer.PlayerName} chose to HOLD at {activePlayer.CurrentScore}");
 
-        CheckRoundConclusion();
-        if (!_gameState.IsGameOver)
+        if (_player1.IsHolding && _player2.IsHolding)
+        {
+            EvaluateRoundWinner();
+        }
+        else
         {
             SwitchTurn();
         }
@@ -116,25 +150,28 @@ public partial class GameManager : Node
             EvaluateRoundWinner();
             return;
         }
-
-        // Switch active player index
+        
+        //Toggle active player if the other player is not holding.
         if (_currentActivePlayer == 1)
         {
-            _currentActivePlayer = 2;
-            _player1.IsActiveTurn = false;
-            _player2.IsActiveTurn = !_player2.IsHolding;
-
-            if (!_player2.IsHolding) DrawCardForActivePlayer();
+            if (!_player2.IsHolding)
+            {
+                _currentActivePlayer = 2;
+                _player1.IsActiveTurn = false;
+                _player2.IsActiveTurn = !_player2.IsHolding;
+            }
         }
         else
         {
-            _currentActivePlayer = 1;
-            _player2.IsActiveTurn = false;
-            _player1.IsActiveTurn = !_player1.IsHolding;
-
-            if (!_player1.IsHolding) DrawCardForActivePlayer();
+            if (!_player1.IsHolding)
+            {
+                _currentActivePlayer = 1;
+                _player2.IsActiveTurn = false;
+                _player1.IsActiveTurn = !_player1.IsHolding;
+            }
         }
 
+        DrawCardForActivePlayer();
         UpdateUI();
     }
 
@@ -165,18 +202,9 @@ public partial class GameManager : Node
 
         int roundWinner = 0;
 
-        if (p1Bust && p2Bust)
-        {
-            roundWinner = 0;
-        }
-        else if (p1Bust)
-        {
-            roundWinner = 2;
-        }
-        else if (p2Bust)
-        {
-            roundWinner = 1;
-        }
+        if (p1Bust && p2Bust) roundWinner = 0;
+        else if (p1Bust) roundWinner = 2;
+        else if (p2Bust) roundWinner = 1;
         else
         {
             int p1Diff = target - p1Score;
@@ -186,7 +214,7 @@ public partial class GameManager : Node
             else if (p2Diff < p1Diff) roundWinner = 2;
         }
 
-        if(roundWinner == 0)
+        if (roundWinner == 0)
         {
             GD.Print("Tie. Replaying Round...");
             _roundInfoLabel.Text = "Tie. Replaying Round...";
@@ -195,14 +223,16 @@ public partial class GameManager : Node
         {
             _gameState.RecordRoundWinner(roundWinner);
             GD.Print($"Player {roundWinner} won Round {_gameState.CurrentRound}");
-            _roundInfoLabel.Text = $"Player {roundWinner} has won this round.";
+            _roundInfoLabel.Text = $"Player {roundWinner} won this round!";
             _gameState.CurrentRound++;
         }
 
         if (_gameState.CheckMatchWinner(out int matchWinner))
         {
             GD.Print($"Player {matchWinner} wins the match");
-            _roundInfoLabel.Text = $"Player {matchWinner} wins the match.";
+            _roundInfoLabel.Text = $"Player {matchWinner} wins the match!";
+            _endTurnButton.Disabled = true;
+            _holdButton.Disabled = true;
         }
         else
         {
@@ -221,38 +251,38 @@ public partial class GameManager : Node
         if (_p1WinsLabel != null) _p1WinsLabel.Text = $"Round Wins: {_gameState.RoundsWonPlayer1}";
         if (_p2WinsLabel != null) _p2WinsLabel.Text = $"Round Wins: {_gameState.RoundsWonPlayer2}";
 
-        _roundInfoLabel.Text = $"Round {_gameState.CurrentRound} - Target: {_gameState.TargetScore} | Turn: P{_currentActivePlayer}";
+        if (_isGameStarted)
+        {
+            _roundInfoLabel.Text = $"Round {_gameState.CurrentRound} - Target: {_gameState.TargetScore} | Turn: P{_currentActivePlayer}";
+        }
 
         RefreshHandUI();
     }
     
     private void RefreshHandUI()
     {
-        // Fixed lowercase typo "gameUI" to "GameUI" for Player 2
         Control p1HandContainer = GetNode<Control>("GameUI/Player1Side/HandContainer");
         Control p2HandContainer = GetNode<Control>("GameUI/Player2Side/HandContainer");
 
         foreach(Node child in p1HandContainer.GetChildren()) child.QueueFree();
         foreach (Node child in p2HandContainer.GetChildren()) child.QueueFree();
 
-        // Populate Player 1 Hand Buttons
         foreach (Card card in _player1.ModifierHand)
         {
             Button cardButton = new Button();
             cardButton.Text = card.CardName;
             cardButton.CustomMinimumSize = new Vector2(60, 50);
-            cardButton.Disabled = (_currentActivePlayer != 1 || _player1.IsHolding);
+            cardButton.Disabled = (!_isGameStarted || _currentActivePlayer != 1 || _player1.IsHolding);
             cardButton.Pressed += () => OnModifierCardPressed(_player1, card);
             p1HandContainer.AddChild(cardButton);
         }
 
-        // Populate Player 2 Hand Buttons
         foreach (Card card in _player2.ModifierHand)
         {
             Button cardButton = new Button();
             cardButton.Text = card.CardName;
             cardButton.CustomMinimumSize = new Vector2(60, 50);
-            cardButton.Disabled = (_currentActivePlayer != 2 || _player2.IsHolding);
+            cardButton.Disabled = (!_isGameStarted || _currentActivePlayer != 2 || _player2.IsHolding);
             cardButton.Pressed += () => OnModifierCardPressed(_player2, card);
             p2HandContainer.AddChild(cardButton);
         }
@@ -264,14 +294,27 @@ public partial class GameManager : Node
 
         if (player.PlayModifierCard(card, _gameState))
         {
-            if(player.CurrentScore > _gameState.TargetScore)
+            Control boardContainer = (player == _player1)
+                ? GetNode<Control>("GameUI/Player1Side/BoardSlotsContainer")
+                : GetNode<Control>("GameUI/Player2Side/BoardSlotsContainer");
+
+            InstantiateCardView(card, boardContainer);
+
+            UpdateUI();
+        }
+    }
+    
+    private void InstantiateCardView(Card card, Control parentContainer)
+    {
+        if (_cardViewScene != null)
+        {
+            Control cardNode = (Control)_cardViewScene.Instantiate();
+            Label label = cardNode.GetNodeOrNull<Label>("Label");
+            if (label != null)
             {
-                HandlePlayerBust(player);
+                label.Text = card.CardName;
             }
-            else
-            {
-                UpdateUI();
-            }
+            parentContainer.AddChild(cardNode);
         }
     }
 }

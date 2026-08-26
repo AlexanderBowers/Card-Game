@@ -100,6 +100,21 @@ grow_horizontal = 2
 text = "Round 1 - Target: 20"
 horizontal_alignment = 1
 
+[node name="StartButton" type="Button" parent="GameUI/SharedControlPanel"]
+layout_mode = 1
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -70.0
+offset_top = -5.0
+offset_right = 70.0
+offset_bottom = 35.0
+grow_horizontal = 2
+grow_vertical = 2
+text = "Start Game"
+
 [node name="EndTurnButton" type="Button" parent="GameUI/SharedControlPanel"]
 layout_mode = 1
 anchors_preset = 2

@@ -12,7 +12,7 @@ public partial class Player : RefCounted
     public List<Card> ModifierHand { get; set; } = new List<Card>();
 
     //Cards played onto the board this round
-    public List<Card> ActiveModifiersOnBoard { get; set; } = new List<Card>();
+    public List<Card> ActiveCardsOnBoard { get; set; } = new List<Card>();
 
     public Player(string name)
     {
@@ -34,7 +34,7 @@ public partial class Player : RefCounted
         if (!ModifierHand.Contains(card)) return false;
 
         ModifierHand.Remove(card);
-        ActiveModifiersOnBoard.Add(card);
+        ActiveCardsOnBoard.Add(card);
 
         CurrentScore += card.Value;
         return true;
@@ -44,6 +44,6 @@ public partial class Player : RefCounted
         CurrentScore = 0;
         IsHolding = false;
         IsActiveTurn = false;
-        ActiveModifiersOnBoard.Clear();
+        ActiveCardsOnBoard.Clear();
     }
 }
