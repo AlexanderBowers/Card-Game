@@ -195,3 +195,15 @@ offset_top = 20.0
 offset_right = 850.0
 offset_bottom = 100.0
 alignment = 1
+
+[node name="GameModeButton" type="OptionButton" parent="GameUI/SharedControlPanel"]
+layout_mode = 1
+anchors_preset = 5
+anchor_left = 0.5
+anchor_right = 0.5
+offset_left = -70.0
+offset_top = -45.0
+offset_right = 70.0
+offset_bottom = -10.0
+grow_horizontal = 2
+text = "Mode: vs Bot"

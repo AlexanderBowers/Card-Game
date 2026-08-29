@@ -25,7 +25,7 @@ public partial class GameState : Node
 			IsGameOver = true;
 			return true;
 		}
-		if (RoundsWonPlayer1 >= 2)
+		if (RoundsWonPlayer2 >= 2)
 		{
 			matchWinner = 2;
 			IsGameOver = true;
