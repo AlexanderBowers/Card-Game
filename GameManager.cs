@@ -131,10 +131,21 @@ public partial class GameManager : Node
         }
     }
 
-    private void ProcessAiTurn()
+    private async void ProcessAiTurn()
     {   
-        TryAiPlayModifierCard();
+        //1. Wait a moment to let the player see the AI's drawn card
+        await ToSignal(GetTree().CreateTimer(1.0f), SceneTreeTimer.SignalName.Timeout);
 
+        //2. The AI will decide if it wants to play a modifier.
+        bool playedModifier = TryAiPlayModifierCard();
+
+        if (playedModifier)
+        {
+            //If the AI played a modifier, wait 1.5 seconds to let the player see it
+            await ToSignal(GetTree().CreateTimer(1.5f), SceneTreeTimer.SignalName.Timeout);
+        }
+
+        //3. Evaluate the score at the end of the turn.
         if(_player2.CurrentScore > _gameState.TargetScore)
         {
             HandlePlayerBust(_player2);
@@ -143,11 +154,18 @@ public partial class GameManager : Node
         {
             int target = _gameState.TargetScore;
             int holdThreshold = Math.Max(10, target - 2);
+
+            if (_player1.IsHolding && _player1.CurrentScore <= target)
+            {
+                holdThreshold = _player1.CurrentScore;
+            }
+
             if (_player2.CurrentScore >= holdThreshold || _player2.CurrentScore == target)
             {
                 GD.Print($"AI decides to HOLD at {_player2.CurrentScore} (Target: {target})");
                 _player2.IsHolding = true;
                 _player2.IsActiveTurn = false;
+
                 if (_player1.IsHolding)
                 {
                     EvaluateRoundWinner();
@@ -164,12 +182,17 @@ public partial class GameManager : Node
         }
     }
 
-    private void TryAiPlayModifierCard()
+    private bool TryAiPlayModifierCard()
     {
         int target = _gameState.TargetScore;
         Card bestCardToPlay = null;
         int highValueThreshold = target - 2;
         int projectedScore = 0;
+
+        if(_player1.IsHolding && _player1.CurrentScore <= target)
+        {
+            highValueThreshold = _player1.CurrentScore;
+        }
 
         foreach(Card card in _player2.ModifierHand)
         {
@@ -197,7 +220,11 @@ public partial class GameManager : Node
             InstantiateCardView(bestCardToPlay, _p2BoardContainer);
 
             UpdateUI();
+
+            return true;
         }
+
+        return false;
     }
 
     private void OnEndTurnPressed()
