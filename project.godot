@@ -21,17 +21,28 @@ config/icon="res://icon.svg"
 
 [display]
 
-window/size/viewport_width=1152
-window/size/viewport_height=648
+; Base is a 720px square: with aspect "expand" the SHORT side of any screen becomes 720
+; design-pixels and the long side grows, so the UI is the same physical size in portrait
+; (720x~1560 on a phone) and landscape (1280x720 on desktop). See GameManager.ApplyResponsiveLayout.
+window/size/viewport_width=720
+window/size/viewport_height=720
+window/size/window_width_override=1152
+window/size/window_height_override=648
 window/stretch/mode="canvas_items"
 window/stretch/aspect="expand"
 window/handheld/orientation=6
+
+[gui]
+
+theme/custom="res://ui_theme.tres"
 
 [dotnet]
 
 project/assembly_name="CardGame2"
 
 [rendering]
+
+environment/defaults/default_clear_color=Color(0.07, 0.24, 0.13, 1)
 
 renderer/rendering_method="mobile"
 textures/vram_compression/import_etc2_astc=true
