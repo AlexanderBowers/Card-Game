@@ -30,6 +30,10 @@ public partial class GameManager : Node
     [Export] private Button _holdButton;
     [Export] private Control _mainDeckPosition;
 
+    [ExportGroup("System UI")]
+    [Export] private Button _restartButton;
+    [Export] private Button _exitButton;
+
     private int _currentActivePlayer = 1;
     private Random _random = new Random();
     private PackedScene _cardViewScene = GD.Load<PackedScene>("res://CardView.tscn");
@@ -60,11 +64,36 @@ public partial class GameManager : Node
         _startButton.Pressed += OnStartButtonPressed;
         _endTurnButton.Pressed += OnEndTurnPressed;
         _holdButton.Pressed += OnHoldPressed;
+        if (_restartButton != null) _restartButton.Pressed += OnRestartPressed;
+        if (_exitButton != null) _exitButton.Pressed += OnExitPressed;
 
         // Set initial waiting message
         _roundInfoLabel.Text = "Press Start Game to Begin";
         _endTurnButton.Disabled = true;
         _holdButton.Disabled = true;
+    }
+
+    private void OnRestartPressed()
+    {
+        // Reloading the scene rebuilds GameManager, GameState and both Players from scratch,
+        // so this fully resets the match (round wins, scores, hands) for the current mode.
+        GD.Print("Restarting game...");
+        GetTree().ReloadCurrentScene();
+    }
+
+    private void OnExitPressed()
+    {
+        GD.Print("Exiting game...");
+        GetTree().Quit();
+    }
+
+    public override void _Notification(int what)
+    {
+        // Android hardware/gesture "Back" and the desktop window close button both arrive here.
+        if (what == NotificationWMGoBackRequest || what == NotificationWMCloseRequest)
+        {
+            GetTree().Quit();
+        }
     }
 
     private void OnStartButtonPressed()

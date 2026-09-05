@@ -2,7 +2,7 @@
 
 [ext_resource type="Script" uid="uid://cdrp0i3hpccul" path="res://GameManager.cs" id="1_u7gne"]
 
-[node name="TableScene" type="Control" unique_id=610587453 node_paths=PackedStringArray("_p1ScoreLabel", "_p1StatusLabel", "_p1WinsLabel", "_p1BoardContainer", "_p1HandContainer", "_p2ScoreLabel", "_p2StatusLabel", "_p2WinsLabel", "_p2BoardContainer", "_p2HandContainer", "_p2Rotator", "_roundInfoLabel", "_gameModeButton", "_startButton", "_endTurnButton", "_holdButton", "_mainDeckPosition")]
+[node name="TableScene" type="Control" unique_id=610587453 node_paths=PackedStringArray("_p1ScoreLabel", "_p1StatusLabel", "_p1WinsLabel", "_p1BoardContainer", "_p1HandContainer", "_p2ScoreLabel", "_p2StatusLabel", "_p2WinsLabel", "_p2BoardContainer", "_p2HandContainer", "_p2Rotator", "_roundInfoLabel", "_gameModeButton", "_startButton", "_endTurnButton", "_holdButton", "_mainDeckPosition", "_restartButton", "_exitButton")]
 layout_mode = 3
 anchors_preset = 15
 anchor_right = 1.0
@@ -27,6 +27,8 @@ _startButton = NodePath("GameUI/MainLayout/SharedControlPanel/VBoxContainer/Star
 _endTurnButton = NodePath("GameUI/MainLayout/SharedControlPanel/VBoxContainer/ActionButtons/EndTurnButton")
 _holdButton = NodePath("GameUI/MainLayout/SharedControlPanel/VBoxContainer/ActionButtons/HoldButton")
 _mainDeckPosition = NodePath("GameUI/MainLayout/SharedControlPanel/VBoxContainer/MainDeck")
+_restartButton = NodePath("GameUI/MainLayout/SharedControlPanel/VBoxContainer/SystemButtons/RestartButton")
+_exitButton = NodePath("GameUI/MainLayout/SharedControlPanel/VBoxContainer/SystemButtons/ExitButton")
 
 [node name="Background" type="TextureRect" parent="." unique_id=1180029379]
 layout_mode = 1
@@ -134,6 +136,20 @@ text = "End Turn"
 [node name="HoldButton" type="Button" parent="GameUI/MainLayout/SharedControlPanel/VBoxContainer/ActionButtons" unique_id=1320511195]
 layout_mode = 2
 text = "Hold"
+
+[node name="SystemButtons" type="HBoxContainer" parent="GameUI/MainLayout/SharedControlPanel/VBoxContainer" unique_id=1550060130]
+layout_mode = 2
+alignment = 1
+
+[node name="RestartButton" type="Button" parent="GameUI/MainLayout/SharedControlPanel/VBoxContainer/SystemButtons" unique_id=571703508]
+custom_minimum_size = Vector2(90, 40)
+layout_mode = 2
+text = "Restart"
+
+[node name="ExitButton" type="Button" parent="GameUI/MainLayout/SharedControlPanel/VBoxContainer/SystemButtons" unique_id=1179236501]
+custom_minimum_size = Vector2(90, 40)
+layout_mode = 2
+text = "Exit"
 
 [node name="Player1Side" type="CenterContainer" parent="GameUI/MainLayout" unique_id=1803027458]
 layout_mode = 2
