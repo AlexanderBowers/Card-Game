@@ -50,6 +50,15 @@ public partial class GameManager : Node
         if (_p2Rotator != null)
         {
             _p2Rotator.RotationDegrees = 180;
+            // table_scene's MainLayout is a vertical VBoxContainer - lock to portrait so it
+            // never gets squeezed into landscape (that's what caused the Restart/Exit overlap).
+            DisplayServer.ScreenSetOrientation(DisplayServer.ScreenOrientation.SensorPortrait);
+        }
+        else
+        {
+            // solo_table_scene's MainLayout is a horizontal HBoxContainer - lock to landscape so
+            // it never gets stretched into portrait (that's what caused the dead space at the bottom).
+            DisplayServer.ScreenSetOrientation(DisplayServer.ScreenOrientation.SensorLandscape);
         }
 
         if (_gameModeButton != null)
