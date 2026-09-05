@@ -88,6 +88,13 @@ jobs:
           sed -i "s|^version/name=.*|version/name=\"0.1.${GITHUB_RUN_NUMBER}\"|" export_presets.cfg
           grep -E '^version/' export_presets.cfg
 
+      - name: Pin dotnet CLI to the 9.0 SDK for this build (runner also ships .NET 10)
+        run: |
+          cat > global.json <<'JSON'
+          { "sdk": { "version": "9.0.0", "rollForward": "latestFeature" } }
+          JSON
+          dotnet --version
+
       - name: Sanity-check the C# project the way Godot does before an Android export
         # Godot 4.7 runs exactly this and refuses to export unless the answer is "net9.0".
         run: |
@@ -118,9 +125,15 @@ jobs:
           STATUS=${PIPESTATUS[0]}
           set -e
           if [ "${STATUS}" != "0" ] || [ ! -s build/CardGame2.apk ]; then
-            # Surface the real reason in the run's Annotations (visible without signing in).
-            echo "::error::Godot export failed (exit ${STATUS}). Last lines of output:"
-            grep -v "^\s*$" build/export.log | grep -iv "^\[verbose\]\|Registered\|Loading\|Godot Engine v" | tail -40 | while IFS= read -r line; do echo "::error::${line}"; done
+            # Full log tail into the job summary (public), key lines into annotations.
+            {
+              echo "## Godot export failed (exit ${STATUS})"
+              echo '```'
+              tail -200 build/export.log
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "::error::Godot export failed (exit ${STATUS}). See job summary for the full log."
+            grep -i "error\|fail\|unable\|missing\|not found\|exception\|invalid" build/export.log | grep -iv "Failed to load project assembly" | tail -8 | while IFS= read -r line; do echo "::error::${line}"; done
             exit 1
           fi
           ls -la build
