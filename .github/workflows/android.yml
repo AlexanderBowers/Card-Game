@@ -27,7 +27,7 @@ jobs:
             9.0.x
 
       - name: Set up JDK 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "17"
@@ -83,12 +83,26 @@ jobs:
 
       - name: Stamp version code/name from run number
         run: |
+          mkdir -p build
           sed -i "s|^version/code=.*|version/code=${GITHUB_RUN_NUMBER}|" export_presets.cfg
           sed -i "s|^version/name=.*|version/name=\"0.1.${GITHUB_RUN_NUMBER}\"|" export_presets.cfg
           grep -E '^version/' export_presets.cfg
 
+      - name: Sanity-check the C# project the way Godot does before an Android export
+        # Godot 4.7 runs exactly this and refuses to export unless the answer is "net9.0".
+        run: |
+          set -euo pipefail
+          echo "dotnet: $(dotnet --version)"
+          TFM=$(dotnet build CardGame2.csproj /p:GodotTargetPlatform=android --getProperty:TargetFramework 2>&1 | tee build/tfm-check.log | tail -1) || true
+          echo "TargetFramework for android => '${TFM}'"
+          if [ "${TFM}" != "net9.0" ]; then
+            echo "::error::Godot needs the Android TargetFramework to resolve to net9.0 but got '${TFM}'. Build output follows."
+            cat build/tfm-check.log
+            exit 1
+          fi
+
       - name: Import project (generates .godot cache)
-        run: godot --headless --path . --import || true
+        run: godot --headless --path . --import 2>&1 | tee build/import.log || true
 
       - name: Export Android APK
         env:
@@ -97,9 +111,27 @@ jobs:
         run: |
           set -euo pipefail
           export GODOT_ANDROID_KEYSTORE_DEBUG_PATH="$HOME/debug.keystore"
-          mkdir -p build
-          godot --headless --path . --export-debug "Android" build/CardGame2.apk
+          echo "ANDROID_HOME=${ANDROID_HOME:-<unset>}  JAVA_HOME=${JAVA_HOME:-<unset>}"
+          ls "${ANDROID_HOME}/build-tools" "${ANDROID_HOME}/platform-tools" 2>&1 | head -20
+          set +e
+          godot --headless --path . --verbose --export-debug "Android" build/CardGame2.apk 2>&1 | tee build/export.log
+          STATUS=${PIPESTATUS[0]}
+          set -e
+          if [ "${STATUS}" != "0" ] || [ ! -s build/CardGame2.apk ]; then
+            # Surface the real reason in the run's Annotations (visible without signing in).
+            echo "::error::Godot export failed (exit ${STATUS}). Last lines of output:"
+            grep -v "^\s*$" build/export.log | grep -iv "^\[verbose\]\|Registered\|Loading\|Godot Engine v" | tail -40 | while IFS= read -r line; do echo "::error::${line}"; done
+            exit 1
+          fi
           ls -la build
+
+      - name: Upload build logs (always, so failures can be inspected)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-logs-${{ github.run_number }}
+          path: build/*.log
+          if-no-files-found: ignore
 
       - name: Upload APK as workflow artifact
         uses: actions/upload-artifact@v4
