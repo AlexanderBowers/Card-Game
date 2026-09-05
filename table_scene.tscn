@@ -2,7 +2,7 @@
 
 [ext_resource type="Script" uid="uid://cdrp0i3hpccul" path="res://GameManager.cs" id="1_u7gne"]
 
-[node name="TableScene" type="Control" unique_id=773561969 node_paths=PackedStringArray("_p1ScoreLabel", "_p1StatusLabel", "_p1WinsLabel", "_p1BoardContainer", "_p1HandContainer", "_p2ScoreLabel", "_p2StatusLabel", "_p2WinsLabel", "_p2BoardContainer", "_p2HandContainer", "_p2Rotator", "_roundInfoLabel", "_gameModeButton", "_startButton", "_endTurnButton", "_holdButton")]
+[node name="TableScene" type="Control" unique_id=610587453 node_paths=PackedStringArray("_p1ScoreLabel", "_p1StatusLabel", "_p1WinsLabel", "_p1BoardContainer", "_p1HandContainer", "_p2ScoreLabel", "_p2StatusLabel", "_p2WinsLabel", "_p2BoardContainer", "_p2HandContainer", "_p2Rotator", "_roundInfoLabel", "_gameModeButton", "_startButton", "_endTurnButton", "_holdButton", "_mainDeckPosition")]
 layout_mode = 3
 anchors_preset = 15
 anchor_right = 1.0
@@ -26,17 +26,20 @@ _gameModeButton = NodePath("GameUI/MainLayout/SharedControlPanel/VBoxContainer/G
 _startButton = NodePath("GameUI/MainLayout/SharedControlPanel/VBoxContainer/StartButton")
 _endTurnButton = NodePath("GameUI/MainLayout/SharedControlPanel/VBoxContainer/ActionButtons/EndTurnButton")
 _holdButton = NodePath("GameUI/MainLayout/SharedControlPanel/VBoxContainer/ActionButtons/HoldButton")
+_mainDeckPosition = NodePath("GameUI/MainLayout/SharedControlPanel/VBoxContainer/MainDeck")
 
-[node name="Background" type="TextureRect" parent="." unique_id=1296628383]
-layout_mode = 0
+[node name="Background" type="TextureRect" parent="." unique_id=1180029379]
+layout_mode = 1
+anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
 mouse_filter = 2
 
-[node name="GameUI" type="MarginContainer" parent="." unique_id=629766118]
-layout_mode = 0
+[node name="GameUI" type="MarginContainer" parent="." unique_id=364165236]
+layout_mode = 1
+anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
 grow_horizontal = 2
@@ -46,17 +49,17 @@ theme_override_constants/margin_top = 20
 theme_override_constants/margin_right = 20
 theme_override_constants/margin_bottom = 20
 
-[node name="MainLayout" type="VBoxContainer" parent="GameUI" unique_id=920376323]
+[node name="MainLayout" type="VBoxContainer" parent="GameUI" unique_id=1743845819]
 layout_mode = 2
 
-[node name="Player2Side" type="CenterContainer" parent="GameUI/MainLayout" unique_id=988959567]
+[node name="Player2Side" type="CenterContainer" parent="GameUI/MainLayout" unique_id=360900795]
 layout_mode = 2
 size_flags_vertical = 3
 
-[node name="P2Rotator" type="Control" parent="GameUI/MainLayout/Player2Side" unique_id=991509629]
+[node name="P2Rotator" type="Control" parent="GameUI/MainLayout/Player2Side" unique_id=23345930]
 layout_mode = 2
 
-[node name="Layout" type="VBoxContainer" parent="GameUI/MainLayout/Player2Side/P2Rotator" unique_id=1812038051]
+[node name="Layout" type="VBoxContainer" parent="GameUI/MainLayout/Player2Side/P2Rotator" unique_id=1711430586]
 layout_mode = 1
 anchors_preset = 8
 anchor_left = 0.5
@@ -67,89 +70,104 @@ grow_horizontal = 2
 grow_vertical = 2
 alignment = 1
 
-[node name="Stats" type="HBoxContainer" parent="GameUI/MainLayout/Player2Side/P2Rotator/Layout" unique_id=919614482]
+[node name="Stats" type="HBoxContainer" parent="GameUI/MainLayout/Player2Side/P2Rotator/Layout" unique_id=1598554030]
 layout_mode = 2
 alignment = 1
 
-[node name="WinsLabel" type="Label" parent="GameUI/MainLayout/Player2Side/P2Rotator/Layout/Stats" unique_id=1613551539]
+[node name="WinsLabel" type="Label" parent="GameUI/MainLayout/Player2Side/P2Rotator/Layout/Stats" unique_id=58649425]
 layout_mode = 2
 text = "Wins: 0"
 
-[node name="ScoreLabel" type="Label" parent="GameUI/MainLayout/Player2Side/P2Rotator/Layout/Stats" unique_id=1065651354]
+[node name="ScoreLabel" type="Label" parent="GameUI/MainLayout/Player2Side/P2Rotator/Layout/Stats" unique_id=413716060]
 layout_mode = 2
 theme_override_font_sizes/font_size = 24
 text = "Score: 0"
 
-[node name="StatusLabel" type="Label" parent="GameUI/MainLayout/Player2Side/P2Rotator/Layout/Stats" unique_id=2020065678]
+[node name="StatusLabel" type="Label" parent="GameUI/MainLayout/Player2Side/P2Rotator/Layout/Stats" unique_id=1782889633]
 layout_mode = 2
 text = "Waiting"
 
-[node name="BoardSlotsContainer" type="GridContainer" parent="GameUI/MainLayout/Player2Side/P2Rotator/Layout" unique_id=2126820375]
+[node name="BoardSlotsContainer" type="GridContainer" parent="GameUI/MainLayout/Player2Side/P2Rotator/Layout" unique_id=540520973]
+custom_minimum_size = Vector2(230, 320)
 layout_mode = 2
+theme_override_constants/h_separation = 10
+theme_override_constants/v_separation = 10
 columns = 3
 
-[node name="HandContainer" type="HBoxContainer" parent="GameUI/MainLayout/Player2Side/P2Rotator/Layout" unique_id=1374606374]
+[node name="HandContainer" type="HBoxContainer" parent="GameUI/MainLayout/Player2Side/P2Rotator/Layout" unique_id=264133123]
+custom_minimum_size = Vector2(0, 50)
 layout_mode = 2
 alignment = 1
 
-[node name="SharedControlPanel" type="CenterContainer" parent="GameUI/MainLayout" unique_id=2143580697]
+[node name="SharedControlPanel" type="CenterContainer" parent="GameUI/MainLayout" unique_id=414940360]
 layout_mode = 2
 
-[node name="VBoxContainer" type="VBoxContainer" parent="GameUI/MainLayout/SharedControlPanel" unique_id=67989493]
+[node name="VBoxContainer" type="VBoxContainer" parent="GameUI/MainLayout/SharedControlPanel" unique_id=743490495]
 layout_mode = 2
+theme_override_constants/separation = 15
 
-[node name="RoundInfoLabel" type="Label" parent="GameUI/MainLayout/SharedControlPanel/VBoxContainer" unique_id=843672217]
+[node name="RoundInfoLabel" type="Label" parent="GameUI/MainLayout/SharedControlPanel/VBoxContainer" unique_id=672150649]
 layout_mode = 2
 text = "Press Start Game to Begin"
 horizontal_alignment = 1
 
-[node name="GameModeButton" type="OptionButton" parent="GameUI/MainLayout/SharedControlPanel/VBoxContainer" unique_id=1615366027]
+[node name="GameModeButton" type="OptionButton" parent="GameUI/MainLayout/SharedControlPanel/VBoxContainer" unique_id=1779882157]
 layout_mode = 2
 
-[node name="StartButton" type="Button" parent="GameUI/MainLayout/SharedControlPanel/VBoxContainer" unique_id=322798899]
+[node name="StartButton" type="Button" parent="GameUI/MainLayout/SharedControlPanel/VBoxContainer" unique_id=2127159909]
 layout_mode = 2
 text = "Start Game"
 
-[node name="ActionButtons" type="HBoxContainer" parent="GameUI/MainLayout/SharedControlPanel/VBoxContainer" unique_id=813812134]
+[node name="MainDeck" type="Panel" parent="GameUI/MainLayout/SharedControlPanel/VBoxContainer" unique_id=1021730125]
+custom_minimum_size = Vector2(50, 70)
 layout_mode = 2
+size_flags_horizontal = 4
 
-[node name="EndTurnButton" type="Button" parent="GameUI/MainLayout/SharedControlPanel/VBoxContainer/ActionButtons" unique_id=218396278]
+[node name="ActionButtons" type="HBoxContainer" parent="GameUI/MainLayout/SharedControlPanel/VBoxContainer" unique_id=1051189889]
+layout_mode = 2
+alignment = 1
+
+[node name="EndTurnButton" type="Button" parent="GameUI/MainLayout/SharedControlPanel/VBoxContainer/ActionButtons" unique_id=2065686334]
 layout_mode = 2
 text = "End Turn"
 
-[node name="HoldButton" type="Button" parent="GameUI/MainLayout/SharedControlPanel/VBoxContainer/ActionButtons" unique_id=1047447972]
+[node name="HoldButton" type="Button" parent="GameUI/MainLayout/SharedControlPanel/VBoxContainer/ActionButtons" unique_id=1320511195]
 layout_mode = 2
 text = "Hold"
 
-[node name="Player1Side" type="CenterContainer" parent="GameUI/MainLayout" unique_id=983024687]
+[node name="Player1Side" type="CenterContainer" parent="GameUI/MainLayout" unique_id=1803027458]
 layout_mode = 2
 size_flags_vertical = 3
 
-[node name="Layout" type="VBoxContainer" parent="GameUI/MainLayout/Player1Side" unique_id=1246017985]
+[node name="Layout" type="VBoxContainer" parent="GameUI/MainLayout/Player1Side" unique_id=737668783]
 layout_mode = 2
 alignment = 1
 
-[node name="Stats" type="HBoxContainer" parent="GameUI/MainLayout/Player1Side/Layout" unique_id=1944052830]
+[node name="Stats" type="HBoxContainer" parent="GameUI/MainLayout/Player1Side/Layout" unique_id=1528933754]
 layout_mode = 2
 alignment = 1
 
-[node name="WinsLabel" type="Label" parent="GameUI/MainLayout/Player1Side/Layout/Stats" unique_id=630797259]
+[node name="WinsLabel" type="Label" parent="GameUI/MainLayout/Player1Side/Layout/Stats" unique_id=581162210]
 layout_mode = 2
 text = "Wins: 0"
 
-[node name="ScoreLabel" type="Label" parent="GameUI/MainLayout/Player1Side/Layout/Stats" unique_id=1072692373]
+[node name="ScoreLabel" type="Label" parent="GameUI/MainLayout/Player1Side/Layout/Stats" unique_id=846342447]
 layout_mode = 2
 theme_override_font_sizes/font_size = 24
 text = "Score: 0"
 
-[node name="StatusLabel" type="Label" parent="GameUI/MainLayout/Player1Side/Layout/Stats" unique_id=1293230409]
+[node name="StatusLabel" type="Label" parent="GameUI/MainLayout/Player1Side/Layout/Stats" unique_id=1363513435]
 layout_mode = 2
 text = "Active Turn"
 
-[node name="BoardSlotsContainer" type="GridContainer" parent="GameUI/MainLayout/Player1Side/Layout" unique_id=308088703]
+[node name="BoardSlotsContainer" type="GridContainer" parent="GameUI/MainLayout/Player1Side/Layout" unique_id=733887537]
+custom_minimum_size = Vector2(230, 320)
 layout_mode = 2
+theme_override_constants/h_separation = 10
+theme_override_constants/v_separation = 10
 columns = 3
 
-[node name="HandContainer" type="HBoxContainer" parent="GameUI/MainLayout/Player1Side/Layout" unique_id=1962070597]
+[node name="HandContainer" type="HBoxContainer" parent="GameUI/MainLayout/Player1Side/Layout" unique_id=700209036]
+custom_minimum_size = Vector2(0, 50)
 layout_mode = 2
 alignment = 1

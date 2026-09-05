@@ -28,6 +28,7 @@ public partial class GameManager : Node
     [Export] private Button _startButton;
     [Export] private Button _endTurnButton;
     [Export] private Button _holdButton;
+    [Export] private Control _mainDeckPosition;
 
     private int _currentActivePlayer = 1;
     private Random _random = new Random();
@@ -96,9 +97,16 @@ public partial class GameManager : Node
         _player1.ResetForNewRound();
         _player2.ResetForNewRound();
 
+        //Clear old cards
         foreach (Node child in _p1BoardContainer.GetChildren()) child.QueueFree();
         foreach (Node child in _p2BoardContainer.GetChildren()) child.QueueFree();
 
+        //Setting the board for 9 cards to prevent shifting
+        for (int i = 0; i < 9; i++)
+        {
+            _p1BoardContainer.AddChild(new Control { CustomMinimumSize = new Vector2(50, 70)});
+            _p2BoardContainer.AddChild(new Control { CustomMinimumSize = new Vector2(50, 70)});
+        }
         _currentActivePlayer = 1;
         _player1.IsActiveTurn = true;
         _player2.IsActiveTurn = false;
@@ -457,31 +465,76 @@ public partial class GameManager : Node
                 styleBox.CornerRadiusTopRight = 6;
                 styleBox.CornerRadiusBottomLeft = 6;
                 styleBox.CornerRadiusBottomRight = 6;
-                
                 styleBox.BorderWidthTop = 2;
                 styleBox.BorderWidthBottom = 2;
                 styleBox.BorderWidthLeft = 2;
                 styleBox.BorderWidthRight = 2;
                 styleBox.BorderColor = new Color(0.9f, 0.9f, 0.9f);
 
-                if (card.Type == CardType.Main)
-                {
-                    styleBox.BgColor = new Color(0.15f, 0.55f, 0.15f); 
-                }
-                else
-                {
-                    if (card.Value > 0)
-                        styleBox.BgColor = new Color(0.15f, 0.55f, 0.15f); 
-                    else if (card.Value < 0)
-                        styleBox.BgColor = new Color(0.75f, 0.15f, 0.15f); 
-                    else
-                        styleBox.BgColor = new Color(0.15f, 0.35f, 0.75f); 
-                }
+                if (card.Type == CardType.Main) styleBox.BgColor = new Color(0.15f, 0.55f, 0.15f);
+                else if (card.Value > 0) styleBox.BgColor = new Color(0.15f, 0.55f, 0.15f);
+                else if (card.Value < 0) styleBox.BgColor = new Color(0.75f, 0.15f, 0.15f);
+                else styleBox.BgColor = new Color(0.15f, 0.35f, 0.75f);
 
                 bgPanel.AddThemeStyleboxOverride("panel", styleBox);
             }
 
+            // Add to the grid but make it completely invisible
+            cardNode.Modulate = new Color(1, 1, 1, 0);
             parentContainer.AddChild(cardNode);
+
+            // Defer the animation by one frame so Godot has time to calculate its final Grid position
+            CallDeferred(MethodName.AnimateCardDrop, cardNode);
         }
     }
+
+    private void AnimateCardDrop(Control realCard)
+{
+    // Fallback in case the deck isn't assigned in the inspector
+    if (_mainDeckPosition == null)
+    {
+        realCard.Modulate = new Color(1, 1, 1, 1);
+        return;
+    }
+
+    // 1. Create a "fake" card to animate
+    Panel fakeCard = new Panel();
+    fakeCard.CustomMinimumSize = new Vector2(50, 70);
+    
+    // Set a generic dark card-back style
+    StyleBoxFlat fakeStyle = new StyleBoxFlat();
+    fakeStyle.BgColor = new Color(0.2f, 0.2f, 0.2f); 
+    fakeStyle.CornerRadiusTopLeft = 6;
+    fakeStyle.CornerRadiusTopRight = 6;
+    fakeStyle.CornerRadiusBottomLeft = 6;
+    fakeStyle.CornerRadiusBottomRight = 6;
+    fakeStyle.BorderWidthTop = 2;
+    fakeStyle.BorderWidthBottom = 2;
+    fakeStyle.BorderWidthLeft = 2;
+    fakeStyle.BorderWidthRight = 2;
+    fakeStyle.BorderColor = new Color(0.9f, 0.9f, 0.9f);
+    fakeCard.AddThemeStyleboxOverride("panel", fakeStyle);
+
+    // Add it to the main GameUI so it draws on top of all other elements
+    AddChild(fakeCard);
+
+    // 2. Set Initial Physical State (at the deck)
+    fakeCard.GlobalPosition = _mainDeckPosition.GlobalPosition;
+    fakeCard.PivotOffset = new Vector2(25, 35); // Set pivot to the center for clean rotation
+    fakeCard.RotationDegrees = -180f; // Start upside down
+    fakeCard.Scale = new Vector2(0.5f, 0.5f); // Start small
+
+    // 3. Build the Tween Animation
+    Tween tween = GetTree().CreateTween();
+    tween.TweenProperty(fakeCard, "global_position", realCard.GlobalPosition, 0.35f)
+         .SetTrans(Tween.TransitionType.Cubic)
+         .SetEase(Tween.EaseType.Out);
+
+    // 4. Reveal the real card upon landing
+    tween.TweenCallback(Callable.From(() => {
+        fakeCard.QueueFree();
+        realCard.Modulate = new Color(1, 1, 1, 1);
+    }));
+}
+
 }
