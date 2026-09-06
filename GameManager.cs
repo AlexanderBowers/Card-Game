@@ -13,6 +13,8 @@ public partial class GameManager : Node
     [Export] private Label _p1WinsLabel;
     [Export] private Control _p1BoardContainer;
     [Export] private Control _p1HandContainer;
+    [Export] private Button _p1EndTurnButton; // 2-player scene: P1's own End Turn / Hold row under their hand
+    [Export] private Button _p1HoldButton;
 
     [ExportGroup("Player 2 UI (AI)")]
     [Export] private Label _p2ScoreLabel;
@@ -21,13 +23,15 @@ public partial class GameManager : Node
     [Export] private Control _p2BoardContainer;
     [Export] private Control _p2HandContainer;
     [Export] private Control _p2Rotator;
+    [Export] private Button _p2EndTurnButton; // 2-player scene: inside P2Rotator, so it flips with P2's side
+    [Export] private Button _p2HoldButton;
 
     [ExportGroup("Shared UI")]
     [Export] private Label _roundInfoLabel;
     [Export] private OptionButton _gameModeButton;
     [Export] private CheckButton _mirrorToggle; // 2-player scene only: rotate P2's side 180 degrees
     [Export] private Button _startButton;
-    [Export] private Button _endTurnButton;
+    [Export] private Button _endTurnButton; // solo scene: one shared pair in the middle panel (acts for whoever is up)
     [Export] private Button _holdButton;
     [Export] private Control _mainDeckPosition;
 
@@ -41,6 +45,9 @@ public partial class GameManager : Node
     private bool _isGameStarted = false;
     private bool _isVsBot = false;
     private bool _aiTurnInProgress = false; // blocks human input while the bot is "thinking"
+    private bool _roundOverPending = false; // the round-end explanation is up; nothing moves until it's acknowledged
+
+    private Player ActivePlayer => (_currentActivePlayer == 1) ? _player1 : _player2;
 
     // ------------------------------------------------------------------
     // UI scaling
@@ -119,23 +126,28 @@ public partial class GameManager : Node
             _mirrorToggle.Toggled += _ => { ApplyResponsiveLayout(); UpdateUI(); };
         }
 
-        // Connect button signals
+        // Connect button signals. The solo scene has one shared End Turn / Hold pair in the middle
+        // panel; the 2-player scene gives each player their own pair under their hand instead.
         _startButton.Pressed += OnStartButtonPressed;
-        _endTurnButton.Pressed += OnEndTurnPressed;
-        _holdButton.Pressed += OnHoldPressed;
+        if (_endTurnButton != null) _endTurnButton.Pressed += () => OnEndTurnPressed(ActivePlayer);
+        if (_holdButton != null) _holdButton.Pressed += () => OnHoldPressed(ActivePlayer);
+        if (_p1EndTurnButton != null) _p1EndTurnButton.Pressed += () => OnEndTurnPressed(_player1);
+        if (_p1HoldButton != null) _p1HoldButton.Pressed += () => OnHoldPressed(_player1);
+        if (_p2EndTurnButton != null) _p2EndTurnButton.Pressed += () => OnEndTurnPressed(_player2);
+        if (_p2HoldButton != null) _p2HoldButton.Pressed += () => OnHoldPressed(_player2);
         if (_restartButton != null) _restartButton.Pressed += OnRestartPressed;
         if (_exitButton != null) _exitButton.Pressed += OnExitPressed;
 
-        // Set initial waiting message
+        // Set initial waiting message (UpdateUI below disables every action button until Start).
         _roundInfoLabel.Text = "Press Start Game to Begin";
-        _endTurnButton.Disabled = true;
-        _holdButton.Disabled = true;
 
         // Show the empty 3x3 boards and the win chips before the game starts.
         FillBoardWithSlots(_p1BoardContainer);
         FillBoardWithSlots(_p2BoardContainer);
         _p1WinChips = EnsureWinChips(_p1WinsLabel);
         _p2WinChips = EnsureWinChips(_p2WinsLabel);
+
+        BuildRoundEndOverlay();
 
         GetTree().Root.SizeChanged += ApplyResponsiveLayout;
         ApplyResponsiveLayout();
@@ -154,9 +166,10 @@ public partial class GameManager : Node
     // orientation. If the screen can't show that much at the 720px base, the base is enlarged so
     // the entire UI scales down uniformly instead of cropping. (Phones in portrait are ~720x1560,
     // desktop landscape is 1280x720 - both fit as-is; a short portrait desktop window doesn't.)
+    // (Each side is stats + board + hand + its own End Turn / Hold row in the 2-player scene.)
     private const float BaseSide = 720f;
-    private static readonly Vector2 NeedPortrait = new Vector2(420, 1350);
-    private static readonly Vector2 NeedLandscape = new Vector2(1000, 620);
+    private static readonly Vector2 NeedPortrait = new Vector2(420, 1470);
+    private static readonly Vector2 NeedLandscape = new Vector2(1000, 640);
 
     private void ApplyResponsiveLayout()
     {
@@ -283,10 +296,7 @@ public partial class GameManager : Node
         _startButton.Visible = false;
         if (_gameModeButton != null) _gameModeButton.Visible = false;
 
-        _endTurnButton.Disabled = false;
-        _holdButton.Disabled = false;
-
-        StartNewRound();
+        StartNewRound(); // UpdateUI enables the right End Turn / Hold buttons
     }
 
     private void StartNewRound()
@@ -308,7 +318,7 @@ public partial class GameManager : Node
 
     private void DrawCardForActivePlayer()
     {
-        Player activePlayer = (_currentActivePlayer == 1) ? _player1 : _player2;
+        Player activePlayer = ActivePlayer;
 
         if (activePlayer.IsHolding) return;
 
@@ -324,27 +334,14 @@ public partial class GameManager : Node
 
         InstantiateCardView(drawnMainCard, boardContainer);
 
-        // A draw that busts with no way back (no minus card that would bring the score under the
-        // target) ends the round immediately - no point letting End Turn deal more cards.
-        if (activePlayer.CurrentScore > _gameState.TargetScore && !CanRecoverFromBust(activePlayer))
-        {
-            HandlePlayerBust(activePlayer);
-            return;
-        }
+        // Going over the target here is NOT a bust yet - the player may still play a minus card.
+        // The round only ends when a turn is ended while over the target (FinishTurn / the bot's
+        // end-of-turn check) or when both players are holding (SwitchTurn).
 
-        if (_isVsBot && _currentActivePlayer == 2 && !activePlayer.IsHolding)
+        if (_isVsBot && _currentActivePlayer == 2)
         {
             ProcessAiTurn();
         }
-    }
-
-    private bool CanRecoverFromBust(Player player)
-    {
-        foreach (Card card in player.ModifierHand)
-        {
-            if (card.Value < 0 && player.CurrentScore + card.Value <= _gameState.TargetScore) return true;
-        }
-        return false;
     }
 
     private async void ProcessAiTurn()
@@ -369,41 +366,29 @@ public partial class GameManager : Node
 
         _aiTurnInProgress = false;
 
-        //3. Evaluate the score at the end of the turn.
+        //3. The bot ends its turn. Still over the target now = bust, exactly like a human pressing End Turn.
         if (_player2.CurrentScore > _gameState.TargetScore)
         {
             HandlePlayerBust(_player2);
+            return;
         }
-        else
+
+        int target = _gameState.TargetScore;
+        int holdThreshold = Math.Max(10, target - 2);
+
+        if (_player1.IsHolding && _player1.CurrentScore <= target)
         {
-            int target = _gameState.TargetScore;
-            int holdThreshold = Math.Max(10, target - 2);
-
-            if (_player1.IsHolding && _player1.CurrentScore <= target)
-            {
-                holdThreshold = _player1.CurrentScore;
-            }
-
-            if (_player2.CurrentScore >= holdThreshold || _player2.CurrentScore == target)
-            {
-                GD.Print($"AI decides to HOLD at {_player2.CurrentScore} (Target: {target})");
-                _player2.IsHolding = true;
-                _player2.IsActiveTurn = false;
-
-                if (_player1.IsHolding)
-                {
-                    EvaluateRoundWinner();
-                }
-                else
-                {
-                    SwitchTurn();
-                }
-            }
-            else
-            {
-                SwitchTurn();
-            }
+            holdThreshold = _player1.CurrentScore;
         }
+
+        if (_player2.CurrentScore >= holdThreshold || _player2.CurrentScore == target)
+        {
+            GD.Print($"AI decides to HOLD at {_player2.CurrentScore} (Target: {target})");
+            _player2.IsHolding = true;
+            _player2.IsActiveTurn = false;
+        }
+
+        SwitchTurn(); // ends the round instead if both players are now holding
     }
 
     private bool TryAiPlayModifierCard()
@@ -454,55 +439,43 @@ public partial class GameManager : Node
     /// True when a person is allowed to press End Turn / Hold / a hand card right now.
     private bool HumanCanAct()
     {
-        if (!_isGameStarted || _gameState.IsGameOver || _aiTurnInProgress) return false;
+        if (!_isGameStarted || _gameState.IsGameOver || _aiTurnInProgress || _roundOverPending) return false;
         if (_isVsBot && _currentActivePlayer == 2) return false; // it's the bot's turn
         return true;
     }
 
-    private void OnEndTurnPressed()
+    // Each button knows which player it belongs to (the solo scene's shared pair passes
+    // ActivePlayer), so Player 2's row can only ever act for Player 2.
+    private void OnEndTurnPressed(Player player) => FinishTurn(player, hold: false);
+    private void OnHoldPressed(Player player) => FinishTurn(player, hold: true);
+
+    /// The ONLY ways a round ends: a player finishes their turn (End Turn or Hold) while over the
+    /// target - that's the bust - or both players are holding (checked in SwitchTurn).
+    private void FinishTurn(Player player, bool hold)
     {
-        if (!HumanCanAct()) return;
+        if (!HumanCanAct() || player != ActivePlayer || player.IsHolding) return;
 
-        Player activePlayer = (_currentActivePlayer == 1) ? _player1 : _player2;
-        if (activePlayer.IsHolding) return;
-
-        if (activePlayer.CurrentScore > _gameState.TargetScore)
+        if (player.CurrentScore > _gameState.TargetScore)
         {
-            HandlePlayerBust(activePlayer);
+            HandlePlayerBust(player);
+            return;
         }
-        else
+
+        if (hold)
         {
-            SwitchTurn();
+            player.IsHolding = true;
+            player.IsActiveTurn = false;
+            GD.Print($"{player.PlayerName} chose to HOLD at {player.CurrentScore}");
         }
-    }
 
-    private void OnHoldPressed()
-    {
-        if (!HumanCanAct()) return;
-
-        Player activePlayer = (_currentActivePlayer == 1) ? _player1 : _player2;
-        if (activePlayer.IsHolding) return;
-
-        activePlayer.IsHolding = true;
-        activePlayer.IsActiveTurn = false;
-
-        GD.Print($"{activePlayer.PlayerName} chose to HOLD at {activePlayer.CurrentScore}");
-
-        if (_player1.IsHolding && _player2.IsHolding)
-        {
-            EvaluateRoundWinner();
-        }
-        else
-        {
-            SwitchTurn();
-        }
+        SwitchTurn();
     }
 
     private void SwitchTurn()
     {
         if (_player1.IsHolding && _player2.IsHolding)
         {
-            EvaluateRoundWinner();
+            EndRound(null);
             return;
         }
 
@@ -533,64 +506,81 @@ public partial class GameManager : Node
     {
         bustingPlayer.IsHolding = true;
         bustingPlayer.IsActiveTurn = false;
-        GD.Print($"{bustingPlayer.PlayerName} is forced to hold due to busting.");
-        EvaluateRoundWinner();
+        GD.Print($"{bustingPlayer.PlayerName} busted at {bustingPlayer.CurrentScore}.");
+        EndRound(bustingPlayer);
     }
 
-    private void CheckRoundConclusion()
+    /// The round is over. `buster` is the player who ended their turn over the target, or null
+    /// when both players held. Records the result, then shows an explanation that has to be
+    /// acknowledged - the next round (or a restart, after the match) starts from that button.
+    private void EndRound(Player buster)
     {
-        if (_player1.IsHolding && _player2.IsHolding)
-        {
-            EvaluateRoundWinner();
-        }
-    }
-
-    private void EvaluateRoundWinner()
-    {
-        int p1Score = _player1.CurrentScore;
-        int p2Score = _player2.CurrentScore;
         int target = _gameState.TargetScore;
+        int p1 = _player1.CurrentScore;
+        int p2 = _player2.CurrentScore;
+        bool p1Bust = p1 > target;
+        bool p2Bust = p2 > target;
 
-        bool p1Bust = p1Score > target;
-        bool p2Bust = p2Score > target;
-
-        int roundWinner = 0;
-
+        int roundWinner;
         if (p1Bust && p2Bust) roundWinner = 0;
         else if (p1Bust) roundWinner = 2;
         else if (p2Bust) roundWinner = 1;
-        else
-        {
-            int p1Diff = target - p1Score;
-            int p2Diff = target - p2Score;
+        else if (p1 == p2) roundWinner = 0;
+        else roundWinner = (p1 > p2) ? 1 : 2; // both under the target: the higher score is closer
 
-            if (p1Diff < p2Diff) roundWinner = 1;
-            else if (p2Diff < p1Diff) roundWinner = 2;
-        }
+        int roundNumber = _gameState.CurrentRound;
 
+        // Why the round ended.
+        string why = (buster != null)
+            ? $"{buster.PlayerName} busted: {buster.CurrentScore} is over the target of {target}."
+            : $"Both players held.\n{_player1.PlayerName}: {p1}      {_player2.PlayerName}: {p2}";
+
+        // What that means.
+        string title;
+        string buttonText;
         if (roundWinner == 0)
         {
-            GD.Print("Tie. Replaying Round...");
-            _roundInfoLabel.Text = "Tie. Replaying Round...";
+            title = $"Round {roundNumber} is a tie";
+            why += "\nSame score, so the round is replayed.";
+            buttonText = "Replay Round";
         }
         else
         {
+            Player winner = (roundWinner == 1) ? _player1 : _player2;
             _gameState.RecordRoundWinner(roundWinner);
-            GD.Print($"Player {roundWinner} won Round {_gameState.CurrentRound}");
-            _roundInfoLabel.Text = $"Player {roundWinner} won this round!";
             _gameState.CurrentRound++;
+            if (buster == null) why += $"\n{winner.PlayerName} is closest to {target}.";
+            title = $"{winner.PlayerName} wins round {roundNumber}!";
+            buttonText = "Next Round";
         }
 
+        Action next;
         if (_gameState.CheckMatchWinner(out int matchWinner))
         {
-            GD.Print($"Player {matchWinner} wins the match");
-            _roundInfoLabel.Text = $"Player {matchWinner} wins the match!";
-            UpdateUI(); // IsGameOver is now set, so this disables the buttons and hand cards
+            Player champion = (matchWinner == 1) ? _player1 : _player2;
+            int champWins = (matchWinner == 1) ? _gameState.RoundsWonPlayer1 : _gameState.RoundsWonPlayer2;
+            int otherWins = (matchWinner == 1) ? _gameState.RoundsWonPlayer2 : _gameState.RoundsWonPlayer1;
+            title = $"{champion.PlayerName} wins the match!";
+            why += $"\n{champion.PlayerName} took the match {champWins} rounds to {otherWins}.";
+            buttonText = "Play Again";
+            next = OnRestartPressed;
         }
         else
         {
-            StartNewRound();
+            next = () =>
+            {
+                _roundOverPending = false;
+                StartNewRound();
+            };
         }
+
+        string whyOneLine = why.Replace('\n', ' ');
+        GD.Print($"Round {roundNumber} over: {title} ({whyOneLine})");
+
+        _roundOverPending = true;
+        UpdateUI(); // locks every button and hand card; sides show Bust! / Holding
+        if (_roundInfoLabel != null) _roundInfoLabel.Text = title;
+        ShowRoundEnd(title, why, buttonText, next);
     }
 
     // ------------------------------------------------------------------
@@ -614,27 +604,52 @@ public partial class GameManager : Node
             if (_p2ScoreLabel != null) _p2ScoreLabel.Text = $"Score: {_player2.CurrentScore}";
         }
 
-        if (_p1StatusLabel != null) _p1StatusLabel.Text = _player1.IsHolding ? "Holding" : (_player1.IsActiveTurn ? "Active Turn" : "Waiting");
-        if (_p2StatusLabel != null) _p2StatusLabel.Text = _player2.IsHolding ? "Holding" : (_player2.IsActiveTurn ? "Active Turn" : "Waiting");
+        if (_p1StatusLabel != null) _p1StatusLabel.Text = StatusFor(_player1);
+        if (_p2StatusLabel != null) _p2StatusLabel.Text = StatusFor(_player2);
 
         // Round wins are shown as chips next to the label (see UpdateWinChips).
         if (_p1WinsLabel != null) _p1WinsLabel.Text = "Wins:";
         if (_p2WinsLabel != null) _p2WinsLabel.Text = "Wins:";
         UpdateWinChips();
 
-        if (_isGameStarted && _roundInfoLabel != null && !_gameState.IsGameOver)
+        // While the round-end explanation is up, EndRound owns this label.
+        if (_isGameStarted && _roundInfoLabel != null && !_gameState.IsGameOver && !_roundOverPending)
         {
             string turn = (_isVsBot && _currentActivePlayer == 2) ? "Bot thinking..." : $"Turn: P{_currentActivePlayer}";
             _roundInfoLabel.Text = $"Round {_gameState.CurrentRound} - Target: {_gameState.TargetScore} | {turn}";
         }
 
-        // Only the person whose turn it is can act; everything is locked during the bot's turn.
+        // Only the person whose turn it is can act; everything is locked during the bot's turn and
+        // while a round-end explanation is waiting to be acknowledged. Each player's own row only
+        // lights up on their turn; the solo scene's shared pair follows whoever is up.
         bool canAct = HumanCanAct();
-        if (_endTurnButton != null) _endTurnButton.Disabled = !canAct;
-        if (_holdButton != null) _holdButton.Disabled = !canAct;
+        bool p1Turn = canAct && _currentActivePlayer == 1 && !_player1.IsHolding;
+        bool p2Turn = canAct && _currentActivePlayer == 2 && !_player2.IsHolding;
+        SetEnabled(_endTurnButton, p1Turn || p2Turn);
+        SetEnabled(_holdButton, p1Turn || p2Turn);
+        SetEnabled(_p1EndTurnButton, p1Turn);
+        SetEnabled(_p1HoldButton, p1Turn);
+        SetEnabled(_p2EndTurnButton, p2Turn);
+        SetEnabled(_p2HoldButton, p2Turn);
 
         RefreshHandUI();
         CallDeferred(MethodName.UpdateRotatorSize);
+    }
+
+    private string StatusFor(Player player)
+    {
+        if (player.CurrentScore > _gameState.TargetScore)
+        {
+            // Over the target mid-turn is a warning, not a bust yet: play a minus card or bust on End Turn.
+            return player.IsHolding ? "Bust!" : "Over target!";
+        }
+        if (player.IsHolding) return "Holding";
+        return player.IsActiveTurn ? "Active Turn" : "Waiting";
+    }
+
+    private static void SetEnabled(Button button, bool enabled)
+    {
+        if (button != null) button.Disabled = !enabled;
     }
 
     private void RefreshHandUI()
@@ -934,6 +949,139 @@ public partial class GameManager : Node
             }
             i++;
         }
+    }
+
+    // ------------------------------------------------------------------
+    // Round-end overlay
+    //
+    // A full-screen layer over the table (blocks every tap underneath) with a centred panel:
+    // title, why the round ended, and one button. In mirrored 2-player there's also an
+    // upside-down copy of the text at the top of the panel, nearest Player 2. Built in code so
+    // both scenes get it without any NodePath wiring.
+    // ------------------------------------------------------------------
+    private Control _roundEndOverlay;
+    private Label _roundEndTitle;
+    private Label _roundEndBody;
+    private Button _roundEndButton;
+    private Control _roundEndFlippedHolder;   // plain Control: containers reset a child's rotation, holders don't
+    private VBoxContainer _roundEndFlippedBox; // the node that is rotated 180 degrees
+    private Label _roundEndFlippedTitle;
+    private Label _roundEndFlippedBody;
+    private HSeparator _roundEndDivider;
+    private Action _roundEndAction;
+
+    private void BuildRoundEndOverlay()
+    {
+        _roundEndOverlay = new Control { Visible = false, MouseFilter = Control.MouseFilterEnum.Stop };
+        AddChild(_roundEndOverlay); // on the scene root, after GameUI, so it draws (and gets input) on top
+        _roundEndOverlay.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
+
+        ColorRect dim = new ColorRect { Color = new Color(0, 0, 0, 0.5f), MouseFilter = Control.MouseFilterEnum.Ignore };
+        _roundEndOverlay.AddChild(dim);
+        dim.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
+
+        PanelContainer panel = new PanelContainer();
+        StyleBoxFlat style = new StyleBoxFlat
+        {
+            BgColor = new Color(0.1f, 0.14f, 0.2f, 0.98f),
+            BorderColor = new Color(0.55f, 0.65f, 0.8f),
+        };
+        style.SetBorderWidthAll(2);
+        style.SetCornerRadiusAll(12);
+        style.SetContentMarginAll(28);
+        panel.AddThemeStyleboxOverride("panel", style);
+        _roundEndOverlay.AddChild(panel);
+        // Anchored to the centre with zero offsets: a Control grows to its minimum size, and with
+        // grow "both" it stays centred, so the panel always hugs its content.
+        panel.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.Center);
+        panel.GrowHorizontal = Control.GrowDirection.Both;
+        panel.GrowVertical = Control.GrowDirection.Both;
+
+        VBoxContainer box = new VBoxContainer { Alignment = BoxContainer.AlignmentMode.Center };
+        box.AddThemeConstantOverride("separation", 14);
+        panel.AddChild(box);
+
+        // Player 2's upside-down copy (mirrored 2-player only). Same pattern as P2Holder/P2Rotator.
+        _roundEndFlippedHolder = new Control { Visible = false, MouseFilter = Control.MouseFilterEnum.Ignore };
+        box.AddChild(_roundEndFlippedHolder);
+        _roundEndFlippedBox = new VBoxContainer { Alignment = BoxContainer.AlignmentMode.Center };
+        _roundEndFlippedBox.AddThemeConstantOverride("separation", 6);
+        _roundEndFlippedHolder.AddChild(_roundEndFlippedBox);
+        _roundEndFlippedBox.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
+        _roundEndFlippedBox.Resized += () =>
+        {
+            _roundEndFlippedBox.PivotOffset = _roundEndFlippedBox.Size / 2f;
+            _roundEndFlippedBox.RotationDegrees = 180f;
+        };
+        _roundEndFlippedTitle = MakeOverlayLabel(30);
+        _roundEndFlippedBody = MakeOverlayLabel(22);
+        _roundEndFlippedBox.AddChild(_roundEndFlippedTitle);
+        _roundEndFlippedBox.AddChild(_roundEndFlippedBody);
+        _roundEndDivider = new HSeparator { Visible = false };
+        box.AddChild(_roundEndDivider);
+
+        _roundEndTitle = MakeOverlayLabel(30);
+        _roundEndBody = MakeOverlayLabel(22);
+        box.AddChild(_roundEndTitle);
+        box.AddChild(_roundEndBody);
+
+        _roundEndButton = new Button { Text = "Next Round" };
+        _roundEndButton.Pressed += OnRoundEndButtonPressed;
+        box.AddChild(_roundEndButton);
+    }
+
+    private static Label MakeOverlayLabel(int fontSize)
+    {
+        Label label = new Label { HorizontalAlignment = HorizontalAlignment.Center };
+        label.AddThemeFontSizeOverride("font_size", fontSize);
+        return label;
+    }
+
+    private void ShowRoundEnd(string title, string why, string buttonText, Action onAcknowledged)
+    {
+        _roundEndAction = onAcknowledged;
+        if (_roundEndOverlay == null)
+        {
+            onAcknowledged?.Invoke(); // overlay failed to build: don't strand the game
+            return;
+        }
+
+        // Make it visible first: minimum sizes are only reliable for nodes visible in the tree,
+        // and everything below resolves in the same frame before it is drawn.
+        MoveChild(_roundEndOverlay, GetChildCount() - 1); // above any stray animation card
+        _roundEndOverlay.Visible = true;
+
+        _roundEndTitle.Text = title;
+        _roundEndBody.Text = why;
+        _roundEndButton.Text = buttonText;
+
+        bool mirrored = IsMirrored;
+        _roundEndFlippedHolder.Visible = mirrored;
+        _roundEndDivider.Visible = mirrored;
+        if (mirrored)
+        {
+            _roundEndFlippedTitle.Text = title;
+            _roundEndFlippedBody.Text = why;
+            // The holder reports 0x0 on its own; give it the rotated block's footprint.
+            _roundEndFlippedHolder.CustomMinimumSize = _roundEndFlippedBox.GetCombinedMinimumSize();
+        }
+        CallDeferred(MethodName.UpdateRoundEndFlippedSize); // re-measure once the first layout pass has run
+    }
+
+    private void UpdateRoundEndFlippedSize()
+    {
+        if (_roundEndFlippedHolder == null || !_roundEndFlippedHolder.Visible) return;
+        _roundEndFlippedHolder.CustomMinimumSize = _roundEndFlippedBox.GetCombinedMinimumSize();
+        _roundEndFlippedBox.PivotOffset = _roundEndFlippedBox.Size / 2f;
+        _roundEndFlippedBox.RotationDegrees = 180f;
+    }
+
+    private void OnRoundEndButtonPressed()
+    {
+        _roundEndOverlay.Visible = false;
+        Action action = _roundEndAction;
+        _roundEndAction = null;
+        action?.Invoke();
     }
 
     // ------------------------------------------------------------------

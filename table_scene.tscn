@@ -8,7 +8,7 @@
 atlas = ExtResource("2_cards")
 region = Rect2(140, 190, 140, 190)
 
-[node name="TableScene" type="Control" unique_id=610587453 node_paths=PackedStringArray("_p1ScoreLabel", "_p1StatusLabel", "_p1WinsLabel", "_p1BoardContainer", "_p1HandContainer", "_p2ScoreLabel", "_p2StatusLabel", "_p2WinsLabel", "_p2BoardContainer", "_p2HandContainer", "_p2Rotator", "_roundInfoLabel", "_gameModeButton", "_mirrorToggle", "_startButton", "_endTurnButton", "_holdButton", "_mainDeckPosition", "_restartButton", "_exitButton")]
+[node name="TableScene" type="Control" unique_id=610587453 node_paths=PackedStringArray("_p1ScoreLabel", "_p1StatusLabel", "_p1WinsLabel", "_p1BoardContainer", "_p1HandContainer", "_p1EndTurnButton", "_p1HoldButton", "_p2ScoreLabel", "_p2StatusLabel", "_p2WinsLabel", "_p2BoardContainer", "_p2HandContainer", "_p2Rotator", "_p2EndTurnButton", "_p2HoldButton", "_roundInfoLabel", "_gameModeButton", "_mirrorToggle", "_startButton", "_mainDeckPosition", "_restartButton", "_exitButton")]
 layout_mode = 3
 anchors_preset = 15
 anchor_right = 1.0
@@ -21,18 +21,20 @@ _p1StatusLabel = NodePath("GameUI/MainLayout/Player1Side/Layout/Stats/StatusLabe
 _p1WinsLabel = NodePath("GameUI/MainLayout/Player1Side/Layout/Stats/Row1/WinsLabel")
 _p1BoardContainer = NodePath("GameUI/MainLayout/Player1Side/Layout/BoardSlotsContainer")
 _p1HandContainer = NodePath("GameUI/MainLayout/Player1Side/Layout/HandContainer")
+_p1EndTurnButton = NodePath("GameUI/MainLayout/Player1Side/Layout/ActionButtons/EndTurnButton")
+_p1HoldButton = NodePath("GameUI/MainLayout/Player1Side/Layout/ActionButtons/HoldButton")
 _p2ScoreLabel = NodePath("GameUI/MainLayout/Player2Side/P2Holder/P2Rotator/Layout/Stats/Row1/ScoreLabel")
 _p2StatusLabel = NodePath("GameUI/MainLayout/Player2Side/P2Holder/P2Rotator/Layout/Stats/StatusLabel")
 _p2WinsLabel = NodePath("GameUI/MainLayout/Player2Side/P2Holder/P2Rotator/Layout/Stats/Row1/WinsLabel")
 _p2BoardContainer = NodePath("GameUI/MainLayout/Player2Side/P2Holder/P2Rotator/Layout/BoardSlotsContainer")
 _p2HandContainer = NodePath("GameUI/MainLayout/Player2Side/P2Holder/P2Rotator/Layout/HandContainer")
 _p2Rotator = NodePath("GameUI/MainLayout/Player2Side/P2Holder/P2Rotator")
+_p2EndTurnButton = NodePath("GameUI/MainLayout/Player2Side/P2Holder/P2Rotator/Layout/ActionButtons/EndTurnButton")
+_p2HoldButton = NodePath("GameUI/MainLayout/Player2Side/P2Holder/P2Rotator/Layout/ActionButtons/HoldButton")
 _roundInfoLabel = NodePath("GameUI/MainLayout/SharedControlPanel/VBoxContainer/RoundInfoLabel")
 _gameModeButton = NodePath("GameUI/MainLayout/SharedControlPanel/VBoxContainer/GameModeButton")
 _mirrorToggle = NodePath("GameUI/MainLayout/SharedControlPanel/VBoxContainer/MirrorToggle")
 _startButton = NodePath("GameUI/MainLayout/SharedControlPanel/VBoxContainer/StartButton")
-_endTurnButton = NodePath("GameUI/MainLayout/SharedControlPanel/VBoxContainer/TableRow/ButtonColumn/ActionButtons/EndTurnButton")
-_holdButton = NodePath("GameUI/MainLayout/SharedControlPanel/VBoxContainer/TableRow/ButtonColumn/ActionButtons/HoldButton")
 _mainDeckPosition = NodePath("GameUI/MainLayout/SharedControlPanel/VBoxContainer/TableRow/MainDeck")
 _restartButton = NodePath("GameUI/MainLayout/SharedControlPanel/VBoxContainer/TableRow/ButtonColumn/SystemButtons/RestartButton")
 _exitButton = NodePath("GameUI/MainLayout/SharedControlPanel/VBoxContainer/TableRow/ButtonColumn/SystemButtons/ExitButton")
@@ -123,6 +125,21 @@ layout_mode = 2
 theme_override_constants/separation = 10
 alignment = 1
 
+[node name="ActionButtons" type="HBoxContainer" parent="GameUI/MainLayout/Player2Side/P2Holder/P2Rotator/Layout"]
+layout_mode = 2
+theme_override_constants/separation = 10
+alignment = 1
+
+[node name="EndTurnButton" type="Button" parent="GameUI/MainLayout/Player2Side/P2Holder/P2Rotator/Layout/ActionButtons"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "End Turn"
+
+[node name="HoldButton" type="Button" parent="GameUI/MainLayout/Player2Side/P2Holder/P2Rotator/Layout/ActionButtons"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Hold"
+
 [node name="SharedControlPanel" type="CenterContainer" parent="GameUI/MainLayout" unique_id=414940360]
 layout_mode = 2
 
@@ -164,21 +181,6 @@ stretch_mode = 5
 layout_mode = 2
 theme_override_constants/separation = 10
 alignment = 1
-
-[node name="ActionButtons" type="HBoxContainer" parent="GameUI/MainLayout/SharedControlPanel/VBoxContainer/TableRow/ButtonColumn" unique_id=1051189889]
-layout_mode = 2
-theme_override_constants/separation = 10
-alignment = 1
-
-[node name="EndTurnButton" type="Button" parent="GameUI/MainLayout/SharedControlPanel/VBoxContainer/TableRow/ButtonColumn/ActionButtons" unique_id=2065686334]
-layout_mode = 2
-size_flags_horizontal = 3
-text = "End Turn"
-
-[node name="HoldButton" type="Button" parent="GameUI/MainLayout/SharedControlPanel/VBoxContainer/TableRow/ButtonColumn/ActionButtons" unique_id=1320511195]
-layout_mode = 2
-size_flags_horizontal = 3
-text = "Hold"
 
 [node name="SystemButtons" type="HBoxContainer" parent="GameUI/MainLayout/SharedControlPanel/VBoxContainer/TableRow/ButtonColumn" unique_id=1550060130]
 layout_mode = 2
@@ -237,3 +239,18 @@ columns = 3
 layout_mode = 2
 theme_override_constants/separation = 10
 alignment = 1
+
+[node name="ActionButtons" type="HBoxContainer" parent="GameUI/MainLayout/Player1Side/Layout"]
+layout_mode = 2
+theme_override_constants/separation = 10
+alignment = 1
+
+[node name="EndTurnButton" type="Button" parent="GameUI/MainLayout/Player1Side/Layout/ActionButtons"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "End Turn"
+
+[node name="HoldButton" type="Button" parent="GameUI/MainLayout/Player1Side/Layout/ActionButtons"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Hold"
