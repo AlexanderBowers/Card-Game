@@ -31,7 +31,7 @@ public partial class GameManager : Node
     [Export] private OptionButton _gameModeButton;
     [Export] private CheckButton _mirrorToggle; // 2-player scene only: rotate P2's side 180 degrees
     [Export] private Button _startButton;
-    [Export] private Button _endTurnButton; // solo scene: one shared pair in the middle panel (acts for whoever is up)
+    [Export] private Button _endTurnButton; // solo scene: one shared pair in the middle panel (Player 1, the human)
     [Export] private Button _holdButton;
     [Export] private Control _mainDeckPosition;
 
@@ -39,15 +39,12 @@ public partial class GameManager : Node
     [Export] private Button _restartButton;
     [Export] private Button _exitButton;
 
-    private int _currentActivePlayer = 1;
     private Random _random = new Random();
     private PackedScene _cardViewScene = GD.Load<PackedScene>("res://CardView.tscn");
     private bool _isGameStarted = false;
     private bool _isVsBot = false;
-    private bool _aiTurnInProgress = false; // blocks human input while the bot is "thinking"
+    private bool _aiTurnInProgress = false; // the bot is "thinking" for this deal (the human is NOT locked meanwhile)
     private bool _roundOverPending = false; // the round-end explanation is up; nothing moves until it's acknowledged
-
-    private Player ActivePlayer => (_currentActivePlayer == 1) ? _player1 : _player2;
 
     // ------------------------------------------------------------------
     // UI scaling
@@ -127,10 +124,11 @@ public partial class GameManager : Node
         }
 
         // Connect button signals. The solo scene has one shared End Turn / Hold pair in the middle
-        // panel; the 2-player scene gives each player their own pair under their hand instead.
+        // panel (it belongs to Player 1, the human); the 2-player scene gives each player their own
+        // pair under their hand instead.
         _startButton.Pressed += OnStartButtonPressed;
-        if (_endTurnButton != null) _endTurnButton.Pressed += () => OnEndTurnPressed(ActivePlayer);
-        if (_holdButton != null) _holdButton.Pressed += () => OnHoldPressed(ActivePlayer);
+        if (_endTurnButton != null) _endTurnButton.Pressed += () => OnEndTurnPressed(_player1);
+        if (_holdButton != null) _holdButton.Pressed += () => OnHoldPressed(_player1);
         if (_p1EndTurnButton != null) _p1EndTurnButton.Pressed += () => OnEndTurnPressed(_player1);
         if (_p1HoldButton != null) _p1HoldButton.Pressed += () => OnHoldPressed(_player1);
         if (_p2EndTurnButton != null) _p2EndTurnButton.Pressed += () => OnEndTurnPressed(_player2);
@@ -148,6 +146,7 @@ public partial class GameManager : Node
         _p2WinChips = EnsureWinChips(_p2WinsLabel);
 
         BuildRoundEndOverlay();
+        BuildHowToPlay();
 
         GetTree().Root.SizeChanged += ApplyResponsiveLayout;
         ApplyResponsiveLayout();
@@ -166,10 +165,11 @@ public partial class GameManager : Node
     // orientation. If the screen can't show that much at the 720px base, the base is enlarged so
     // the entire UI scales down uniformly instead of cropping. (Phones in portrait are ~720x1560,
     // desktop landscape is 1280x720 - both fit as-is; a short portrait desktop window doesn't.)
-    // (Each side is stats + board + hand + its own End Turn / Hold row in the 2-player scene.)
+    // (Each side is stats + board + hand + its own End Turn / Hold row in the 2-player scene; the
+    // middle panel also carries the How to Play button.)
     private const float BaseSide = 720f;
-    private static readonly Vector2 NeedPortrait = new Vector2(420, 1470);
-    private static readonly Vector2 NeedLandscape = new Vector2(1000, 640);
+    private static readonly Vector2 NeedPortrait = new Vector2(420, 1520);
+    private static readonly Vector2 NeedLandscape = new Vector2(1000, 690);
 
     private void ApplyResponsiveLayout()
     {
@@ -296,7 +296,7 @@ public partial class GameManager : Node
         _startButton.Visible = false;
         if (_gameModeButton != null) _gameModeButton.Visible = false;
 
-        StartNewRound(); // UpdateUI enables the right End Turn / Hold buttons
+        StartNewRound(); // UpdateUI enables the End Turn / Hold buttons
     }
 
     private void StartNewRound()
@@ -308,51 +308,82 @@ public partial class GameManager : Node
         FillBoardWithSlots(_p1BoardContainer);
         FillBoardWithSlots(_p2BoardContainer);
 
-        _currentActivePlayer = 1;
-        _player1.IsActiveTurn = true;
-        _player2.IsActiveTurn = false;
-
-        DrawCardForActivePlayer();
-        UpdateUI();
+        DealCards();
     }
 
-    private void DrawCardForActivePlayer()
+    // ------------------------------------------------------------------
+    // Deals
+    //
+    // There is no turn order. A round is a series of deals: every player who isn't holding draws
+    // a card at the same time, then both play modifiers and press End Turn / Hold blind. Once
+    // neither player can act any more the deal is resolved (ResolveDeal) - busts, both holding,
+    // or simply the next deal.
+    // ------------------------------------------------------------------
+    private void DealCards()
     {
-        Player activePlayer = ActivePlayer;
+        _player1.HasEndedTurn = false;
+        _player2.HasEndedTurn = false;
 
-        if (activePlayer.IsHolding) return;
+        DrawCardFor(_player1, _p1BoardContainer);
+        DrawCardFor(_player2, _p2BoardContainer);
+
+        UpdateUI();
+
+        if (_isVsBot) ProcessAiTurn();
+    }
+
+    private void DrawCardFor(Player player, Control boardContainer)
+    {
+        if (player.IsHolding) return;
 
         int cardValue = _random.Next(1, 11);
-        activePlayer.CurrentScore += cardValue;
+        player.CurrentScore += cardValue;
 
         Card drawnMainCard = new Card(cardValue, CardType.Main, cardValue.ToString());
-        activePlayer.ActiveCardsOnBoard.Add(drawnMainCard);
+        player.ActiveCardsOnBoard.Add(drawnMainCard);
 
-        GD.Print($"{activePlayer.PlayerName} drew a {cardValue}. Score: {activePlayer.CurrentScore}");
-
-        Control boardContainer = (_currentActivePlayer == 1) ? _p1BoardContainer : _p2BoardContainer;
+        GD.Print($"{player.PlayerName} drew a {cardValue}. Score: {player.CurrentScore}");
 
         InstantiateCardView(drawnMainCard, boardContainer);
 
-        // Going over the target here is NOT a bust yet - the player may still play a minus card.
-        // The round only ends when a turn is ended while over the target (FinishTurn / the bot's
-        // end-of-turn check) or when both players are holding (SwitchTurn).
+        // Going over the target here is NOT a bust yet - the player may still play a minus card
+        // before ending the turn. Busts are only decided in ResolveDeal.
+    }
 
-        if (_isVsBot && _currentActivePlayer == 2)
+    /// Called whenever someone finishes their part of the deal (End Turn, Hold, or the bot).
+    /// Does nothing until BOTH players are done; then either ends the round or deals again.
+    private void ResolveDeal()
+    {
+        if (!_isGameStarted || _gameState.IsGameOver || _roundOverPending) return;
+
+        if (_player1.CanAct || _player2.CanAct)
         {
-            ProcessAiTurn();
+            UpdateUI(); // one side is still deciding
+            return;
         }
+
+        int target = _gameState.TargetScore;
+        bool anyBust = _player1.CurrentScore > target || _player2.CurrentScore > target;
+        bool bothHolding = _player1.IsHolding && _player2.IsHolding;
+
+        if (anyBust || bothHolding)
+        {
+            EndRound();
+            return;
+        }
+
+        DealCards();
     }
 
     private async void ProcessAiTurn()
     {
-        if (_aiTurnInProgress) return; // never run two AI turns at once
+        if (_aiTurnInProgress || !_player2.CanAct) return; // never run two AI turns at once
         _aiTurnInProgress = true;
-        UpdateUI(); // locks End Turn / Hold / hand while the bot thinks
+        UpdateUI(); // shows "Thinking..." on the bot's side
 
         //1. Wait a moment to let the player see the AI's drawn card
         await ToSignal(GetTree().CreateTimer(1.0f), SceneTreeTimer.SignalName.Timeout);
-        if (!IsInsideTree()) return; // scene was restarted/exited mid-turn
+        if (!IsInsideTree()) return; // scene was restarted/exited mid-deal
 
         //2. The AI will decide if it wants to play a modifier.
         bool playedModifier = TryAiPlayModifierCard();
@@ -366,14 +397,17 @@ public partial class GameManager : Node
 
         _aiTurnInProgress = false;
 
-        //3. The bot ends its turn. Still over the target now = bust, exactly like a human pressing End Turn.
-        if (_player2.CurrentScore > _gameState.TargetScore)
+        int target = _gameState.TargetScore;
+
+        //3. Still over the target now = the bot ends its turn and busts when the deal resolves.
+        if (_player2.CurrentScore > target)
         {
-            HandlePlayerBust(_player2);
+            GD.Print($"AI ends its turn over the target at {_player2.CurrentScore}");
+            _player2.HasEndedTurn = true;
+            ResolveDeal();
             return;
         }
 
-        int target = _gameState.TargetScore;
         int holdThreshold = Math.Max(10, target - 2);
 
         if (_player1.IsHolding && _player1.CurrentScore <= target)
@@ -385,10 +419,13 @@ public partial class GameManager : Node
         {
             GD.Print($"AI decides to HOLD at {_player2.CurrentScore} (Target: {target})");
             _player2.IsHolding = true;
-            _player2.IsActiveTurn = false;
+        }
+        else
+        {
+            _player2.HasEndedTurn = true;
         }
 
-        SwitchTurn(); // ends the round instead if both players are now holding
+        ResolveDeal();
     }
 
     private bool TryAiPlayModifierCard()
@@ -437,83 +474,51 @@ public partial class GameManager : Node
     }
 
     /// True when a person is allowed to press End Turn / Hold / a hand card right now.
+    /// (The bot thinking does NOT lock the human - both sides act at the same time.)
     private bool HumanCanAct()
     {
-        if (!_isGameStarted || _gameState.IsGameOver || _aiTurnInProgress || _roundOverPending) return false;
-        if (_isVsBot && _currentActivePlayer == 2) return false; // it's the bot's turn
+        if (!_isGameStarted || _gameState.IsGameOver || _roundOverPending) return false;
         return true;
     }
 
-    // Each button knows which player it belongs to (the solo scene's shared pair passes
-    // ActivePlayer), so Player 2's row can only ever act for Player 2.
+    /// True when this particular player can be driven by a person right now.
+    private bool HumanCanActFor(Player player)
+    {
+        if (!HumanCanAct() || !player.CanAct) return false;
+        if (_isVsBot && player == _player2) return false; // the bot drives itself
+        return true;
+    }
+
+    // Each button knows which player it belongs to (the solo scene's shared pair is Player 1's),
+    // so Player 2's row can only ever act for Player 2.
     private void OnEndTurnPressed(Player player) => FinishTurn(player, hold: false);
     private void OnHoldPressed(Player player) => FinishTurn(player, hold: true);
 
-    /// The ONLY ways a round ends: a player finishes their turn (End Turn or Hold) while over the
-    /// target - that's the bust - or both players are holding (checked in SwitchTurn).
+    /// A player is done with this deal: End Turn keeps them in for the next deal, Hold takes them
+    /// out for the rest of the round. Nothing is decided until the other player is done too.
     private void FinishTurn(Player player, bool hold)
     {
-        if (!HumanCanAct() || player != ActivePlayer || player.IsHolding) return;
-
-        if (player.CurrentScore > _gameState.TargetScore)
-        {
-            HandlePlayerBust(player);
-            return;
-        }
+        if (!HumanCanActFor(player)) return;
 
         if (hold)
         {
             player.IsHolding = true;
-            player.IsActiveTurn = false;
             GD.Print($"{player.PlayerName} chose to HOLD at {player.CurrentScore}");
-        }
-
-        SwitchTurn();
-    }
-
-    private void SwitchTurn()
-    {
-        if (_player1.IsHolding && _player2.IsHolding)
-        {
-            EndRound(null);
-            return;
-        }
-
-        if (_currentActivePlayer == 1)
-        {
-            if (!_player2.IsHolding)
-            {
-                _currentActivePlayer = 2;
-                _player1.IsActiveTurn = false;
-                _player2.IsActiveTurn = !_player2.IsHolding;
-            }
         }
         else
         {
-            if (!_player1.IsHolding)
-            {
-                _currentActivePlayer = 1;
-                _player2.IsActiveTurn = false;
-                _player1.IsActiveTurn = !_player1.IsHolding;
-            }
+            player.HasEndedTurn = true;
+            GD.Print($"{player.PlayerName} ended the turn at {player.CurrentScore}");
         }
 
-        DrawCardForActivePlayer();
-        UpdateUI();
+        ResolveDeal();
     }
 
-    private void HandlePlayerBust(Player bustingPlayer)
-    {
-        bustingPlayer.IsHolding = true;
-        bustingPlayer.IsActiveTurn = false;
-        GD.Print($"{bustingPlayer.PlayerName} busted at {bustingPlayer.CurrentScore}.");
-        EndRound(bustingPlayer);
-    }
-
-    /// The round is over. `buster` is the player who ended their turn over the target, or null
-    /// when both players held. Records the result, then shows an explanation that has to be
-    /// acknowledged - the next round (or a restart, after the match) starts from that button.
-    private void EndRound(Player buster)
+    /// The round is over: at least one player finished the deal over the target (a bust), or
+    /// both players are holding. Who busted is derived from the scores. Records the result, then
+    /// shows an explanation that has to be acknowledged - the next round (or a restart, after the
+    /// match) starts from that button.
+    private void EndRound()
     {
         int target = _gameState.TargetScore;
         int p1 = _player1.CurrentScore;
@@ -531,9 +536,16 @@ public partial class GameManager : Node
         int roundNumber = _gameState.CurrentRound;
 
         // Why the round ended.
-        string why = (buster != null)
-            ? $"{buster.PlayerName} busted: {buster.CurrentScore} is over the target of {target}."
-            : $"Both players held.\n{_player1.PlayerName}: {p1}      {_player2.PlayerName}: {p2}";
+        bool anyBust = p1Bust || p2Bust;
+        string why;
+        if (p1Bust && p2Bust)
+            why = $"Both players busted: {p1} and {p2} are over the target of {target}.";
+        else if (p1Bust)
+            why = $"{_player1.PlayerName} busted: {p1} is over the target of {target}.";
+        else if (p2Bust)
+            why = $"{_player2.PlayerName} busted: {p2} is over the target of {target}.";
+        else
+            why = $"Both players held.\n{_player1.PlayerName}: {p1}      {_player2.PlayerName}: {p2}";
 
         // What that means.
         string title;
@@ -549,7 +561,7 @@ public partial class GameManager : Node
             Player winner = (roundWinner == 1) ? _player1 : _player2;
             _gameState.RecordRoundWinner(roundWinner);
             _gameState.CurrentRound++;
-            if (buster == null) why += $"\n{winner.PlayerName} is closest to {target}.";
+            if (!anyBust) why += $"\n{winner.PlayerName} is closest to {target}.";
             title = $"{winner.PlayerName} wins round {roundNumber}!";
             buttonText = "Next Round";
         }
@@ -615,36 +627,57 @@ public partial class GameManager : Node
         // While the round-end explanation is up, EndRound owns this label.
         if (_isGameStarted && _roundInfoLabel != null && !_gameState.IsGameOver && !_roundOverPending)
         {
-            string turn = (_isVsBot && _currentActivePlayer == 2) ? "Bot thinking..." : $"Turn: P{_currentActivePlayer}";
-            _roundInfoLabel.Text = $"Round {_gameState.CurrentRound} - Target: {_gameState.TargetScore} | {turn}";
+            _roundInfoLabel.Text = $"Round {_gameState.CurrentRound} - Target: {_gameState.TargetScore} | {DealStatusText()}";
         }
 
-        // Only the person whose turn it is can act; everything is locked during the bot's turn and
-        // while a round-end explanation is waiting to be acknowledged. Each player's own row only
-        // lights up on their turn; the solo scene's shared pair follows whoever is up.
-        bool canAct = HumanCanAct();
-        bool p1Turn = canAct && _currentActivePlayer == 1 && !_player1.IsHolding;
-        bool p2Turn = canAct && _currentActivePlayer == 2 && !_player2.IsHolding;
-        SetEnabled(_endTurnButton, p1Turn || p2Turn);
-        SetEnabled(_holdButton, p1Turn || p2Turn);
-        SetEnabled(_p1EndTurnButton, p1Turn);
-        SetEnabled(_p1HoldButton, p1Turn);
-        SetEnabled(_p2EndTurnButton, p2Turn);
-        SetEnabled(_p2HoldButton, p2Turn);
+        // Both sides act at once: each player's row stays live until THAT player has ended the
+        // deal or is holding. Everything is locked while a round-end explanation is waiting to be
+        // acknowledged. The solo scene's shared pair is Player 1's.
+        bool p1Can = HumanCanActFor(_player1);
+        bool p2Can = HumanCanActFor(_player2);
+        SetEnabled(_endTurnButton, p1Can);
+        SetEnabled(_holdButton, p1Can);
+        SetEnabled(_p1EndTurnButton, p1Can);
+        SetEnabled(_p1HoldButton, p1Can);
+        SetEnabled(_p2EndTurnButton, p2Can);
+        SetEnabled(_p2HoldButton, p2Can);
 
         RefreshHandUI();
         CallDeferred(MethodName.UpdateRotatorSize);
     }
 
+    /// What the middle panel says about the current deal.
+    private string DealStatusText()
+    {
+        bool p1 = _player1.CanAct;
+        bool p2 = _player2.CanAct;
+        if (_isVsBot)
+        {
+            if (p1 && p2) return "Bot thinking...";
+            if (p1) return "Your move";
+            if (p2) return "Waiting for bot";
+            return "Dealing...";
+        }
+        if (p1 && p2) return "Both players: play or end turn";
+        if (p1) return "Waiting for P1";
+        if (p2) return "Waiting for P2";
+        return "Dealing...";
+    }
+
     private string StatusFor(Player player)
     {
-        if (player.CurrentScore > _gameState.TargetScore)
-        {
-            // Over the target mid-turn is a warning, not a bust yet: play a minus card or bust on End Turn.
-            return player.IsHolding ? "Bust!" : "Over target!";
-        }
+        bool over = player.CurrentScore > _gameState.TargetScore;
+
+        if (_roundOverPending && over) return "Bust!";
+        if (_roundOverPending) return player.IsHolding ? "Holding" : "Done";
+
         if (player.IsHolding) return "Holding";
-        return player.IsActiveTurn ? "Active Turn" : "Waiting";
+        if (player.HasEndedTurn) return "Done - waiting";
+
+        // Still acting this deal.
+        if (over) return "Over target!"; // a warning, not a bust yet: play a minus card before ending the turn
+        if (_isVsBot && player == _player2) return "Thinking...";
+        return "Your move";
     }
 
     private static void SetEnabled(Button button, bool enabled)
@@ -662,17 +695,16 @@ public partial class GameManager : Node
         ClearChildren(_p1HandContainer);
         ClearChildren(_p2HandContainer);
 
-        bool canAct = HumanCanAct();
+        bool p1Can = HumanCanActFor(_player1);
+        bool p2Can = HumanCanActFor(_player2);
         foreach (Card card in _player1.ModifierHand)
         {
-            bool disabled = (!canAct || _currentActivePlayer != 1 || _player1.IsHolding);
-            _p1HandContainer.AddChild(CreateHandCardButton(card, disabled, () => OnModifierCardPressed(_player1, card)));
+            _p1HandContainer.AddChild(CreateHandCardButton(card, !p1Can, () => OnModifierCardPressed(_player1, card)));
         }
 
         foreach (Card card in _player2.ModifierHand)
         {
-            bool disabled = (!canAct || _currentActivePlayer != 2 || _player2.IsHolding);
-            _p2HandContainer.AddChild(CreateHandCardButton(card, disabled, () => OnModifierCardPressed(_player2, card)));
+            _p2HandContainer.AddChild(CreateHandCardButton(card, !p2Can, () => OnModifierCardPressed(_player2, card)));
         }
     }
 
@@ -703,7 +735,7 @@ public partial class GameManager : Node
 
     private void OnModifierCardPressed(Player player, Card card)
     {
-        if (!HumanCanAct() || !player.IsActiveTurn || player.IsHolding) return;
+        if (!HumanCanActFor(player)) return;
 
         if (player.PlayModifierCard(card, _gameState))
         {
@@ -1082,6 +1114,156 @@ public partial class GameManager : Node
         Action action = _roundEndAction;
         _roundEndAction = null;
         action?.Invoke();
+    }
+
+    // ------------------------------------------------------------------
+    // How to Play
+    //
+    // A "How to Play" button is added in code to the middle panel's ButtonColumn (just above the
+    // Restart / Exit row) so both scenes get it without NodePath wiring. It opens a full-screen
+    // overlay with the rules; it can be opened at any time and changes no game state. In mirrored
+    // 2-player mode a "Flip for other player" button turns the panel upside down for Player 2.
+    // ------------------------------------------------------------------
+    private const string HowToPlayText =
+        "GOAL\n" +
+        "Get as close to the target score (20) as you can without going over. " +
+        "Win 2 rounds to win the match.\n\n" +
+        "A ROUND\n" +
+        "A round is a series of deals. Each deal, every player who isn't holding is dealt one card " +
+        "(worth 1 to 10) at the same time. Both players then decide - at the same time, without waiting " +
+        "for each other - whether to play a modifier card, and then press End Turn or Hold.\n\n" +
+        "MODIFIER CARDS\n" +
+        "Each player starts the match with a hand of +1, +2, -1 and -2. Tap one to play it onto your " +
+        "board and add it to your score. Each modifier can only be used once per match, so spend them " +
+        "wisely.\n\n" +
+        "END TURN\n" +
+        "You're done for this deal and will be dealt another card next deal.\n\n" +
+        "HOLD\n" +
+        "You stop taking cards for the rest of the round. Your score is locked in.\n\n" +
+        "GOING OVER\n" +
+        "Going over the target after a deal is only a warning (\"Over target!\") - you can still play a " +
+        "minus card to get back under. If you end your turn or hold while still over the target, you " +
+        "bust and lose the round when the deal resolves.\n\n" +
+        "HOW A ROUND ENDS\n" +
+        "Once both players have pressed End Turn or Hold, the deal resolves:\n" +
+        "- Anyone over the target busts. If both bust, the round is a tie and is replayed.\n" +
+        "- If both players are holding, the higher score wins the round. Equal scores tie and the round " +
+        "is replayed.\n" +
+        "- Otherwise the next deal is dealt to everyone who isn't holding.\n\n" +
+        "Filling all 9 board slots without busting is still a good place to be - hold!\n\n" +
+        "VS. BOT\n" +
+        "The bot plays the same rules as you and decides at the same time as you do - you never have " +
+        "to wait for it to take your turn.";
+
+    private Control _howToPlayOverlay;
+    private PanelContainer _howToPlayPanel;
+    private Button _howToPlayFlipButton;
+    private bool _howToPlayFlipped = false;
+
+    private void BuildHowToPlay()
+    {
+        // 1. The button, in the middle panel's ButtonColumn just above the Restart / Exit row.
+        Control column = GetNodeOrNull<Control>("GameUI/MainLayout/SharedControlPanel/VBoxContainer/TableRow/ButtonColumn");
+        Node systemButtons = _restartButton?.GetParent();
+        if (column == null && systemButtons?.GetParent() is Control fallback) column = fallback;
+        if (column == null) return;
+
+        Button open = new Button { Text = "How to Play" };
+        open.Pressed += ShowHowToPlay;
+        column.AddChild(open);
+        if (systemButtons != null && systemButtons.GetParent() == column)
+        {
+            column.MoveChild(open, systemButtons.GetIndex());
+        }
+
+        // 2. The overlay: dim + centred panel + scrolling rules + Close (and Flip when mirrored).
+        _howToPlayOverlay = new Control { Visible = false, MouseFilter = Control.MouseFilterEnum.Stop };
+        AddChild(_howToPlayOverlay);
+        _howToPlayOverlay.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
+
+        ColorRect dim = new ColorRect { Color = new Color(0, 0, 0, 0.6f), MouseFilter = Control.MouseFilterEnum.Ignore };
+        _howToPlayOverlay.AddChild(dim);
+        dim.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
+
+        _howToPlayPanel = new PanelContainer();
+        StyleBoxFlat style = new StyleBoxFlat
+        {
+            BgColor = new Color(0.1f, 0.14f, 0.2f, 0.98f),
+            BorderColor = new Color(0.55f, 0.65f, 0.8f),
+        };
+        style.SetBorderWidthAll(2);
+        style.SetCornerRadiusAll(12);
+        style.SetContentMarginAll(20);
+        _howToPlayPanel.AddThemeStyleboxOverride("panel", style);
+        _howToPlayOverlay.AddChild(_howToPlayPanel);
+        // Fill the screen with a margin so the rules get as much room as the device has.
+        _howToPlayPanel.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
+        _howToPlayPanel.OffsetLeft = 24;
+        _howToPlayPanel.OffsetTop = 24;
+        _howToPlayPanel.OffsetRight = -24;
+        _howToPlayPanel.OffsetBottom = -24;
+        _howToPlayPanel.Resized += () =>
+        {
+            _howToPlayPanel.PivotOffset = _howToPlayPanel.Size / 2f;
+            _howToPlayPanel.RotationDegrees = _howToPlayFlipped ? 180f : 0f;
+        };
+
+        VBoxContainer box = new VBoxContainer();
+        box.AddThemeConstantOverride("separation", 12);
+        _howToPlayPanel.AddChild(box);
+
+        Label title = MakeOverlayLabel(30);
+        title.Text = "How to Play";
+        box.AddChild(title);
+
+        ScrollContainer scroll = new ScrollContainer
+        {
+            SizeFlagsVertical = Control.SizeFlags.ExpandFill,
+            HorizontalScrollMode = ScrollContainer.ScrollMode.Disabled,
+        };
+        box.AddChild(scroll);
+
+        Label rules = new Label
+        {
+            Text = HowToPlayText,
+            AutowrapMode = TextServer.AutowrapMode.Word,
+            SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+        };
+        rules.AddThemeFontSizeOverride("font_size", 20);
+        scroll.AddChild(rules);
+
+        HBoxContainer buttons = new HBoxContainer { Alignment = BoxContainer.AlignmentMode.Center };
+        buttons.AddThemeConstantOverride("separation", 16);
+        box.AddChild(buttons);
+
+        _howToPlayFlipButton = new Button { Text = "Flip for other player", Visible = false };
+        _howToPlayFlipButton.Pressed += () =>
+        {
+            _howToPlayFlipped = !_howToPlayFlipped;
+            _howToPlayPanel.PivotOffset = _howToPlayPanel.Size / 2f;
+            _howToPlayPanel.RotationDegrees = _howToPlayFlipped ? 180f : 0f;
+        };
+        buttons.AddChild(_howToPlayFlipButton);
+
+        Button close = new Button { Text = "Close" };
+        close.Pressed += HideHowToPlay;
+        buttons.AddChild(close);
+    }
+
+    private void ShowHowToPlay()
+    {
+        if (_howToPlayOverlay == null) return;
+        _howToPlayFlipped = false;
+        _howToPlayPanel.RotationDegrees = 0f;
+        _howToPlayFlipButton.Visible = IsMirrored;
+        MoveChild(_howToPlayOverlay, GetChildCount() - 1); // above any stray animation card
+        _howToPlayOverlay.Visible = true;
+    }
+
+    private void HideHowToPlay()
+    {
+        if (_howToPlayOverlay == null) return;
+        _howToPlayOverlay.Visible = false;
     }
 
     // ------------------------------------------------------------------

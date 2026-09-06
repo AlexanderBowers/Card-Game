@@ -6,7 +6,11 @@ public partial class Player : RefCounted
     public string PlayerName { get; set; }
     public int CurrentScore { get; set; } = 0;
     public bool IsHolding { get; set; } = false;
-    public bool IsActiveTurn {get; set; } = false;
+    // Set when the player pressed End Turn for the current deal (cleared by the next deal).
+    public bool HasEndedTurn { get; set; } = false;
+
+    // A player acts (plays modifiers / ends the turn / holds) until they hold or end the deal.
+    public bool CanAct => !IsHolding && !HasEndedTurn;
 
     //Cards currently available in the player's modifier hand
     public List<Card> ModifierHand { get; set; } = new List<Card>();
@@ -43,7 +47,7 @@ public partial class Player : RefCounted
     {
         CurrentScore = 0;
         IsHolding = false;
-        IsActiveTurn = false;
+        HasEndedTurn = false;
         ActiveCardsOnBoard.Clear();
     }
 }
