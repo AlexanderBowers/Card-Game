@@ -1,4 +1,5 @@
 using Godot;
+using System;
 using System.Collections.Generic;
 
 public partial class Player : RefCounted
@@ -21,16 +22,47 @@ public partial class Player : RefCounted
     public Player(string name)
     {
         PlayerName = name;
-        InitializeDefaultModifierHand();
     }
-    
-    private void InitializeDefaultModifierHand()
-    {
-        ModifierHand.Add(new Card(1, CardType.Modifier, "+1"));
-        ModifierHand.Add(new Card(2, CardType.Modifier, "+2"));
-        ModifierHand.Add(new Card(-1, CardType.Modifier, "-1"));
-        ModifierHand.Add(new Card(-2, CardType.Modifier, "-2"));
 
+    /// Deals a fresh modifier hand for a new match. Every card is a random non-zero value in
+    /// -maxMagnitude..+maxMagnitude, and each one has a flipChance of being a "+/-" card that the
+    /// player can swap between plus and minus before playing it.
+    public void DealRandomModifierHand(Random rng, int handSize = 4, double flipChance = 0.10, int maxMagnitude = 4)
+    {
+        ModifierHand.Clear();
+        for (int i = 0; i < handSize; i++)
+        {
+            ModifierHand.Add(CreateRandomModifier(rng, flipChance, maxMagnitude));
+        }
+
+        // One guarantee on top of the randomness: a hand always holds at least one way up and one
+        // way down. A purely random hand comes out all-plus or all-minus about one match in eight,
+        // and neither is playable - all minus can never climb to the target, all plus can never
+        // recover from going over. A "+/-" card counts as both, since it can be played either way.
+        EnsureBothSigns(rng, flipChance, maxMagnitude);
+    }
+
+    private void EnsureBothSigns(Random rng, double flipChance, int maxMagnitude)
+    {
+        if (ModifierHand.Count < 2) return;
+
+        bool hasPlus = ModifierHand.Exists(c => c.IsFlip || c.Value > 0);
+        bool hasMinus = ModifierHand.Exists(c => c.IsFlip || c.Value < 0);
+        if (hasPlus && hasMinus) return;
+
+        // Turn one card round rather than redealing, so every other card stays as it was dealt.
+        Card card = ModifierHand[rng.Next(ModifierHand.Count)];
+        int magnitude = Math.Abs(card.Value);
+        int value = hasPlus ? -magnitude : magnitude;
+        ModifierHand[ModifierHand.IndexOf(card)] = new Card(value, CardType.Modifier, "", card.IsFlip);
+    }
+
+    public static Card CreateRandomModifier(Random rng, double flipChance = 0.10, int maxMagnitude = 4)
+    {
+        int magnitude = rng.Next(1, maxMagnitude + 1);          // 1..maxMagnitude - never 0
+        int value = rng.Next(2) == 0 ? -magnitude : magnitude;  // an even chance of either sign
+        bool isFlip = rng.NextDouble() < flipChance;
+        return new Card(value, CardType.Modifier, "", isFlip);
     }
 
     public bool PlayModifierCard(Card card, GameState gameState)

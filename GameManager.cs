@@ -1,5 +1,6 @@
 using Godot;
 using System;
+using System.Collections.Generic;
 
 public partial class GameManager : Node
 {
@@ -47,6 +48,39 @@ public partial class GameManager : Node
     private bool _roundOverPending = false; // the round-end explanation is up; nothing moves until it's acknowledged
 
     // ------------------------------------------------------------------
+    // Modifier hands
+    //
+    // Each match deals every player a fresh random hand: non-zero values in -4..+4, and a 1-in-10
+    // chance for any of them to be a "+/-" (flip) card the player can swap between plus and minus
+    // before committing it. Cards are spent for the whole match, not the round.
+    // ------------------------------------------------------------------
+    private const int ModifierHandSize = 4;
+    private const int MaxModifierMagnitude = 4;
+    private const double FlipCardChance = 0.10;
+
+    // ------------------------------------------------------------------
+    // Tap to pick up, tap again to play
+    //
+    // Nothing is spent by a single tap. Tapping a hand card picks it up (it lifts, the others dim,
+    // and the player's status line spells out the sum it would make); the End Turn / Hold row is
+    // then replaced by big Play / +- / Put back buttons, and tapping the same card again plays it.
+    // Chosen over long-press or drag-and-drop: both need sustained precision, which is exactly what
+    // small children and older hands struggle with.
+    // ------------------------------------------------------------------
+    // The single-player ladder run, when there is one (RunData autoload). Local 2-player ignores
+    // it entirely and keeps its self-contained randomized hands.
+    private bool _inRun = false;
+
+    private Card _p1SelectedCard;
+    private Card _p2SelectedCard;
+    private HBoxContainer _p1ConfirmRow;
+    private HBoxContainer _p2ConfirmRow;
+    private Button _p1FlipButton;
+    private Button _p2FlipButton;
+    private Control _p1ActionRow;
+    private Control _p2ActionRow;
+
+    // ------------------------------------------------------------------
     // UI scaling
     //
     // project.godot uses a 720x720 base viewport with stretch aspect "expand", so the SHORT
@@ -89,6 +123,7 @@ public partial class GameManager : Node
         _gameState = new GameState();
         _player1 = new Player("Player 1");
         _player2 = new Player("Player 2");
+        DealMatchHands();
 
         _cardSheet = GD.Load<Texture2D>("res://assets/kenney/cards.png");
         _chipSheet = GD.Load<Texture2D>("res://assets/kenney/chips.png");
@@ -147,6 +182,7 @@ public partial class GameManager : Node
 
         BuildRoundEndOverlay();
         BuildHowToPlay();
+        BuildConfirmRows();
 
         GetTree().Root.SizeChanged += ApplyResponsiveLayout;
         ApplyResponsiveLayout();
@@ -168,8 +204,8 @@ public partial class GameManager : Node
     // (Each side is stats + board + hand + its own End Turn / Hold row in the 2-player scene; the
     // middle panel also carries the How to Play button.)
     private const float BaseSide = 720f;
-    private static readonly Vector2 NeedPortrait = new Vector2(420, 1520);
-    private static readonly Vector2 NeedLandscape = new Vector2(1000, 690);
+    private static readonly Vector2 NeedPortrait = new Vector2(470, 1520);
+    private static readonly Vector2 NeedLandscape = new Vector2(1040, 690);
 
     private void ApplyResponsiveLayout()
     {
@@ -296,13 +332,57 @@ public partial class GameManager : Node
         _startButton.Visible = false;
         if (_gameModeButton != null) _gameModeButton.Visible = false;
 
+        BeginRunMatch();
+        DealMatchHands(); // the hand has to last all three rounds of the match
+
         StartNewRound(); // UpdateUI enables the End Turn / Hold buttons
+    }
+
+    /// Puts the solo scene onto the ladder: picks up the run in progress (or starts one), and takes
+    /// this venue's target score. Local 2-player is never part of a run.
+    private void BeginRunMatch()
+    {
+        _inRun = false;
+        if (!_isVsBot) return;
+
+        RunData run = RunData.Instance;
+        if (run == null) return; // autoload missing (e.g. the scene opened on its own) - play a one-off
+
+        if (!run.RunActive || run.RunComplete) run.StartNewRun();
+
+        _inRun = true;
+        _gameState.TargetScore = run.CurrentTarget;
+        _player2.PlayerName = run.CurrentStep.Opponent;
+    }
+
+    /// A fresh modifier hand for both players. Cards are spent for the whole match, so this runs
+    /// once per match - not per round.
+    ///
+    /// In a run, Player 1's hand is drawn at random from the 12-card side deck they built in the
+    /// armory: the deck is chosen, the hand is not. Everywhere else (local 2-player, and the bot)
+    /// the hand is dealt at random.
+    private void DealMatchHands()
+    {
+        List<Card> runHand = _inRun ? RunData.Instance?.DrawMatchHand() : null;
+        if (runHand != null && runHand.Count > 0)
+        {
+            _player1.ModifierHand.Clear();
+            _player1.ModifierHand.AddRange(runHand);
+        }
+        else
+        {
+            _player1.DealRandomModifierHand(_random, ModifierHandSize, FlipCardChance, MaxModifierMagnitude);
+        }
+
+        _player2.DealRandomModifierHand(_random, ModifierHandSize, FlipCardChance, MaxModifierMagnitude);
+        ClearSelections();
     }
 
     private void StartNewRound()
     {
         _player1.ResetForNewRound();
         _player2.ResetForNewRound();
+        ClearSelections();
 
         // Clear old cards and lay out fresh empty 3x3 boards
         FillBoardWithSlots(_p1BoardContainer);
@@ -428,49 +508,54 @@ public partial class GameManager : Node
         ResolveDeal();
     }
 
+    /// The bot looks at every card in its hand - and, for a "+/-" card, at BOTH orientations -
+    /// and takes the play that leaves it as high as possible without going over the target.
     private bool TryAiPlayModifierCard()
     {
         int target = _gameState.TargetScore;
-        Card bestCardToPlay = null;
-        int highValueThreshold = target - 2;
-        int projectedScore = 0;
+        int score = _player2.CurrentScore;
 
-        if (_player1.IsHolding && _player1.CurrentScore <= target)
-        {
-            highValueThreshold = _player1.CurrentScore;
-        }
+        // How high it wants to be before it stops improving: near the target normally, or level
+        // with Player 1 when it is chasing a score Player 1 has already locked in.
+        int wantAtLeast = Math.Max(10, target - 2);
+        if (_player1.IsHolding && _player1.CurrentScore <= target) wantAtLeast = _player1.CurrentScore;
+
+        Card bestCard = null;
+        int bestValue = 0;
+        int bestResult = int.MinValue;
 
         foreach (Card card in _player2.ModifierHand)
         {
-            projectedScore = _player2.CurrentScore + card.Value;
+            int[] orientations = card.IsFlip ? new[] { card.Value, -card.Value } : new[] { card.Value };
+            foreach (int value in orientations)
+            {
+                int result = score + value;
 
-            if (_player2.CurrentScore > target && card.Value < 0 && projectedScore <= target)
-            {
-                bestCardToPlay = card;
-                break;
-            }
-            else if (_player2.CurrentScore <= target && card.Value > 0 && projectedScore <= target)
-            {
-                if (projectedScore >= highValueThreshold || projectedScore == target)
+                if (result > target) continue;                        // never play into a bust
+                if (score <= target)
                 {
-                    bestCardToPlay = card;
-                    break;
+                    if (result <= score) continue;                    // already safe: only play to improve
+                    if (result < wantAtLeast) continue;               // not worth burning a card for
                 }
+                if (result <= bestResult) continue;
+
+                bestCard = card;
+                bestValue = value;
+                bestResult = result;
             }
         }
 
-        if (bestCardToPlay != null)
-        {
-            GD.Print($"AI Bot plays modifier {bestCardToPlay.CardName}. New Score: {projectedScore} (Target: {target})");
-            _player2.PlayModifierCard(bestCardToPlay, _gameState);
-            InstantiateCardView(bestCardToPlay, _p2BoardContainer);
+        if (bestCard == null) return false;
 
-            UpdateUI();
+        if (bestCard.Value != bestValue) bestCard.Flip(); // play the +/- card the other way round
 
-            return true;
-        }
+        GD.Print($"AI Bot plays modifier {bestCard.CardName}. New Score: {bestResult} (Target: {target})");
+        _player2.PlayModifierCard(bestCard, _gameState);
+        InstantiateCardView(bestCard, _p2BoardContainer);
 
-        return false;
+        UpdateUI();
+
+        return true;
     }
 
     /// True when a person is allowed to press End Turn / Hold / a hand card right now.
@@ -499,6 +584,8 @@ public partial class GameManager : Node
     private void FinishTurn(Player player, bool hold)
     {
         if (!HumanCanActFor(player)) return;
+
+        SetSelection(player, null); // a card that was only picked up is put back, not spent
 
         if (hold)
         {
@@ -574,6 +661,7 @@ public partial class GameManager : Node
             int otherWins = (matchWinner == 1) ? _gameState.RoundsWonPlayer2 : _gameState.RoundsWonPlayer1;
             title = $"{champion.PlayerName} wins the match!";
             why += $"\n{champion.PlayerName} took the match {champWins} rounds to {otherWins}.";
+            why += ReportRunResult(matchWinner == 1, _gameState.RoundsWonPlayer1);
             buttonText = "Play Again";
             next = OnRestartPressed;
         }
@@ -595,11 +683,43 @@ public partial class GameManager : Node
         ShowRoundEnd(title, why, buttonText, next);
     }
 
+    /// Banks the match result against the run and says what it was worth. (The shop and the armory
+    /// are not built yet, so for now the player simply carries the medals up the ladder.)
+    private string ReportRunResult(bool playerWon, int playerRoundsWon)
+    {
+        RunData run = _inRun ? RunData.Instance : null;
+        if (run == null) return string.Empty;
+
+        int before = run.Medals;
+        run.CompleteMatch(playerRoundsWon, playerWon);
+
+        if (!playerWon) return "\n\nThe run ends here. Play Again starts a new one.";
+
+        int earned = run.Medals - before;
+        if (run.RunComplete) return $"\n\nYou earned {earned} medals - and you have cleared the whole ladder.";
+
+        RunData.LadderStep next = run.CurrentStep;
+        return $"\n\nYou earned {earned} medals ({run.Medals} banked)." +
+               $"\nNext: {next.Opponent} at the {next.Venue}, target {next.TargetScore}.";
+    }
+
+    /// "Match 3/10 - Neon Underground" while a run is on; nothing otherwise.
+    private string RunHeader()
+    {
+        RunData run = _inRun ? RunData.Instance : null;
+        if (run == null) return string.Empty;
+        return $"Match {run.MatchNumber}/{RunData.LadderLength} - {run.CurrentStep.Venue} - ";
+    }
+
     // ------------------------------------------------------------------
     // UI refresh
     // ------------------------------------------------------------------
     private void UpdateUI()
     {
+        // A picked-up card that can no longer be played (spent, or the player just held) is
+        // dropped before anything is drawn, so the status line and the buttons agree.
+        ValidateSelections();
+
         // When P2's side is flipped, each player sees both scores on their own (readable) row.
         // Otherwise everyone can read both rows, so each side just shows its own score.
         if (IsMirrored)
@@ -618,6 +738,8 @@ public partial class GameManager : Node
 
         if (_p1StatusLabel != null) _p1StatusLabel.Text = StatusFor(_player1);
         if (_p2StatusLabel != null) _p2StatusLabel.Text = StatusFor(_player2);
+        ApplyStatusColor(_p1StatusLabel, _player1);
+        ApplyStatusColor(_p2StatusLabel, _player2);
 
         // Round wins are shown as chips next to the label (see UpdateWinChips).
         if (_p1WinsLabel != null) _p1WinsLabel.Text = "Wins:";
@@ -627,7 +749,7 @@ public partial class GameManager : Node
         // While the round-end explanation is up, EndRound owns this label.
         if (_isGameStarted && _roundInfoLabel != null && !_gameState.IsGameOver && !_roundOverPending)
         {
-            _roundInfoLabel.Text = $"Round {_gameState.CurrentRound} - Target: {_gameState.TargetScore} | {DealStatusText()}";
+            _roundInfoLabel.Text = $"{RunHeader()}Round {_gameState.CurrentRound} - Target: {_gameState.TargetScore} | {DealStatusText()}";
         }
 
         // Both sides act at once: each player's row stays live until THAT player has ended the
@@ -641,6 +763,11 @@ public partial class GameManager : Node
         SetEnabled(_p1HoldButton, p1Can);
         SetEnabled(_p2EndTurnButton, p2Can);
         SetEnabled(_p2HoldButton, p2Can);
+
+        // While a card is picked up, that player's End Turn / Hold row is swapped for the
+        // Play / +- / Put back row (same slot in the layout, so nothing moves).
+        UpdateConfirmRow(_player1, _p1ConfirmRow, _p1FlipButton, _p1ActionRow);
+        UpdateConfirmRow(_player2, _p2ConfirmRow, _p2FlipButton, _p2ActionRow);
 
         RefreshHandUI();
         CallDeferred(MethodName.UpdateRotatorSize);
@@ -674,6 +801,15 @@ public partial class GameManager : Node
         if (player.IsHolding) return "Holding";
         if (player.HasEndedTurn) return "Done - waiting";
 
+        // A card is picked up: spell the arithmetic out. This is the game's teaching moment, so
+        // it is shown as a full sum rather than just the answer.
+        Card picked = SelectedFor(player);
+        if (picked != null)
+        {
+            string sign = picked.Value < 0 ? "-" : "+";
+            return $"{player.CurrentScore} {sign} {Math.Abs(picked.Value)} = {player.CurrentScore + picked.Value}";
+        }
+
         // Still acting this deal.
         if (over) return "Over target!"; // a warning, not a bust yet: play a minus card before ending the turn
         if (_isVsBot && player == _player2) return "Thinking...";
@@ -683,6 +819,158 @@ public partial class GameManager : Node
     private static void SetEnabled(Button button, bool enabled)
     {
         if (button != null) button.Disabled = !enabled;
+    }
+
+    // ------------------------------------------------------------------
+    // Picking a card up
+    // ------------------------------------------------------------------
+    private Card SelectedFor(Player player) => (player == _player1) ? _p1SelectedCard : _p2SelectedCard;
+
+    private void SetSelection(Player player, Card card)
+    {
+        if (player == _player1) _p1SelectedCard = card;
+        else _p2SelectedCard = card;
+    }
+
+    private void ClearSelections()
+    {
+        _p1SelectedCard = null;
+        _p2SelectedCard = null;
+    }
+
+    /// Drops any picked-up card that has since been played, or whose owner can no longer act.
+    private void ValidateSelections()
+    {
+        if (_p1SelectedCard != null && (!_player1.ModifierHand.Contains(_p1SelectedCard) || !HumanCanActFor(_player1)))
+            _p1SelectedCard = null;
+        if (_p2SelectedCard != null && (!_player2.ModifierHand.Contains(_p2SelectedCard) || !HumanCanActFor(_player2)))
+            _p2SelectedCard = null;
+    }
+
+    /// Green when the picked-up card keeps the player at or under the target, red when it would
+    /// take them over - the colour reads long before the numbers do.
+    private void ApplyStatusColor(Label label, Player player)
+    {
+        if (label == null) return;
+
+        Card picked = SelectedFor(player);
+        if (picked == null)
+        {
+            label.RemoveThemeColorOverride("font_color");
+            return;
+        }
+
+        bool over = player.CurrentScore + picked.Value > _gameState.TargetScore;
+        label.AddThemeColorOverride("font_color", over
+            ? new Color(1f, 0.45f, 0.42f)
+            : new Color(0.55f, 0.95f, 0.60f));
+    }
+
+    /// Builds each player's Play / +- / Put back row, directly under the End Turn / Hold row it
+    /// stands in for. Found from the exported buttons rather than a NodePath, so it works in both
+    /// scenes (and inside P2's rotator, so it flips with the rest of P2's side).
+    private void BuildConfirmRows()
+    {
+        _p1ConfirmRow = BuildConfirmRow(_player1, _p1EndTurnButton ?? _endTurnButton, out _p1FlipButton, out _p1ActionRow);
+        _p2ConfirmRow = BuildConfirmRow(_player2, _p2EndTurnButton, out _p2FlipButton, out _p2ActionRow);
+    }
+
+    private HBoxContainer BuildConfirmRow(Player player, Button anchorButton, out Button flipButton, out Control actionRow)
+    {
+        flipButton = null;
+        actionRow = null;
+        if (anchorButton == null) return null; // that side has no buttons in this scene (the bot's)
+
+        actionRow = anchorButton.GetParent() as Control; // the End Turn / Hold row
+        Node host = actionRow?.GetParent();              // the column that row lives in
+        if (actionRow == null || host == null) return null;
+
+        HBoxContainer row = new HBoxContainer
+        {
+            Visible = false,
+            Alignment = BoxContainer.AlignmentMode.Center,
+        };
+        row.AddThemeConstantOverride("separation", 12);
+
+        Button play = MakeConfirmButton("Play", new Color(0.24f, 0.62f, 0.31f));
+        play.Pressed += () => PlaySelectedCard(player);
+        row.AddChild(play);
+
+        flipButton = MakeConfirmButton("+ / -", new Color(0.22f, 0.44f, 0.78f));
+        flipButton.Pressed += () => FlipSelectedCard(player);
+        row.AddChild(flipButton);
+
+        Button cancel = MakeConfirmButton("Put back", new Color(0.38f, 0.38f, 0.42f));
+        cancel.Pressed += () => { SetSelection(player, null); UpdateUI(); };
+        row.AddChild(cancel);
+
+        host.AddChild(row);
+        host.MoveChild(row, actionRow.GetIndex() + 1);
+        return row;
+    }
+
+    private static Button MakeConfirmButton(string text, Color tint)
+    {
+        Button button = new Button { Text = text, FocusMode = Control.FocusModeEnum.None };
+        button.AddThemeColorOverride("font_color", Colors.White);
+        button.AddThemeColorOverride("font_hover_color", Colors.White);
+        button.AddThemeColorOverride("font_pressed_color", Colors.White);
+
+        StyleBoxFlat box = new StyleBoxFlat
+        {
+            BgColor = tint,
+            CornerRadiusTopLeft = 8,
+            CornerRadiusTopRight = 8,
+            CornerRadiusBottomLeft = 8,
+            CornerRadiusBottomRight = 8,
+            ContentMarginLeft = 20,
+            ContentMarginRight = 20,
+            ContentMarginTop = 14,
+            ContentMarginBottom = 14,
+        };
+        StyleBoxFlat pressed = (StyleBoxFlat)box.Duplicate();
+        pressed.BgColor = tint.Lightened(0.15f);
+
+        button.AddThemeStyleboxOverride("normal", box);
+        button.AddThemeStyleboxOverride("hover", pressed);
+        button.AddThemeStyleboxOverride("pressed", pressed);
+        button.AddThemeStyleboxOverride("focus", box);
+        return button;
+    }
+
+    private void UpdateConfirmRow(Player player, HBoxContainer row, Button flipButton, Control actionRow)
+    {
+        if (row == null) return;
+
+        Card picked = SelectedFor(player);
+        row.Visible = picked != null;
+        if (actionRow != null) actionRow.Visible = picked == null;
+        if (flipButton != null) flipButton.Visible = picked != null && picked.IsFlip;
+    }
+
+    private void PlaySelectedCard(Player player)
+    {
+        Card card = SelectedFor(player);
+        if (card == null || !HumanCanActFor(player)) return;
+
+        SetSelection(player, null);
+        if (player.PlayModifierCard(card, _gameState))
+        {
+            InstantiateCardView(card, (player == _player1) ? _p1BoardContainer : _p2BoardContainer);
+        }
+
+        UpdateUI();
+    }
+
+    /// Swaps a picked-up "+/-" card between plus and minus. Nothing is spent - the sum in the
+    /// status line just changes, so it can be flipped back and forth as often as the player likes.
+    private void FlipSelectedCard(Player player)
+    {
+        Card card = SelectedFor(player);
+        if (card == null || !HumanCanActFor(player) || !card.Flip()) return;
+
+        _sfxPlace?.Play();
+        UpdateUI();
     }
 
     private void RefreshHandUI()
@@ -699,18 +987,23 @@ public partial class GameManager : Node
         bool p2Can = HumanCanActFor(_player2);
         foreach (Card card in _player1.ModifierHand)
         {
-            _p1HandContainer.AddChild(CreateHandCardButton(card, !p1Can, () => OnModifierCardPressed(_player1, card)));
+            _p1HandContainer.AddChild(CreateHandCardButton(
+                card, !p1Can, card == _p1SelectedCard, _p1SelectedCard != null,
+                () => OnModifierCardPressed(_player1, card)));
         }
 
         foreach (Card card in _player2.ModifierHand)
         {
-            _p2HandContainer.AddChild(CreateHandCardButton(card, !p2Can, () => OnModifierCardPressed(_player2, card)));
+            _p2HandContainer.AddChild(CreateHandCardButton(
+                card, !p2Can, card == _p2SelectedCard, _p2SelectedCard != null,
+                () => OnModifierCardPressed(_player2, card)));
         }
     }
 
     /// A tappable modifier card: an invisible Button (so the theme's touch-friendly hit area
-    /// and focus handling still apply) with the card art drawn on top.
-    private Button CreateHandCardButton(Card card, bool disabled, Action onPressed)
+    /// and focus handling still apply) with the card art drawn on top. A picked-up card is lifted
+    /// and the rest of the hand dims, so which card is in play is obvious without reading anything.
+    private Button CreateHandCardButton(Card card, bool disabled, bool selected, bool anySelected, Action onPressed)
     {
         Button button = new Button
         {
@@ -726,9 +1019,37 @@ public partial class GameManager : Node
 
         TextureRect view = CreateCardView(card, HandCardSize);
         view.MouseFilter = Control.MouseFilterEnum.Ignore;
-        view.Modulate = disabled ? new Color(0.55f, 0.55f, 0.55f) : Colors.White;
+
+        if (disabled) view.Modulate = new Color(0.55f, 0.55f, 0.55f);
+        else if (anySelected && !selected) view.Modulate = new Color(0.5f, 0.5f, 0.55f); // the rest of the hand steps back
+        else view.Modulate = Colors.White;
+
         button.AddChild(view);
         view.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
+
+        if (selected)
+        {
+            // Scale the art, not the Button: the Button is a container child and would have its
+            // scale reset on the next layout pass, and growing it would shove the whole hand about.
+            view.PivotOffset = HandCardSize / 2f;
+            view.Scale = new Vector2(1.18f, 1.18f);
+
+            StyleBoxFlat outline = new StyleBoxFlat
+            {
+                BgColor = new Color(0, 0, 0, 0),
+                BorderColor = new Color(1f, 0.92f, 0.4f),
+                CornerRadiusTopLeft = 6,
+                CornerRadiusTopRight = 6,
+                CornerRadiusBottomLeft = 6,
+                CornerRadiusBottomRight = 6,
+            };
+            outline.SetBorderWidthAll(4);
+
+            Panel highlight = new Panel { MouseFilter = Control.MouseFilterEnum.Ignore };
+            highlight.AddThemeStyleboxOverride("panel", outline);
+            view.AddChild(highlight);
+            highlight.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
+        }
 
         return button;
     }
@@ -737,14 +1058,17 @@ public partial class GameManager : Node
     {
         if (!HumanCanActFor(player)) return;
 
-        if (player.PlayModifierCard(card, _gameState))
+        // Second tap on the card already in hand plays it - the quick path for anyone who has
+        // learned the game. The first tap only picks it up; nothing is spent yet.
+        if (SelectedFor(player) == card)
         {
-            Control boardContainer = (player == _player1) ? _p1BoardContainer : _p2BoardContainer;
-
-            InstantiateCardView(card, boardContainer);
-
-            UpdateUI();
+            PlaySelectedCard(player);
+            return;
         }
+
+        SetSelection(player, card);
+        _sfxSlide?.Play();
+        UpdateUI();
     }
 
     // ------------------------------------------------------------------
@@ -830,6 +1154,9 @@ public partial class GameManager : Node
             flipped.AddThemeFontSizeOverride("font_size", fontSize);
             flipped.Visible = twoWay;
         }
+
+        Label badge = view.GetNodeOrNull<Label>("FlipBadge");
+        if (badge != null) badge.AddThemeFontSizeOverride("font_size", Mathf.RoundToInt(size.Y * 0.22f));
     }
 
     private TextureRect CreateCardView(Card card, Vector2 size)
@@ -838,11 +1165,31 @@ public partial class GameManager : Node
         view.Texture = MakeAtlas(_cardSheet, RegionFor(card));
         ApplyCardSize(view, size);
 
-        string text = (card.Type != CardType.Main && card.Value > 0) ? "+" + card.Value : card.CardName;
+        string text = card.DisplayText; // read from Value, so a flipped card shows its new sign
         foreach (string name in CardLabelNames)
         {
             Label label = view.GetNodeOrNull<Label>(name);
             if (label != null) label.Text = text;
+        }
+
+        // A "+/-" card wears a badge on its edge. The glyph is unchanged by a 180 degree turn, so
+        // one badge is readable from both sides of the table.
+        if (card.IsFlip)
+        {
+            Label badge = new Label
+            {
+                Name = "FlipBadge",
+                Text = "\u00B1",
+                MouseFilter = Control.MouseFilterEnum.Ignore,
+                HorizontalAlignment = HorizontalAlignment.Left,
+                VerticalAlignment = VerticalAlignment.Center,
+            };
+            badge.AddThemeColorOverride("font_color", new Color(1f, 0.92f, 0.4f));
+            badge.AddThemeColorOverride("font_outline_color", new Color(0, 0, 0, 0.65f));
+            badge.AddThemeConstantOverride("outline_size", 6);
+            badge.AddThemeFontSizeOverride("font_size", Mathf.RoundToInt(size.Y * 0.22f));
+            view.AddChild(badge);
+            badge.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
         }
 
         // The bottom label is rotated about its own centre once the layout has given it a size.
@@ -1133,9 +1480,18 @@ public partial class GameManager : Node
         "(worth 1 to 10) at the same time. Both players then decide - at the same time, without waiting " +
         "for each other - whether to play a modifier card, and then press End Turn or Hold.\n\n" +
         "MODIFIER CARDS\n" +
-        "Each player starts the match with a hand of +1, +2, -1 and -2. Tap one to play it onto your " +
-        "board and add it to your score. Each modifier can only be used once per match, so spend them " +
-        "wisely.\n\n" +
+        "Each player is dealt a hand of 4 random modifier cards at the start of the match. They are " +
+        "worth anywhere from -4 to +4, and playing one adds its value to your score. Each card can " +
+        "only be used once per match, so spend them wisely.\n\n" +
+        "PLAYING A CARD\n" +
+        "Tap a card in your hand to pick it up. It lifts, and your status line shows the sum it would " +
+        "make - for example \"17 + 3 = 20\". Green means you would still be at or under the target, " +
+        "red means it would take you over. Nothing is spent yet: tap Play (or tap the card again) to " +
+        "commit it, or Put back to change your mind.\n\n" +
+        "+/- CARDS\n" +
+        "A card marked with a small yellow +/- can be played either way round. Pick it up and press " +
+        "the + / - button to swap it between plus and minus - as often as you like - before playing it. " +
+        "A +3 becomes a -3, and back again.\n\n" +
         "END TURN\n" +
         "You're done for this deal and will be dealt another card next deal.\n\n" +
         "HOLD\n" +
