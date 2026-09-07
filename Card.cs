@@ -18,11 +18,16 @@ public partial class Card : RefCounted
 	/// the card is currently showing.
 	public bool IsFlip { get; set; }
 
-	public Card(int value, CardType type, string cardName = "", bool isFlip = false)
+	/// What this card does beyond adding its own value to its owner's score. None for every
+	/// ordinary modifier and every main-deck card; see CardEffects for the rest.
+	public CardEffect Effect { get; set; } = CardEffect.None;
+
+	public Card(int value, CardType type, string cardName = "", bool isFlip = false, CardEffect effect = CardEffect.None)
 	{
 		Value = value;
 		Type = type;
 		IsFlip = isFlip;
+		Effect = effect;
 		CardName = string.IsNullOrEmpty(cardName) ? DefaultName(value, type) : cardName;
 	}
 
@@ -35,8 +40,11 @@ public partial class Card : RefCounted
 		return true;
 	}
 
-	/// What the card shows: main cards are a bare number, modifiers always carry their sign.
-	public string DisplayText => DefaultName(Value, Type);
+	/// What the card shows: main cards are a bare number, modifiers always carry their sign, and
+	/// an effect card leads with its glyph - the arrow reads before the arithmetic does.
+	public string DisplayText => Effect == CardEffect.None
+		? DefaultName(Value, Type)
+		: CardEffects.Glyph(Effect) + (Effect == CardEffect.Push ? DefaultName(Value, Type) : "");
 
 	private static string DefaultName(int value, CardType type)
 	{

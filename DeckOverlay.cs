@@ -3,14 +3,14 @@ using System;
 using System.Collections.Generic;
 
 /// <summary>
-/// The armory: the player's whole collection on the left, the twelve side-deck slots on the right,
+/// The deck screen: the player's whole collection on the left, the twelve side-deck slots on the right,
 /// tap a card to move it between them. Four of those twelve are dealt at random at the start of
 /// each match - the deck is chosen, the hand is not.
 ///
 /// Writes RunData.SideDeck (indices into RunData.Inventory) when Continue is pressed, so a run that
 /// is quit here keeps the deck it arrived with rather than a half-built one.
 /// </summary>
-public partial class ArmoryOverlay : Control
+public partial class DeckOverlay : Control
 {
     private const int Columns = 3;
     private const int VisibleRows = 4;   // how much of the collection is on screen before it scrolls
@@ -49,9 +49,9 @@ public partial class ArmoryOverlay : Control
         OverlayUi.AddDim(this);
         VBoxContainer box = OverlayUi.AddPanel(this, contentMargin: 24, separation: 12);
 
-        box.AddChild(OverlayUi.MakeLabel("Armory", 30));
+        box.AddChild(OverlayUi.MakeLabel("Your Deck", 30));
         box.AddChild(OverlayUi.MakeLabel(
-            "Tap a card to move it in or out of your side deck.\nFour of your twelve are dealt to you each match.",
+            "Tap a card to move it in or out of your deck.\nFour of your twelve are dealt to you each match.",
             18, OverlayUi.Muted));
 
         HBoxContainer columns = new HBoxContainer { Alignment = BoxContainer.AlignmentMode.Center };
@@ -79,7 +79,7 @@ public partial class ArmoryOverlay : Control
         VBoxContainer right = new VBoxContainer { Alignment = BoxContainer.AlignmentMode.Center };
         right.AddThemeConstantOverride("separation", 6);
         columns.AddChild(right);
-        right.AddChild(OverlayUi.MakeLabel("Side deck", 20));
+        right.AddChild(OverlayUi.MakeLabel("Deck (12)", 20));
 
         _slotGrid = new GridContainer { Columns = Columns };
         _slotGrid.AddThemeConstantOverride("h_separation", 8);
@@ -103,7 +103,7 @@ public partial class ArmoryOverlay : Control
         if (!_built || run == null)
         {
             _onDone = null;
-            onDone?.Invoke(); // never strand the run because the armory failed to build
+            onDone?.Invoke(); // never strand the run because the deck screen failed to build
             return;
         }
 

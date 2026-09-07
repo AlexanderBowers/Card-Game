@@ -19,6 +19,11 @@ public partial class Player : RefCounted
     //Cards played onto the board this round
     public List<Card> ActiveCardsOnBoard { get; set; } = new List<Card>();
 
+    /// The main-deck card this player drew in the CURRENT deal, or null if they did not draw one
+    /// (they are holding). TradeDraw needs to name it exactly, and "the last Main card on the
+    /// board" is not the same thing once modifiers have been played on top.
+    public Card LastDrawnCard { get; set; }
+
     public Player(string name)
     {
         PlayerName = name;
@@ -39,19 +44,23 @@ public partial class Player : RefCounted
         // way down. A purely random hand comes out all-plus or all-minus about one match in eight,
         // and neither is playable - all minus can never climb to the target, all plus can never
         // recover from going over. A "+/-" card counts as both, since it can be played either way.
-        EnsureBothSigns(rng, flipChance, maxMagnitude);
+        EnsureBothSigns(rng);
     }
 
-    private void EnsureBothSigns(Random rng, double flipChance, int maxMagnitude)
+    /// Public because the stage recipes build the AI's hand card by card and need the same
+    /// guarantee afterwards. Effect cards are left alone: an effect card is not a way up or down,
+    /// and turning one into a plain -3 would silently delete the stage's whole new rule.
+    public void EnsureBothSigns(Random rng)
     {
-        if (ModifierHand.Count < 2) return;
+        List<Card> plain = ModifierHand.FindAll(c => c.Effect == CardEffect.None);
+        if (plain.Count < 2) return;
 
-        bool hasPlus = ModifierHand.Exists(c => c.IsFlip || c.Value > 0);
-        bool hasMinus = ModifierHand.Exists(c => c.IsFlip || c.Value < 0);
+        bool hasPlus = plain.Exists(c => c.IsFlip || c.Value > 0);
+        bool hasMinus = plain.Exists(c => c.IsFlip || c.Value < 0);
         if (hasPlus && hasMinus) return;
 
         // Turn one card round rather than redealing, so every other card stays as it was dealt.
-        Card card = ModifierHand[rng.Next(ModifierHand.Count)];
+        Card card = plain[rng.Next(plain.Count)];
         int magnitude = Math.Abs(card.Value);
         int value = hasPlus ? -magnitude : magnitude;
         ModifierHand[ModifierHand.IndexOf(card)] = new Card(value, CardType.Modifier, "", card.IsFlip);
@@ -80,6 +89,7 @@ public partial class Player : RefCounted
         CurrentScore = 0;
         IsHolding = false;
         HasEndedTurn = false;
+        LastDrawnCard = null;
         ActiveCardsOnBoard.Clear();
     }
 }

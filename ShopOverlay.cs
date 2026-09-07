@@ -4,7 +4,7 @@ using System.Collections.Generic;
 
 /// <summary>
 /// The market between two rungs of the ladder: a handful of modifier cards for sale, priced in the
-/// medals won on the table. Bought cards go into RunData.Inventory; the armory (which opens next)
+/// medals won on the table. Bought cards go into RunData.Inventory; the deck screen (which opens next)
 /// decides which twelve of them make the side deck.
 ///
 /// An overlay over the table rather than a scene of its own, so the intermission never breaks the
@@ -45,6 +45,17 @@ public partial class ShopOverlay : Control
     // ------------------------------------------------------------------
     public static int PriceOf(RunData.ModifierDef def)
     {
+        // Effect cards are one-shot swings rather than arithmetic, so they sit above the whole
+        // modifier table. Trade Totals is the most expensive card in the game on purpose: it takes
+        // a won round off the other player, and it should cost most of a match's winnings.
+        switch (def.Effect)
+        {
+            case CardEffect.Shave: return 10;
+            case CardEffect.TradeDraw: return 12;
+            case CardEffect.TradeHands: return 14;
+            case CardEffect.TradeTotals: return 18;
+        }
+
         int magnitude = Math.Abs(def.Value);
         int price;
         switch (magnitude)
@@ -56,30 +67,96 @@ public partial class ShopOverlay : Control
             case 5: price = 11; break;
             default: price = 14; break;
         }
+        if (def.Effect == CardEffect.Push) return price + 6; // the number is what it costs, plus the reach
         return def.IsFlip ? price * 2 : price;
     }
 
-    /// The stock for one visit. Bigger cards appear further up the ladder, and +/- cards get
-    /// commoner - progression comes from the player's deck, never from inflating the arithmetic.
-    public static List<RunData.ModifierDef> RollOffers(Random rng, int stepIndex, int count)
+    /// The stock for one visit.
+    ///
+    /// Slot one is always the SIGNATURE CARD of the stage just cleared (Alexander's rule): you
+    /// lose two rounds to a Push, you clear the stage, and a Push is waiting on the next screen.
+    /// The rest rolls from everything unlocked so far - bigger cards and commoner +/- further up
+    /// the ladder, and effects at about a quarter of the stock so the arithmetic deck still grows.
+    public static List<RunData.ModifierDef> RollOffers(Random rng, RunData run, int count)
     {
         List<RunData.ModifierDef> offers = new List<RunData.ModifierDef>();
+        int stepIndex = run?.StepIndex ?? 0;
         int maxMagnitude = Mathf.Clamp(3 + stepIndex / 3, 3, 6);
         double flipChance = 0.15 + 0.02 * stepIndex;
 
-        for (int attempt = 0; attempt < count * 8 && offers.Count < count; attempt++)
+        List<CardEffect> unlocked = run != null ? run.UnlockedEffects() : new List<CardEffect>();
+        if (run != null) offers.Add(SignatureOffer(rng, run, unlocked, maxMagnitude));
+
+        for (int attempt = 0; attempt < count * 12 && offers.Count < count; attempt++)
         {
-            bool isFlip = rng.NextDouble() < flipChance;
-            int magnitude = RollMagnitude(rng, maxMagnitude);
+            RunData.ModifierDef def;
 
-            // A +/- card is stored positive; the player picks its sign at the table.
-            int value = (isFlip || rng.Next(2) == 0) ? magnitude : -magnitude;
-            RunData.ModifierDef def = new RunData.ModifierDef(value, isFlip);
+            if (unlocked.Count > 0 && rng.NextDouble() < 0.25)
+            {
+                def = ToDef(CardEffects.Create(unlocked[rng.Next(unlocked.Count)], rng));
+            }
+            else
+            {
+                bool isFlip = rng.NextDouble() < flipChance;
+                int magnitude = RollMagnitude(rng, maxMagnitude);
 
-            bool duplicate = offers.Exists(o => o.Value == def.Value && o.IsFlip == def.IsFlip);
-            if (!duplicate) offers.Add(def);
+                // A +/- card is stored positive; the player picks its sign at the table.
+                int value = (isFlip || rng.Next(2) == 0) ? magnitude : -magnitude;
+                def = new RunData.ModifierDef(value, isFlip);
+            }
+
+            if (!IsDuplicate(offers, def)) offers.Add(def);
         }
+
+        // A market where nothing at all can be bought is a dead screen. An unaffordable SIGNATURE
+        // card is fine - that one is a savings target - so the cheap card replaces the last slot.
+        if (run != null && run.Medals >= 4 && offers.Count > 1
+            && offers.TrueForAll(o => PriceOf(o) > run.Medals))
+        {
+            offers[offers.Count - 1] = new RunData.ModifierDef(rng.Next(2) == 0 ? 2 : -2);
+        }
+
         return offers;
+    }
+
+    /// The one card every visit guarantees: whatever the stage just cleared was about.
+    private static RunData.ModifierDef SignatureOffer(Random rng, RunData run,
+                                                      List<CardEffect> unlocked, int maxMagnitude)
+    {
+        RunData.LadderStep cleared = run.StepAt(run.ClearedStepIndex);
+        int stage = run.ClearedStepIndex + 1;
+
+        // Stages 4-8: the card the player has just been hit with, now for sale.
+        if (cleared.AiEffect != CardEffect.None && run.EffectUnlocked(cleared.AiEffect))
+        {
+            return ToDef(CardEffects.Create(cleared.AiEffect, rng));
+        }
+
+        // Stage 1 is the plain game; stage 2 is the one that introduces "+/-".
+        if (stage <= 1) return new RunData.ModifierDef(RollMagnitude(rng, 3) * (rng.Next(2) == 0 ? 1 : -1));
+        if (stage == 2) return new RunData.ModifierDef(RollMagnitude(rng, 3), isFlip: true);
+
+        // Stages that introduce no card of their own - stage 3 (the target moves) and the
+        // randomized rungs until pass 4 rolls their ruleset. A moved target is exactly when a big
+        // swing earns its price; once effects are unlocked, one of those is the better souvenir.
+        if (stage >= 9 && unlocked.Count > 0)
+        {
+            return ToDef(CardEffects.Create(unlocked[rng.Next(unlocked.Count)], rng));
+        }
+
+        int magnitude = Math.Max(4, RollMagnitude(rng, Math.Max(4, maxMagnitude)));
+        return new RunData.ModifierDef(rng.Next(2) == 0 ? magnitude : -magnitude);
+    }
+
+    private static RunData.ModifierDef ToDef(Card card) =>
+        new RunData.ModifierDef(card.Value, card.IsFlip, card.Effect);
+
+    /// Two offers are the same card when they would play identically. Effect cards collide on the
+    /// effect alone: two Pushes in one market is a thin visit however their numbers differ.
+    private static bool IsDuplicate(List<RunData.ModifierDef> offers, RunData.ModifierDef def)
+    {
+        if (def.Effect != CardEffect.None) return offers.Exists(o => o.Effect == def.Effect);
+        return offers.Exists(o => o.Effect == CardEffect.None && o.Value == def.Value && o.IsFlip == def.IsFlip);
     }
 
     private static int RollMagnitude(Random rng, int max)
@@ -129,10 +206,10 @@ public partial class ShopOverlay : Control
         box.AddChild(_offerRow);
 
         box.AddChild(OverlayUi.MakeLabel(
-            "Cards you buy are yours for the rest of the run.\nYou choose which twelve go in your side deck next.",
+            "Cards you buy are yours to keep - a lost run never takes them away.\nYou choose which twelve go in your deck next.",
             16, OverlayUi.Muted));
 
-        _continueButton = new Button { Text = "Continue to the Armory" };
+        _continueButton = new Button { Text = "Continue to your Deck" };
         _continueButton.Pressed += Close;
         box.AddChild(_continueButton);
     }
@@ -151,11 +228,11 @@ public partial class ShopOverlay : Control
         }
 
         _offers.Clear();
-        foreach (RunData.ModifierDef def in RollOffers(_random, run.StepIndex, OfferCount))
+        foreach (RunData.ModifierDef def in RollOffers(_random, run, OfferCount))
             _offers.Add(new Offer { Def = def, Price = PriceOf(def) });
 
         RunData.LadderStep next = run.CurrentStep;
-        _subtitle.Text = $"Next: {next.Opponent} at the {next.Venue} - target {next.TargetScore}";
+        _subtitle.Text = $"Next: {next.Opponent} - target {next.TargetScore}";
 
         // Above the round-end overlay and any stray animation card.
         Node parent = GetParent();
