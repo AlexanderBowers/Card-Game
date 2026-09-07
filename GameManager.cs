@@ -118,6 +118,11 @@ public partial class GameManager : Node
     private AudioStreamPlayer _sfxSlide;
     private AudioStreamPlayer _sfxPlace;
 
+    // The intermission between two rungs: the market, then the armory. Overlays over this same
+    // table rather than scenes of their own, so the run never leaves the venue it is playing in.
+    private ShopOverlay _shopOverlay;
+    private ArmoryOverlay _armoryOverlay;
+
     public override void _Ready()
     {
         _gameState = new GameState();
@@ -183,10 +188,19 @@ public partial class GameManager : Node
         BuildRoundEndOverlay();
         BuildHowToPlay();
         BuildConfirmRows();
+        BuildIntermissionOverlays();
 
         GetTree().Root.SizeChanged += ApplyResponsiveLayout;
         ApplyResponsiveLayout();
         UpdateUI();
+
+        // Coming back from the armory: the player already pressed a button to get here, so deal
+        // the next match instead of showing them a Start button. (Solo scene only.)
+        if (_gameModeButton == null && RunData.Instance != null && RunData.Instance.AutoStartNextMatch)
+        {
+            RunData.Instance.AutoStartNextMatch = false;
+            CallDeferred(MethodName.OnStartButtonPressed);
+        }
     }
 
     public override void _ExitTree()
@@ -662,8 +676,21 @@ public partial class GameManager : Node
             title = $"{champion.PlayerName} wins the match!";
             why += $"\n{champion.PlayerName} took the match {champWins} rounds to {otherWins}.";
             why += ReportRunResult(matchWinner == 1, _gameState.RoundsWonPlayer1);
-            buttonText = "Play Again";
-            next = OnRestartPressed;
+            // A won match on a live run goes to the market and the armory before the next rung;
+            // a loss (or the end of the ladder) just offers a fresh run. ReportRunResult above has
+            // already banked the result, so RunActive/RunComplete describe what happens next.
+            RunData run = _inRun ? RunData.Instance : null;
+            bool runContinues = run != null && run.RunActive && !run.RunComplete;
+            if (runContinues)
+            {
+                buttonText = "Continue";
+                next = OpenIntermission;
+            }
+            else
+            {
+                buttonText = "Play Again";
+                next = OnRestartPressed;
+            }
         }
         else
         {
@@ -683,8 +710,8 @@ public partial class GameManager : Node
         ShowRoundEnd(title, why, buttonText, next);
     }
 
-    /// Banks the match result against the run and says what it was worth. (The shop and the armory
-    /// are not built yet, so for now the player simply carries the medals up the ladder.)
+    /// Banks the match result against the run and says what it was worth. The market and the armory
+    /// open next (OpenIntermission), which is where those medals get spent.
     private string ReportRunResult(bool playerWon, int playerRoundsWon)
     {
         RunData run = _inRun ? RunData.Instance : null;
@@ -700,7 +727,8 @@ public partial class GameManager : Node
 
         RunData.LadderStep next = run.CurrentStep;
         return $"\n\nYou earned {earned} medals ({run.Medals} banked)." +
-               $"\nNext: {next.Opponent} at the {next.Venue}, target {next.TargetScore}.";
+               $"\nNext: {next.Opponent} at the {next.Venue}, target {next.TargetScore}." +
+               "\nThe market is open first.";
     }
 
     /// "Match 3/10 - Neon Underground" while a run is on; nothing otherwise.
@@ -709,6 +737,47 @@ public partial class GameManager : Node
         RunData run = _inRun ? RunData.Instance : null;
         if (run == null) return string.Empty;
         return $"Match {run.MatchNumber}/{RunData.LadderLength} - {run.CurrentStep.Venue} - ";
+    }
+
+    // ------------------------------------------------------------------
+    // The intermission: market, then armory, then the next rung
+    // ------------------------------------------------------------------
+    private void BuildIntermissionOverlays()
+    {
+        // Only the single-player ladder has a run to spend medals on; local 2-player never does.
+        if (_gameModeButton != null) return;
+
+        _shopOverlay = new ShopOverlay();
+        AddChild(_shopOverlay);
+        _shopOverlay.Setup(CreateCardView);
+
+        _armoryOverlay = new ArmoryOverlay();
+        AddChild(_armoryOverlay);
+        _armoryOverlay.Setup(CreateCardView);
+    }
+
+    /// Market first (spend the medals just won), then the armory (choose the twelve those cards
+    /// go into), then the next match.
+    private void OpenIntermission()
+    {
+        if (_shopOverlay == null || _armoryOverlay == null)
+        {
+            StartNextMatch();
+            return;
+        }
+
+        // The armory works in smaller cards than the table: twelve slots and a collection have to
+        // fit side by side on a phone in portrait.
+        Vector2 armoryCardSize = CardSize * 0.7f;
+        _shopOverlay.Open(CardSize, () => _armoryOverlay.Open(armoryCardSize, StartNextMatch));
+    }
+
+    /// Reloading the scene is what resets the board, the scores and the round wins (the same path
+    /// Restart takes); RunData is an autoload, so the run itself survives it.
+    private void StartNextMatch()
+    {
+        if (RunData.Instance != null) RunData.Instance.AutoStartNextMatch = true;
+        GetTree().ReloadCurrentScene();
     }
 
     // ------------------------------------------------------------------

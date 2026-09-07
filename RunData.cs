@@ -81,6 +81,11 @@ public partial class RunData : Node
     // ------------------------------------------------------------------
     public bool RunActive { get; private set; }
     public int Medals { get; private set; }
+
+    /// Set by the armory just before the table scene is reloaded for the next rung, so the player
+    /// walks straight into the match instead of landing back on a Start button. Deliberately not
+    /// saved: it is about this reload, not about the run. (This autoload survives the reload.)
+    public bool AutoStartNextMatch { get; set; }
     public int StepIndex { get; private set; }              // 0-based rung of the ladder
 
     /// Every modifier card the player owns. Cards are only ever added (there is no selling), so an
@@ -160,7 +165,26 @@ public partial class RunData : Node
 
     public void SpendMedals(int amount) { Medals = Math.Max(0, Medals - amount); Save(); }
 
-    public void AddToInventory(ModifierDef def) { Inventory.Add(def); Save(); }
+    /// Adds a bought card to the collection and returns its index - which is its permanent id,
+    /// because the collection is append-only (there is no selling).
+    public int AddToInventory(ModifierDef def)
+    {
+        Inventory.Add(def);
+        Save();
+        return Inventory.Count - 1;
+    }
+
+    /// The armory's output: the indices the player chose. Anything out of range or repeated is
+    /// dropped rather than trusted, so a bad save can never deal a card that isn't there.
+    public void SetSideDeck(IEnumerable<int> indices)
+    {
+        SideDeck.Clear();
+        foreach (int index in indices)
+        {
+            if (index >= 0 && index < Inventory.Count && !SideDeck.Contains(index)) SideDeck.Add(index);
+        }
+        Save();
+    }
 
     // ------------------------------------------------------------------
     // Dealing a match hand
