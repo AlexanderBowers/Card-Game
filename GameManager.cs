@@ -110,6 +110,13 @@ public partial class GameManager : Node
     private float _cardScale = 1f;
     private BoxContainer _mainLayout;
 
+    // The middle panel's two added lines: the target, big, above the round line; and a banner
+    // under it that says what an effect card just did. Both are built in code (BuildTableBanners)
+    // so the two .tscn scenes stay as they are.
+    private Label _targetLabel;
+    private Label _effectBanner;
+    private uint _effectBannerToken;   // so a stale timer never wipes a newer message
+
     private Vector2 CardSize => BaseCardSize * _cardScale;
     private Vector2 HandCardSize => BaseCardSize * _cardScale * HandCardScale;
 
@@ -215,6 +222,10 @@ public partial class GameManager : Node
         BuildHowToPlay();
         BuildConfirmRows();
         BuildIntermissionOverlays();
+        BuildTableBanners();
+        BuildDebugRow();
+        ConfigureStatusLabel(_p1StatusLabel);
+        ConfigureStatusLabel(_p2StatusLabel);
 
         GetTree().Root.SizeChanged += ApplyResponsiveLayout;
         ApplyResponsiveLayout();
@@ -459,17 +470,31 @@ public partial class GameManager : Node
             hand[flipIndex] = new Card(Math.Abs(card.Value), CardType.Modifier, "", isFlip: true);
         }
 
-        // The stage's effect card takes one of the four slots - but only once that effect both
-        // resolves and reads on the table (CardEffects.Implemented), so a half-built stage plays
-        // as the stage below it rather than dealing a card that does nothing.
+        // The stage's effect card takes one of the four slots.
         //
+        // From stage 4 up, if the card this rung is NAMED for is not built yet, the bot carries a
+        // finished effect instead of nothing. That is what Alexander was seeing as "the AI is
+        // sometimes starting a match without their new modifier card": stages 5, 6 and 8 name a
+        // Trade that pass 3 has still to wire, and stages 9-10 name nothing at all until pass 4
+        // rolls their ruleset - so at those rungs the bot was dealt four ordinary cards and the
+        // stage played exactly like the one below it.
+        //
+        // Still ONE card, dealt once for the whole match and spent when it is played. Hands are
+        // not topped up between rounds: the drama of a stage card is that there is one of it.
+        CardEffect aiEffect = step.AiEffect;
+        if (!CardEffects.IsWired(aiEffect) && run.MatchNumber >= 4)
+        {
+            List<CardEffect> wired = CardEffects.WiredEffects();
+            if (wired.Count > 0) aiEffect = wired[_random.Next(wired.Count)];
+        }
+
         // Never the slot the "+/-" card just took: the recipe is three plain cards (one of them
         // a "+/-") plus the effect, and eating the flip card would quietly undo stage 2.
-        if (step.AiEffect != CardEffect.None && CardEffects.Implemented(step.AiEffect))
+        if (CardEffects.IsWired(aiEffect))
         {
             int effectIndex = _random.Next(hand.Count);
             if (effectIndex == flipIndex) effectIndex = (effectIndex + 1) % hand.Count;
-            hand[effectIndex] = CardEffects.Create(step.AiEffect, _random);
+            hand[effectIndex] = CardEffects.Create(aiEffect, _random);
         }
 
         _player2.ModifierHand = hand;
@@ -481,6 +506,7 @@ public partial class GameManager : Node
         _player1.ResetForNewRound();
         _player2.ResetForNewRound();
         ClearSelections();
+        ClearEffectBanner();
 
         // Clear old cards and lay out fresh empty 3x3 boards
         FillBoardWithSlots(_p1BoardContainer);
@@ -562,6 +588,45 @@ public partial class GameManager : Node
         DealCards();
     }
 
+    // ------------------------------------------------------------------
+    // How good the bot is
+    //
+    // Skill rides on the RANK, so it escalates on the same rhythm as the board colour and the
+    // player feels the opponent change every second rung. See claude/ai-skill-tiers.md.
+    // ------------------------------------------------------------------
+    private enum AiSkill
+    {
+        /// Bronze, Silver (stages 1-4). One card per deal, blind to your hand. The opponent that
+        /// teaches the game: it never surprises you while you are still learning what a +/- does.
+        Basic,
+
+        /// Gold, Ruby (stages 5-8). It plays the BOARD: chains cards while each one improves its
+        /// position, which is what lets it play two minus cards to climb back under a bust.
+        Chains,
+
+        /// Obsidian (stages 9-10). It plays YOU: reads your hand to decide whether its own score
+        /// is actually safe, and weighs the match score when taking a risk.
+        Reads,
+    }
+
+    /// At most this many ordinary cards in one deal, once the bot chains. The cap is the point:
+    /// an unbounded loop empties the hand in a single deal and reads as a machine having a fit.
+    private const int MaxAiChainedCards = 3;
+
+    private AiSkill CurrentAiSkill()
+    {
+        RunData run = _inRun ? RunData.Instance : null;
+        if (run == null) return AiSkill.Basic; // a one-off solo match is never a boss fight
+
+        switch (run.CurrentStep.Rank)
+        {
+            case 4: return AiSkill.Reads;
+            case 3:
+            case 2: return AiSkill.Chains;
+            default: return AiSkill.Basic;
+        }
+    }
+
     private async void ProcessAiTurn()
     {
         if (_aiTurnInProgress || !_player2.CanAct) return; // never run two AI turns at once
@@ -580,12 +645,17 @@ public partial class GameManager : Node
             if (!IsInsideTree()) return;
         }
 
-        //3. Then its own arithmetic.
-        bool playedModifier = TryAiPlayModifierCard();
+        //3. Then its own arithmetic. From Gold up it keeps going while each card strictly improves
+        //   its position - capped, and with the same pause between each, so the player can follow
+        //   a chain rather than watch a hand evaporate.
+        AiSkill skill = CurrentAiSkill();
+        int maxCards = (skill == AiSkill.Basic) ? 1 : MaxAiChainedCards;
 
-        if (playedModifier)
+        for (int played = 0; played < maxCards; played++)
         {
-            //If the AI played a modifier, wait 1.5 seconds to let the player see it
+            if (!TryAiPlayModifierCard(mayChain: skill != AiSkill.Basic)) break;
+
+            //Wait 1.5 seconds to let the player see each card land
             await ToSignal(GetTree().CreateTimer(1.5f), SceneTreeTimer.SignalName.Timeout);
             if (!IsInsideTree()) return;
         }
@@ -614,9 +684,36 @@ public partial class GameManager : Node
 
         int holdThreshold = Math.Max(10, target - 2);
 
+        // Chasing a score the player has already locked in: play to BEAT it, not to match it.
+        // The first build set the threshold to Player 1's score itself, so against a locked 19 the
+        // bot held at 19 - a tie, which is replayed rather than won. That is not a difficulty
+        // setting, it is the bot declining a win it could take, so it is fixed at every tier.
         if (_player1.IsHolding && _player1.CurrentScore <= target)
         {
-            holdThreshold = _player1.CurrentScore;
+            holdThreshold = Math.Min(target, _player1.CurrentScore + 1);
+        }
+        else if (skill == AiSkill.Reads)
+        {
+            // Level 3 weighs the MATCH, not just the round: a bust at one round each hands the
+            // whole match over, while a round down there is nothing left to protect.
+            int mine = _gameState.RoundsWonPlayer2;
+            int yours = _gameState.RoundsWonPlayer1;
+            if (mine < yours) holdThreshold += 1;
+            else if (mine == yours && mine > 0) holdThreshold -= 1;
+
+            // ...and it READS PLAYER 1'S HAND, for the one decision it otherwise gets wrong: is my
+            // score actually safe? Against a player sitting on 15 with a +4 in hand, holding on 18
+            // is not safe, so it keeps pushing for the target.
+            //
+            // This is hidden information, on purpose, and only from Obsidian: the early ladder is
+            // honest and the top of it is meant to feel like the opponent knows what you are
+            // holding. Do not "fix" this - if it reads as cheating in playtesting, delete it.
+            if (!_player1.IsHolding && CanBeatWithOrdinary(_player1, _player2.CurrentScore, target))
+            {
+                holdThreshold = target;
+            }
+
+            holdThreshold = Math.Clamp(holdThreshold, 1, target);
         }
 
         if (_player2.CurrentScore >= holdThreshold || _player2.CurrentScore == target)
@@ -657,19 +754,22 @@ public partial class GameManager : Node
             int theirScore = you.CurrentScore + card.Value;
             if (theirScore <= target) continue; // a poke that does not bust is a wasted card
 
-            // They are holding: the score is locked, they cannot answer, the round is over.
-            bool locked = you.IsHolding;
+            // The old first branch - "they are holding, so they cannot answer" - is gone with the
+            // rule that allowed it: CanPlayEffect now refuses a Push at a holder outright. What is
+            // left are the two honest reasons to spend one.
 
             // I am busted with nothing to fix it: taking them over too makes the round a TIE,
-            // which is replayed rather than lost. Worth a card. (No chaining for me: the bot plays
-            // at most one ordinary card per deal.)
-            bool iAmSunk = me.CurrentScore > target && !CanGetUnder(me, me.CurrentScore, target, mayChain: false);
+            // which is replayed rather than lost. Worth a card - but only if I really am sunk, so
+            // this has to ask the question against the bot's OWN skill: from Gold up it chains,
+            // and a bot that could climb back under with two cards is not sunk at all.
+            bool iAmSunk = me.CurrentScore > target
+                && !CanGetUnder(me, me.CurrentScore, target, mayChain: CurrentAiSkill() != AiSkill.Basic);
 
             // They can still act, and a person may chain as many hand cards as they like - so ask
             // whether EVERYTHING they hold could bring them back, not just their best single card.
             bool theyCannotAnswer = !CanGetUnder(you, theirScore, target, mayChain: true);
 
-            if (locked || iAmSunk || theyCannotAnswer) return PlayEffectCard(me, card);
+            if (iAmSunk || theyCannotAnswer) return PlayEffectCard(me, card);
         }
 
         // Shave - their score is locked below the target, so it can never move again and there is
@@ -697,8 +797,12 @@ public partial class GameManager : Node
     ///
     /// mayChain says whether they get to play more than one: a person can chain hand cards for as
     /// long as they like before ending the turn, while the bot plays at most one per deal - so the
-    /// same question has two different answers depending on who is being asked about.
-    private static bool CanGetUnder(Player player, int score, int target, bool mayChain)
+    /// same question has two different answers depending on who is being asked about. (From Gold
+    /// up the bot chains too, and asks this about itself with mayChain: true.)
+    ///
+    /// `ignore` leaves one card out of the count - the card the caller is about to spend, which is
+    /// no longer available to finish the job it starts.
+    private static bool CanGetUnder(Player player, int score, int target, bool mayChain, Card ignore = null)
     {
         if (score <= target) return true;
 
@@ -706,6 +810,7 @@ public partial class GameManager : Node
         foreach (Card card in player.ModifierHand)
         {
             if (card.Effect != CardEffect.None) continue;
+            if (card == ignore) continue;
 
             int best = card.IsFlip ? -Math.Abs(card.Value) : card.Value;
             if (!mayChain && score + best <= target) return true;
@@ -736,19 +841,34 @@ public partial class GameManager : Node
 
     /// The bot looks at every card in its hand - and, for a "+/-" card, at BOTH orientations -
     /// and takes the play that leaves it as high as possible without going over the target.
-    private bool TryAiPlayModifierCard()
+    ///
+    /// `mayChain` says whether another card may follow this one in the same deal (Gold and up). It
+    /// changes exactly one thing, and it is the thing Alexander caught at the table: a bot on 26
+    /// against a target of 20, holding a -3 and a -4, plays NEITHER, because neither card alone
+    /// gets it under. Allowed to chain it plays the -4, then the -3, and takes the round.
+    private bool TryAiPlayModifierCard(bool mayChain = false)
     {
         int target = _gameState.TargetScore;
         int score = _player2.CurrentScore;
 
-        // How high it wants to be before it stops improving: near the target normally, or level
-        // with Player 1 when it is chasing a score Player 1 has already locked in.
+        // How high it wants to be before it stops improving: near the target normally, or one PAST
+        // Player 1 when it is chasing a score Player 1 has already locked in - drawing level with
+        // a locked score is a tie, which is replayed rather than won.
         int wantAtLeast = Math.Max(10, target - 2);
-        if (_player1.IsHolding && _player1.CurrentScore <= target) wantAtLeast = _player1.CurrentScore;
+        if (_player1.IsHolding && _player1.CurrentScore <= target)
+        {
+            wantAtLeast = Math.Min(target, _player1.CurrentScore + 1);
+        }
 
         Card bestCard = null;
         int bestValue = 0;
         int bestResult = int.MinValue;
+
+        // A partial climb down: still over the target, but closer, and only ever considered when
+        // what is LEFT in the hand can finish the job.
+        Card salvageCard = null;
+        int salvageValue = 0;
+        int salvageResult = int.MaxValue;
 
         foreach (Card card in _player2.ModifierHand)
         {
@@ -762,7 +882,21 @@ public partial class GameManager : Node
             {
                 int result = score + value;
 
-                if (result > target) continue;                        // never play into a bust
+                if (result > target)
+                {
+                    // Never play INTO a bust. Already busted, chaining, and this card leaves it
+                    // strictly closer to legal - that is the one case worth a card, and only if
+                    // the rest of the hand can actually finish the climb down.
+                    if (!mayChain || score <= target || result >= score) continue;
+                    if (!CanGetUnder(_player2, result, target, mayChain: true, ignore: card)) continue;
+                    if (result >= salvageResult) continue;
+
+                    salvageCard = card;
+                    salvageValue = value;
+                    salvageResult = result;
+                    continue;
+                }
+
                 if (score <= target)
                 {
                     if (result <= score) continue;                    // already safe: only play to improve
@@ -774,6 +908,14 @@ public partial class GameManager : Node
                 bestValue = value;
                 bestResult = result;
             }
+        }
+
+        // Landing legal always beats getting closer, so the salvage is only ever the fallback.
+        if (bestCard == null && salvageCard != null)
+        {
+            bestCard = salvageCard;
+            bestValue = salvageValue;
+            bestResult = salvageResult;
         }
 
         if (bestCard == null) return false;
@@ -806,6 +948,23 @@ public partial class GameManager : Node
 
         Player target = (owner == _player1) ? _player2 : _player1;
         return CardEffects.CanPlay(card, owner, target, _gameState.TargetScore);
+    }
+
+    /// WHY this card cannot be played right now, as a sentence, or null when it can be. The
+    /// once-per-deal limit belongs to the DEAL, so it is answered here; every other rule is the
+    /// card's own and is answered by CardEffects.
+    ///
+    /// The same sentence is what the status line shows and what explains the greyed-out Play
+    /// button - a rule the player cannot see is a rule they cannot learn.
+    private string EffectRefusal(Player owner, Card card)
+    {
+        if (card == null || card.Effect == CardEffect.None) return null;
+
+        if (owner == _player1 ? _p1PlayedEffectThisDeal : _p2PlayedEffectThisDeal)
+            return "one card across the table per deal, and you have played yours.";
+
+        Player target = (owner == _player1) ? _player2 : _player1;
+        return CardEffects.RefusalReason(card, owner, target, _gameState.TargetScore);
     }
 
     /// Spends an effect card and applies it. Returns false without touching anything if the play
@@ -841,6 +1000,7 @@ public partial class GameManager : Node
         InstantiateCardView(card, board);
 
         GD.Print(result.Narration);
+        ShowEffectBanner(result.Narration); // the log is not on the table - the player has to SEE it
         UpdateUI();
 
         // A re-opened BOT has to be sent round again: ResolveDeal refuses to move while either
@@ -1032,6 +1192,142 @@ public partial class GameManager : Node
     }
 
     // ------------------------------------------------------------------
+    // The middle panel's two added lines
+    // ------------------------------------------------------------------
+
+    /// The target, and the banner that narrates effect cards. Added around the existing round
+    /// line in code rather than in the two scene files, so both scenes get them from one place.
+    private void BuildTableBanners()
+    {
+        Control column = _roundInfoLabel?.GetParent() as Control;
+        if (column == null) return;
+        int at = _roundInfoLabel.GetIndex();
+
+        // The target is the whole difficulty curve on this ladder - it moves from 20 to 23 to 18
+        // and back up - so it is the one number that cannot be a fragment of a status string.
+        _targetLabel = OverlayUi.MakeLabel(string.Empty, 30);
+        column.AddChild(_targetLabel);
+        column.MoveChild(_targetLabel, at);
+
+        // Kept VISIBLE and empty rather than hidden, so the panel does not jump by a line every
+        // time an effect card resolves.
+        _effectBanner = OverlayUi.MakeLabel(string.Empty, 17, new Color(0.86f, 0.74f, 1.0f));
+        _effectBanner.AutowrapMode = TextServer.AutowrapMode.WordSmart;
+        _effectBanner.CustomMinimumSize = new Vector2(0, 46);
+        column.AddChild(_effectBanner);
+        column.MoveChild(_effectBanner, at + 2);
+    }
+
+    /// A refusal is a sentence now, so the status line has to be able to hold one. The height for
+    /// two lines is reserved up front - a label that grows when a card is picked up would shove
+    /// the board down the screen mid-deal.
+    private void ConfigureStatusLabel(Label label)
+    {
+        if (label == null) return;
+        label.AutowrapMode = TextServer.AutowrapMode.WordSmart;
+        label.HorizontalAlignment = HorizontalAlignment.Center;
+        label.CustomMinimumSize = new Vector2(0, label.GetThemeFontSize("font_size") * 2.6f);
+    }
+
+    private void UpdateTargetLabel()
+    {
+        if (_targetLabel == null) return;
+
+        if (!_isGameStarted)
+        {
+            _targetLabel.Text = string.Empty;
+            _targetLabel.RemoveThemeColorOverride("font_color");
+            return;
+        }
+
+        _targetLabel.Text = $"TARGET  {_gameState.TargetScore}";
+        _targetLabel.RemoveThemeColorOverride("font_color");
+
+        // And when stepping onto this rung MOVED it, say so on the rung where it happens. A target
+        // that changes quietly is the game changing its own rules behind the player's back.
+        RunData run = _inRun ? RunData.Instance : null;
+        if (run != null && run.TargetMovedThisStage)
+        {
+            string direction = run.CurrentTarget > run.PreviousTarget ? "up" : "down";
+            _targetLabel.Text += $"   ({direction} from {run.PreviousTarget})";
+            _targetLabel.AddThemeColorOverride("font_color", OverlayUi.MedalGold);
+        }
+    }
+
+    /// What an effect card just did, on the table. The explanation already existed - CardEffects
+    /// writes one for every card it resolves - but it only ever went to the log, so at the table
+    /// a score simply changed and nothing said why.
+    private async void ShowEffectBanner(string text)
+    {
+        if (_effectBanner == null || string.IsNullOrEmpty(text)) return;
+
+        uint token = ++_effectBannerToken;
+        _effectBanner.Text = text;
+
+        await ToSignal(GetTree().CreateTimer(5.0f), SceneTreeTimer.SignalName.Timeout);
+        if (!IsInsideTree() || token != _effectBannerToken) return; // a newer card owns the line
+
+        _effectBanner.Text = string.Empty;
+    }
+
+    private void ClearEffectBanner()
+    {
+        _effectBannerToken++;
+        if (_effectBanner != null) _effectBanner.Text = string.Empty;
+    }
+
+    // ------------------------------------------------------------------
+    // Debug row
+    //
+    // Behind OS.IsDebugBuild(), so it cannot ship: an exported build never builds these buttons.
+    // Solo scene only - local 2-player has no run to jump around in.
+    // ------------------------------------------------------------------
+    private void BuildDebugRow()
+    {
+        if (!OS.IsDebugBuild()) return;
+        if (_gameModeButton != null) return;
+
+        Control column = _roundInfoLabel?.GetParent() as Control;
+        if (column == null) return;
+
+        HBoxContainer row = new HBoxContainer { Alignment = BoxContainer.AlignmentMode.Center };
+        row.AddThemeConstantOverride("separation", 6);
+        column.AddChild(row);
+
+        row.AddChild(OverlayUi.MakeLabel("debug", 12, OverlayUi.Muted));
+
+        Button back = new Button { Text = "< Stage" };
+        back.Pressed += () => DebugJumpStage(-1);
+        row.AddChild(back);
+
+        Button forward = new Button { Text = "Stage >" };
+        forward.Pressed += () => DebugJumpStage(+1);
+        row.AddChild(forward);
+
+        Button wipe = new Button { Text = "Wipe Save" };
+        wipe.Pressed += () =>
+        {
+            RunData.Instance?.DebugWipeSave();
+            GD.Print("DEBUG: save wiped - collection, deck, medals and run are gone");
+            OnRestartPressed();
+        };
+        row.AddChild(wipe);
+    }
+
+    /// Drops the run one rung either way and walks straight into that match, so a stage can be
+    /// tested without climbing to it.
+    private void DebugJumpStage(int delta)
+    {
+        RunData run = RunData.Instance;
+        if (run == null) return;
+
+        run.DebugJumpToStep(run.StepIndex + delta);
+        run.AutoStartNextMatch = true;
+        GD.Print($"DEBUG: jumped to stage {run.MatchNumber} ({run.CurrentStep.Opponent}, target {run.CurrentTarget})");
+        OnRestartPressed();
+    }
+
+    // ------------------------------------------------------------------
     // The intermission: market, then deck, then the next rung
     // ------------------------------------------------------------------
     private void BuildIntermissionOverlays()
@@ -1097,6 +1393,8 @@ public partial class GameManager : Node
             if (_p2ScoreLabel != null) _p2ScoreLabel.Text = $"Score: {_player2.CurrentScore}";
         }
 
+        UpdateTargetLabel();
+
         if (_p1StatusLabel != null) _p1StatusLabel.Text = StatusFor(_player1);
         if (_p2StatusLabel != null) _p2StatusLabel.Text = StatusFor(_player2);
         ApplyStatusColor(_p1StatusLabel, _player1);
@@ -1110,7 +1408,7 @@ public partial class GameManager : Node
         // While the round-end explanation is up, EndRound owns this label.
         if (_isGameStarted && _roundInfoLabel != null && !_gameState.IsGameOver && !_roundOverPending)
         {
-            _roundInfoLabel.Text = $"{RunHeader()}Round {_gameState.CurrentRound} - Target: {_gameState.TargetScore} | {DealStatusText()}";
+            _roundInfoLabel.Text = $"{RunHeader()}Round {_gameState.CurrentRound} | {DealStatusText()}";
         }
 
         // Both sides act at once: each player's row stays live until THAT player has ended the
@@ -1187,8 +1485,8 @@ public partial class GameManager : Node
         Player other = (player == _player1) ? _player2 : _player1;
         string name = CardEffects.Label(picked.Effect);
 
-        if (!CardEffects.Implemented(picked.Effect)) return $"{name} - not in play yet";
-        if (!CanPlayEffect(player, picked)) return $"{name} - not against them right now";
+        string refusal = EffectRefusal(player, picked);
+        if (refusal != null) return $"{name}: {refusal}";
 
         switch (picked.Effect)
         {

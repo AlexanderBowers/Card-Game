@@ -44,6 +44,20 @@ public static class CardEffects
     public static bool Implemented(CardEffect effect) =>
         effect == CardEffect.None || Wired.Contains(effect);
 
+    /// Implemented() treats an ordinary card as fine, because it is. IsWired asks the narrower
+    /// question the ladder and the market need: is this a finished EFFECT card, something a stage
+    /// can actually be about? None is not.
+    public static bool IsWired(CardEffect effect) => Wired.Contains(effect);
+
+    /// Every finished effect, lowest stage first - what a stage or a market may fall back on when
+    /// the card it wanted is not built yet.
+    public static List<CardEffect> WiredEffects()
+    {
+        List<CardEffect> wired = new List<CardEffect>(Wired);
+        wired.Sort((a, b) => ((int)a).CompareTo((int)b));
+        return wired;
+    }
+
     /// What resolving a card did, for the caller to narrate and act on.
     public readonly struct EffectResult
     {
@@ -78,12 +92,17 @@ public static class CardEffects
             case CardEffect.None:
                 return true;
 
-            // Not at a locked score - unless it busts it. This is what keeps the two cards
-            // distinct: Push THREATENS A BUST, Shave nibbles a locked score. If a Push could
-            // freely drag a held score down, a -3 Push would be a strictly better Shave and
-            // stage 7 would have nothing left to teach.
+            // Never at a locked score, full stop (Alexander, 2026-09-07). The first build let a
+            // Push land on a holder as long as it busted them, on the reasoning that being
+            // unanswerable was the point - which made it a guaranteed round win from any score,
+            // whatever the pusher's own total. A Push only ever lands on a player who is still
+            // drawing, so it is a THREAT they get to answer.
+            //
+            // That leaves Shave as the only card in the game that touches a locked score: one
+            // point, and only below the target. Which is the distinction the two cards were
+            // always meant to carry, now actually enforced.
             case CardEffect.Push:
-                return !opponent.IsHolding || opponent.CurrentScore + card.Value > target;
+                return !opponent.IsHolding;
 
             // Only when both players actually drew this deal. A holding player does not draw
             // (DrawCardFor returns early), so the GDD's "if they aren't holding" falls out for free.
@@ -107,6 +126,59 @@ public static class CardEffects
         }
 
         return false;
+    }
+
+    /// WHY CanPlay said no, in the player's own terms - one sentence, naming the rule rather than
+    /// the state. Returns null when the card is playable.
+    ///
+    /// "Not against them right now" (the first build) tells the player nothing, and this is a game
+    /// whose whole difficulty is knowing what your cards do. The same sentence is what greys the
+    /// Play button out, so the answer is never more than one card-tap away.
+    public static string RefusalReason(Card card, Player self, Player opponent, int target)
+    {
+        if (card == null || self == null || opponent == null) return "No card selected.";
+        if (card.Effect == CardEffect.None) return null;
+        if (!Implemented(card.Effect)) return $"{Label(card.Effect)} is not in play yet.";
+        if (CanPlay(card, self, opponent, target)) return null;
+
+        string them = opponent.PlayerName;
+
+        switch (card.Effect)
+        {
+            case CardEffect.Push:
+                return $"{them} is holding - a Push only lands on a player who is still drawing.";
+
+            case CardEffect.TradeDraw:
+                if (self.IsHolding) return "You are holding, so you did not draw a card this deal.";
+                if (opponent.IsHolding) return $"{them} is holding, so they did not draw a card this deal.";
+                return "Trade Draw needs a card on both sides of the table this deal.";
+
+            case CardEffect.TradeTotals:
+                return $"{them} is holding - a locked score cannot be traded away.";
+
+            case CardEffect.Shave:
+                if (!opponent.IsHolding) return $"{them} is still drawing - Shave only trims a score that is locked in.";
+                return $"{them} is holding on {opponent.CurrentScore}, and Shave only trims a score below the target of {target}.";
+
+            case CardEffect.TradeHands:
+                return $"{them} has no cards left to take.";
+        }
+
+        return $"{Label(card.Effect)} cannot be played right now.";
+    }
+
+    /// One line for the market: what the card does, before the player has ever been hit with it.
+    public static string Description(CardEffect effect)
+    {
+        switch (effect)
+        {
+            case CardEffect.Push: return "Add its number to your opponent's score.\nOnly while they are still drawing.";
+            case CardEffect.TradeDraw: return "Swap the two cards drawn this deal.";
+            case CardEffect.TradeTotals: return "Swap the two current scores.";
+            case CardEffect.Shave: return "Take 1 off an opponent who is holding\nbelow the target. They cannot answer.";
+            case CardEffect.TradeHands: return "Swap the two remaining hands.";
+            default: return string.Empty;
+        }
     }
 
     // ------------------------------------------------------------------

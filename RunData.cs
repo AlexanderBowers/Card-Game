@@ -151,14 +151,17 @@ public partial class RunData : Node
     private readonly Random _random = new Random();
 
     /// What a player owns before they have ever bought anything: enough that the deck screen is a
-    /// real choice from the first visit (15 owned, 12 slotted). Handed out once, not once per run.
+    /// real choice from the first visit (14 owned, 12 slotted). Handed out once, not once per run.
+    ///
+    /// Plain arithmetic only. A "+/-" card is a STORE card (Alexander, 2026-09-07): stage 2 is the
+    /// rung that introduces it - you meet one across the table, then the stage 2 market sells you
+    /// your first one. Handing one out at the start spends that introduction before it happens.
     private static readonly ModifierDef[] StarterCollection =
     {
         new ModifierDef(1), new ModifierDef(1), new ModifierDef(2), new ModifierDef(2),
         new ModifierDef(3), new ModifierDef(3), new ModifierDef(4),
         new ModifierDef(-1), new ModifierDef(-1), new ModifierDef(-2), new ModifierDef(-2),
         new ModifierDef(-3), new ModifierDef(-3), new ModifierDef(-4),
-        new ModifierDef(2, isFlip: true),
     };
 
     public override void _Ready()
@@ -175,6 +178,14 @@ public partial class RunData : Node
     public Rank CurrentRank => Ranks[Mathf.Clamp(CurrentStep.Rank, 0, Ranks.Length - 1)];
     public int MatchNumber => Mathf.Clamp(StepIndex, 0, Ladder.Length - 1) + 1;
     public bool RunComplete => StepIndex >= Ladder.Length;
+
+    /// The target of the rung below this one - what the player has been playing to until now.
+    public int PreviousTarget => StepIndex > 0 ? StepAt(StepIndex - 1).TargetScore : CurrentTarget;
+
+    /// True when stepping onto this rung MOVED the target. Difficulty on this ladder is the
+    /// target moving away from a comfortable 20, so the one thing the table must not do is change
+    /// that number quietly - the player has to be told, on the rung where it happens.
+    public bool TargetMovedThisStage => StepIndex > 0 && CurrentTarget != PreviousTarget;
 
     /// Starts a run at the bottom of the ladder. The LADDER resets; the COLLECTION does not.
     ///
@@ -280,6 +291,35 @@ public partial class RunData : Node
             }
         }
         return unlocked;
+    }
+
+    // ------------------------------------------------------------------
+    // Debug
+    //
+    // Called only from the debug row on the table, which GameManager builds behind
+    // OS.IsDebugBuild() - an exported build has no way to reach either of these.
+    // ------------------------------------------------------------------
+
+    /// Drops the run onto any rung, for testing a stage without climbing to it.
+    public void DebugJumpToStep(int stepIndex)
+    {
+        if (!RunActive) StartNewRun();
+        StepIndex = Mathf.Clamp(stepIndex, 0, Ladder.Length - 1);
+        if (StepIndex > FurthestStep) FurthestStep = StepIndex;
+        Save();
+    }
+
+    /// Back to a brand new player: no collection, no deck, no medals, no run.
+    public void DebugWipeSave()
+    {
+        RunActive = false;
+        Medals = 0;
+        StepIndex = 0;
+        FurthestStep = 0;
+        Inventory.Clear();
+        SideDeck.Clear();
+        if (FileAccess.FileExists(SavePath)) DirAccess.RemoveAbsolute(ProjectSettings.GlobalizePath(SavePath));
+        Save();
     }
 
     public void SpendMedals(int amount) { Medals = Math.Max(0, Medals - amount); Save(); }

@@ -136,13 +136,19 @@ public partial class ShopOverlay : Control
         if (stage <= 1) return new RunData.ModifierDef(RollMagnitude(rng, 3) * (rng.Next(2) == 0 ? 1 : -1));
         if (stage == 2) return new RunData.ModifierDef(RollMagnitude(rng, 3), isFlip: true);
 
-        // Stages that introduce no card of their own - stage 3 (the target moves) and the
-        // randomized rungs until pass 4 rolls their ruleset. A moved target is exactly when a big
-        // swing earns its price; once effects are unlocked, one of those is the better souvenir.
-        if (stage >= 9 && unlocked.Count > 0)
+        // The cleared stage WAS about an effect card, but not one that is built yet - stages 5, 6
+        // and 8 name a Trade that pass 3 has still to wire - or it is a randomized rung that names
+        // none until pass 4. Either way the player has just cleared a rung well up the ladder, and
+        // the first build handed them a plain number for it: Alexander cleared stage 8 and the
+        // Obsidian market opened with arithmetic. Offer another unlocked effect instead, and only
+        // fall back to a big plain card when the player owns no effect stage yet.
+        if (stage >= 4 && unlocked.Count > 0)
         {
             return ToDef(CardEffects.Create(unlocked[rng.Next(unlocked.Count)], rng));
         }
+
+        // Stage 3 is the one that moves the target and introduces no card of its own. A moved
+        // target is exactly when a big swing earns its price.
 
         int magnitude = Math.Max(4, RollMagnitude(rng, Math.Max(4, maxMagnitude)));
         return new RunData.ModifierDef(rng.Next(2) == 0 ? magnitude : -magnitude);
@@ -273,6 +279,18 @@ public partial class ShopOverlay : Control
             column.AddChild(OverlayUi.MakeLabel(
                 offer.Sold ? "bought" : $"{offer.Price} medals",
                 16, offer.Sold ? OverlayUi.Muted : OverlayUi.MedalGold));
+
+            // An effect card is a rule, not a number, and the face only has room for a glyph. The
+            // market is where the player decides whether to spend a match's winnings on one, so
+            // it is the one screen that has to spell the rule out.
+            if (offer.Def.Effect != CardEffect.None)
+            {
+                column.AddChild(OverlayUi.MakeLabel(CardEffects.Label(offer.Def.Effect), 16));
+                Label rule = OverlayUi.MakeLabel(CardEffects.Description(offer.Def.Effect), 13, OverlayUi.Muted);
+                rule.CustomMinimumSize = new Vector2(_cardSize.X * 2.0f, 0);
+                rule.AutowrapMode = TextServer.AutowrapMode.WordSmart;
+                column.AddChild(rule);
+            }
 
             Offer captured = offer;
             Button buy = new Button
