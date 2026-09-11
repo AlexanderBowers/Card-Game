@@ -8,11 +8,31 @@ using System.Collections.Generic;
 public enum CardEffect
 {
     None,          // Value is added to the owner's score (the only kind of card before stage 4)
-    Push,          // stage 4: Value - either sign - is added to the OPPONENT's score
-    TradeDraw,     // stage 5: swap the two cards drawn this deal
-    TradeTotals,   // stage 6: swap the two current scores
-    Shave,         // stage 7: -1 to an opponent who is holding below the target
-    TradeHands,    // stage 8: swap the two remaining hands
+
+    /// RETIRED 2026-09-10. Push added its number to the opponent's score, and it could not be
+    /// balanced: two-signed it was a gift as often as a threat, plus-only it was either
+    /// irrelevant or an execution, and allowed at a locked score it simply won the round. Copy
+    /// took its place at stage 4.
+    ///
+    /// The SLOT stays because these values are written into save files as ints - deleting it
+    /// would renumber every effect below it and turn a saved Shave into something else. Nothing
+    /// creates one any more, and RunData.Load migrates any that were saved.
+    Push,
+
+    /// RETIRED 2026-09-11. Trade Draw swapped the two cards drawn this deal. Copy (stage 4) is
+    /// the same idea without the second half, and two cards that both rewrite the drawn cards is
+    /// one idea wearing two faces - so this one goes and Copy keeps the mechanic.
+    ///
+    /// The SLOT stays for the same reason Push's does: these values are ints in the save file.
+    TradeDraw,
+
+    // The ORDER of the members below is not the ladder's order and never will be again - these
+    // values are ints in the save file, so a card's slot is fixed the day it is written, while
+    // its rung lives in RunData.Ladder and moved once already (2026-09-11).
+    TradeTotals,   // stage 5: swap the two current scores
+    Shave,         // stage 6: -1 to an opponent who is holding below the target
+    TradeHands,    // stage 7: swap the two remaining hands
+    Copy,          // stage 4: YOUR drawn card becomes a copy of theirs - they are untouched
 }
 
 /// <summary>
@@ -33,12 +53,16 @@ public static class CardEffects
     // An effect is only dealt once it both resolves AND reads correctly on the table. Pass 1 wires
     // up none of them: the model, the legality gate and the answering rule land first, so the
     // stage recipes below can name their card without the ladder dealing something inert.
-    // Pass 2 adds Push and Shave here; pass 3 the three Trades.
+    // Pass 2 wired Push and Shave; pass 4 scrapped Push and put Copy in its place at stage 4;
+    // pass 5 wired the two remaining Trades. Stages 4-7 now each deal their own card, and stage 8
+    // is the only rung still without one.
     // ------------------------------------------------------------------
     private static readonly HashSet<CardEffect> Wired = new HashSet<CardEffect>
     {
-        CardEffect.Push,   // pass 2
-        CardEffect.Shave,  // pass 2
+        CardEffect.Copy,        // pass 4 - stage 4, replaced Push
+        CardEffect.TradeTotals, // pass 5 - stage 5
+        CardEffect.Shave,       // pass 2 - stage 6
+        CardEffect.TradeHands,  // pass 5 - stage 7
     };
 
     public static bool Implemented(CardEffect effect) =>
@@ -49,8 +73,9 @@ public static class CardEffects
     /// can actually be about? None is not.
     public static bool IsWired(CardEffect effect) => Wired.Contains(effect);
 
-    /// Every finished effect, lowest stage first - what a stage or a market may fall back on when
-    /// the card it wanted is not built yet.
+    /// Every finished effect, in enum order - what a stage or a market may fall back on when the
+    /// card it wanted is not built yet. The caller filters by rung (GameManager's stage recipe
+    /// drops anything introduced above the current match), because enum order is NOT stage order.
     public static List<CardEffect> WiredEffects()
     {
         List<CardEffect> wired = new List<CardEffect>(Wired);
@@ -92,23 +117,16 @@ public static class CardEffects
             case CardEffect.None:
                 return true;
 
-            // Never at a locked score, full stop (Alexander, 2026-09-07). The first build let a
-            // Push land on a holder as long as it busted them, on the reasoning that being
-            // unanswerable was the point - which made it a guaranteed round win from any score,
-            // whatever the pusher's own total. A Push only ever lands on a player who is still
-            // drawing, so it is a THREAT they get to answer.
+            // Both players must have drawn this deal - there has to be a card of mine to rewrite
+            // and a card of theirs to rewrite it with. A holding player does not draw
+            // (DrawCardFor returns early), so "neither of us is holding" falls out for free.
             //
-            // That leaves Shave as the only card in the game that touches a locked score: one
-            // point, and only below the target. Which is the distinction the two cards were
-            // always meant to carry, now actually enforced.
-            case CardEffect.Push:
-                return !opponent.IsHolding;
-
-            // Only when both players actually drew this deal. A holding player does not draw
-            // (DrawCardFor returns early), so the GDD's "if they aren't holding" falls out for free.
-            case CardEffect.TradeDraw:
+            // And the two cards have to actually DIFFER. Copying a 5 onto a 5 spends the card to
+            // change nothing, which is the one outcome no player ever means to buy.
+            case CardEffect.Copy:
                 return !self.IsHolding && !opponent.IsHolding
-                    && self.LastDrawnCard != null && opponent.LastDrawnCard != null;
+                    && self.LastDrawnCard != null && opponent.LastDrawnCard != null
+                    && self.LastDrawnCard.Value != opponent.LastDrawnCard.Value;
 
             // A held score is locked in. TradeTotals cannot take it.
             case CardEffect.TradeTotals:
@@ -145,13 +163,12 @@ public static class CardEffects
 
         switch (card.Effect)
         {
-            case CardEffect.Push:
-                return $"{them} is holding - a Push only lands on a player who is still drawing.";
-
-            case CardEffect.TradeDraw:
-                if (self.IsHolding) return "You are holding, so you did not draw a card this deal.";
-                if (opponent.IsHolding) return $"{them} is holding, so they did not draw a card this deal.";
-                return "Trade Draw needs a card on both sides of the table this deal.";
+            case CardEffect.Copy:
+                if (self.IsHolding) return "You are holding, so you did not draw a card to replace.";
+                if (opponent.IsHolding) return $"{them} is holding, so they have no card this deal to copy.";
+                if (self.LastDrawnCard == null || opponent.LastDrawnCard == null)
+                    return "Copy needs a freshly drawn card on both sides of the table.";
+                return $"You both drew a {self.LastDrawnCard.Value} - copying it would change nothing.";
 
             case CardEffect.TradeTotals:
                 return $"{them} is holding - a locked score cannot be traded away.";
@@ -172,8 +189,7 @@ public static class CardEffects
     {
         switch (effect)
         {
-            case CardEffect.Push: return "Add its number to your opponent's score.\nOnly while they are still drawing.";
-            case CardEffect.TradeDraw: return "Swap the two cards drawn this deal.";
+            case CardEffect.Copy: return "Your drawn card becomes a copy of theirs.\nTheir card and their score do not change.";
             case CardEffect.TradeTotals: return "Swap the two current scores.";
             case CardEffect.Shave: return "Take 1 off an opponent who is holding\nbelow the target. They cannot answer.";
             case CardEffect.TradeHands: return "Swap the two remaining hands.";
@@ -193,36 +209,24 @@ public static class CardEffects
 
         switch (card.Effect)
         {
-            case CardEffect.Push:
-            {
-                int before = opponent.CurrentScore;
-                opponent.CurrentScore += card.Value;
-                return new EffectResult(true, true,
-                    $"{self.PlayerName} plays Push {Signed(card.Value)} - {opponent.PlayerName}: {before} to {opponent.CurrentScore}");
-            }
-
-            case CardEffect.TradeDraw:
+            case CardEffect.Copy:
             {
                 Card mine = self.LastDrawnCard;
                 Card theirs = opponent.LastDrawnCard;
                 if (mine == null || theirs == null) return EffectResult.Nothing;
 
-                int a = mine.Value;
-                int b = theirs.Value;
+                int wasCard = mine.Value;
+                int nowCard = theirs.Value;
+                int wasScore = self.CurrentScore;
 
-                // Each side keeps the card object it already has on the board and takes the other
-                // one's number; the scores move by the difference. (Refreshing the two card VIEWS
-                // is pass 3 - the model is what the round is scored on.)
-                // Value only: the card VIEWS are built at draw time and are refreshed in pass 3.
-                // Writing CardName here would look like it updated the board, and it does not.
-                mine.Value = b;
-                theirs.Value = a;
+                // MY card takes THEIR card's number. Theirs is not touched, and neither is their
+                // score - which is why this does not re-open their turn below. The card object on
+                // my board is mutated rather than replaced, so the caller can refresh its face.
+                mine.Value = nowCard;
+                self.CurrentScore += nowCard - wasCard;
 
-                self.CurrentScore += b - a;
-                opponent.CurrentScore += a - b;
-
-                return new EffectResult(true, true,
-                    $"{self.PlayerName} plays Trade Draw - the {a} and the {b} change places");
+                return new EffectResult(true, false,
+                    $"{self.PlayerName} plays Copy - their {nowCard} replaces the {wasCard}. {self.PlayerName}: {wasScore} to {self.CurrentScore}");
             }
 
             case CardEffect.TradeTotals:
@@ -266,17 +270,30 @@ public static class CardEffects
     // ------------------------------------------------------------------
     // Presentation helpers
     // ------------------------------------------------------------------
-    /// True when the card belongs in the TARGET's board grid rather than its owner's: the two
-    /// effects that change the other player's score should sit where that score is.
+    /// True when the card belongs in the TARGET's board grid rather than its owner's: a card whose
+    /// whole effect lands on one other number should sit where that number is.
+    ///
+    /// Only Shave. Trade Totals moves BOTH scores, so there is no single side it belongs to, and
+    /// putting it on the target's board would read as "this happened to you" when half of it
+    /// happened to the player who spent the card. It stays with its owner.
     public static bool LandsOnTarget(CardEffect effect) =>
-        effect == CardEffect.Push || effect == CardEffect.Shave;
+        effect == CardEffect.Shave;
+
+    /// True when this effect rewrites a card that is already face-up on a board. Those cards are
+    /// mutated in place rather than replaced, so whoever plays one has to redraw its FACE as well
+    /// - otherwise the board still reads 10 while the score has already been paid at 2.
+    ///
+    /// Only Copy does this now that Trade Draw is gone. It stays a predicate rather than becoming
+    /// `effect == Copy` at the call site because it names the REASON, which is the thing a future
+    /// card would have to share to need the same treatment.
+    public static bool RewritesDrawnCards(CardEffect effect) =>
+        effect == CardEffect.Copy;
 
     public static string Label(CardEffect effect)
     {
         switch (effect)
         {
-            case CardEffect.Push: return "Push";
-            case CardEffect.TradeDraw: return "Trade Draw";
+            case CardEffect.Copy: return "Copy";
             case CardEffect.TradeTotals: return "Trade Totals";
             case CardEffect.Shave: return "Shave";
             case CardEffect.TradeHands: return "Trade Hands";
@@ -288,16 +305,19 @@ public static class CardEffects
     ///
     /// Kept to characters the built-in font actually has: ui_theme.tres sets a font SIZE but no
     /// font, so Godot falls back to Open Sans and anything exotic renders as an empty box. The
-    /// swap arrows "-><-" stand in for one mark until pass 3 draws the real faces; all three
-    /// Trades share them, which is exactly why pass 3 has to draw them properly.
+    /// The two Trades used to share "-><-", which made the stage 5 card and the stage 7 card
+    /// indistinguishable on the table. They still share the swap mark "<>", because they ARE both
+    /// swaps, but each now says WHAT is being swapped: "#" for a score, "[]" for a hand. Four
+    /// characters either way, which is the width the card face was already laid out for.
+    ///
+    /// These are placeholders for drawn faces, not the final art.
     public static string Glyph(CardEffect effect)
     {
         switch (effect)
         {
-            case CardEffect.Push: return "->";        // it goes at THEM
-            case CardEffect.TradeDraw: return "-><-"; // things change places
-            case CardEffect.TradeTotals: return "-><-";
-            case CardEffect.TradeHands: return "-><-";
+            case CardEffect.Copy: return "<-";        // their card comes to ME
+            case CardEffect.TradeTotals: return "#<>#";
+            case CardEffect.TradeHands: return "[<>]";
             case CardEffect.Shave: return "-1";
             default: return string.Empty;
         }
@@ -306,23 +326,21 @@ public static class CardEffects
     // ------------------------------------------------------------------
     // Building one
     // ------------------------------------------------------------------
-    /// A fresh effect card for a stage recipe or a shop offer. Only Push carries a number: 2..5,
-    /// either sign, so it is big enough to bust a careless score without being an instant loss.
+    /// A fresh effect card for a stage recipe or a shop offer.
+    ///
+    /// No effect card carries a rolled number any more. Push was the only one that did, and its
+    /// number was exactly what could not be balanced: the same card was a gift at +2 and an
+    /// execution at +5, and no range made it mean one thing. Copy takes its number from the
+    /// TABLE - whatever the opponent happened to draw - so the card is always the same card and
+    /// the drama comes from the deal instead of from the roll.
     public static Card Create(CardEffect effect, Random rng)
     {
         int value = 0;
-        if (effect == CardEffect.Push)
-        {
-            int magnitude = rng.Next(2, 6);
-            value = rng.Next(2) == 0 ? magnitude : -magnitude;
-        }
-        else if (effect == CardEffect.Shave)
+        if (effect == CardEffect.Shave)
         {
             value = 1; // fixed by the rule, not by the roll
         }
 
         return new Card(value, CardType.Modifier, Label(effect), false, effect);
     }
-
-    private static string Signed(int value) => value > 0 ? "+" + value : value.ToString();
 }

@@ -20,7 +20,7 @@ public partial class Player : RefCounted
     public List<Card> ActiveCardsOnBoard { get; set; } = new List<Card>();
 
     /// The main-deck card this player drew in the CURRENT deal, or null if they did not draw one
-    /// (they are holding). TradeDraw needs to name it exactly, and "the last Main card on the
+    /// (they are holding). Copy needs to name it exactly, and "the last Main card on the
     /// board" is not the same thing once modifiers have been played on top.
     public Card LastDrawnCard { get; set; }
 

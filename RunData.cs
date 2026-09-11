@@ -108,19 +108,29 @@ public partial class RunData : Node
 
     /// The gauntlet. Difficulty escalates by moving the target away from the comfortable 20 - never
     /// by inflating the arithmetic (the 5-to-85 accessibility tenet rules out multiplier math).
+    ///
+    /// EVERY CARD MOVED UP A RUNG on 2026-09-11 (Alexander's call), closing the hole Trade Draw
+    /// left at stage 5. Trade Totals 6 to 5, Shave 7 to 6, Trade Hands 8 to 7 - so every rung from
+    /// 4 to 7 still introduces exactly one new idea, which is the rule the whole ladder is built
+    /// on. STAGE 8 IS NOW THE EMPTY ONE and wants a card of its own; until it has one it deals a
+    /// wired card from further down (DealAiHand), so it plays as a harder version of a rung below.
+    ///
+    /// Note what moved WITH the cards and what did not: the targets belong to the RANKS, not to
+    /// the cards, so Shave is now met at a target of 18 rather than 24. Worth watching at the
+    /// table - Shave punishes holding below the target, and there is less room to hold below 18.
     private static readonly LadderStep[] Ladder =
     {
         //             rank  opponent               target medals  +/-    effect introduced here
         new LadderStep(0, "Bronze Challenger",   20,  3, false),                            // 1 standard rules
         new LadderStep(0, "Bronze Champion",     20,  3, true),                             // 2 the AI gets +/-
         new LadderStep(1, "Silver Challenger",   23,  4, true),                             // 3 the target moves
-        new LadderStep(1, "Silver Champion",     23,  5, true, CardEffect.Push),            // 4
-        new LadderStep(2, "Gold Challenger",     18,  5, true, CardEffect.TradeDraw),       // 5
-        new LadderStep(2, "Gold Champion",       18,  6, true, CardEffect.TradeTotals),     // 6
-        new LadderStep(3, "Ruby Challenger",     24,  6, true, CardEffect.Shave),           // 7
-        new LadderStep(3, "Ruby Champion",       24,  8, true, CardEffect.TradeHands),      // 8
-        new LadderStep(4, "Obsidian Challenger", 22,  8, true),                             // 9  ruleset rolled (pass 4)
-        new LadderStep(4, "Obsidian Champion",   25, 10, true),                             // 10 ruleset rolled (pass 4)
+        new LadderStep(1, "Silver Champion",     23,  5, true, CardEffect.Copy),            // 4
+        new LadderStep(2, "Gold Challenger",     18,  5, true, CardEffect.TradeTotals),     // 5
+        new LadderStep(2, "Gold Champion",       18,  6, true, CardEffect.Shave),           // 6
+        new LadderStep(3, "Ruby Challenger",     24,  6, true, CardEffect.TradeHands),      // 7
+        new LadderStep(3, "Ruby Champion",       24,  8, true),                             // 8  NEW CARD PENDING - see below
+        new LadderStep(4, "Obsidian Challenger", 22,  8, true),                             // 9  ruleset rolled
+        new LadderStep(4, "Obsidian Champion",   25, 10, true),                             // 10 ruleset rolled
     };
 
     public static int LadderLength => Ladder.Length;
@@ -265,11 +275,11 @@ public partial class RunData : Node
     /// Buyable once the player has cleared the stage that introduced it IN THIS RUN.
     ///
     /// Gated on StepIndex, not on FurthestStep: the market stocks "that stage or previous stages",
-    /// and that ladder resets when the run does. Gating on the all-time best put a stage 4 Push in
-    /// the stage 2 market of every run after the first time the player got that far, which read as
-    /// the shop running ahead of the game (Alexander, 2026-09-07).
+    /// and that ladder resets when the run does. Gating on the all-time best put the stage 4 effect
+    /// card in the stage 2 market of every run after the first time the player got that far, which
+    /// read as the shop running ahead of the game (Alexander, 2026-09-07).
     ///
-    /// Cards already OWNED are untouched by this: a Push bought in an earlier run stays in the
+    /// Cards already OWNED are untouched by this: a Copy bought in an earlier run stays in the
     /// collection and can be decked at stage 1. Losing costs the climb, never the cards - you just
     /// cannot buy a NEW one until you have earned your way back to its stage.
     public bool EffectUnlocked(CardEffect effect)
@@ -443,12 +453,29 @@ public partial class RunData : Node
                 // Range-checked: an out-of-range int would otherwise become an undefined effect
                 // that renders blank, can never be played, and sits in a deck slot forever.
                 int rawEffect = card.TryGetValue("effect", out Variant e) ? e.AsInt32() : 0;
-                CardEffect effect = (rawEffect > 0 && rawEffect <= (int)CardEffect.TradeHands)
+                CardEffect effect = (rawEffect > 0 && rawEffect <= (int)CardEffect.Copy)
                     ? (CardEffect)rawEffect
                     : CardEffect.None;
 
-                // An effect card may legitimately be worth 0 (only Push carries a number), so the
-                // "value != 0" guard against junk rows only applies to ordinary modifiers.
+                // Push was scrapped (2026-09-10) and Copy took its stage 4 slot. A Push already in
+                // someone's collection becomes a Copy rather than a card that no longer exists:
+                // it keeps its place in the deck, and what the player owns is still "the stage 4
+                // effect card". Copy carries no number, so the old rolled value goes with it.
+                //
+                // Cards are never TAKEN away - that rule is what makes losing a run survivable,
+                // and it applies just as much when the design changes underneath a card.
+                // Trade Draw was removed the next day (2026-09-11) for overlapping Copy. It was
+                // never wired and so never buyable, which means no honest save can hold one - but
+                // a hand-edited or half-migrated file could, and a card nothing can play is worse
+                // than a card that plays as its replacement.
+                if (effect == CardEffect.Push || effect == CardEffect.TradeDraw)
+                {
+                    effect = CardEffect.Copy;
+                    value = 0;
+                }
+
+                // Effect cards are worth 0 - none of them carries a number - so the "value != 0"
+                // guard against junk rows only applies to ordinary modifiers.
                 if (value != 0 || effect != CardEffect.None) Inventory.Add(new ModifierDef(value, flip, effect));
             }
         }

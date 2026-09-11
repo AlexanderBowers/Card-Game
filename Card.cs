@@ -8,6 +8,14 @@ public enum CardType
 
 public partial class Card : RefCounted
 {
+	private static int _nextId;
+
+	/// A stable handle for this card, unique for the lifetime of the process. The board holds
+	/// VIEWS, not cards, and an effect that rewrites a card in place (Copy, and Trade Draw when it
+	/// lands) has to find the view showing it so the face can be redrawn. Godot is single
+	/// threaded, so a plain counter is enough.
+	public int Id { get; } = ++_nextId;
+
 	/// The value this card is worth right now. For a flip card this changes sign when it is flipped.
 	public int Value { get; set; }
 	public CardType Type { get; set; }
@@ -41,10 +49,11 @@ public partial class Card : RefCounted
 	}
 
 	/// What the card shows: main cards are a bare number, modifiers always carry their sign, and
-	/// an effect card leads with its glyph - the arrow reads before the arithmetic does.
+	/// an effect card is its glyph alone. No effect card carries a rolled number - Push was the
+	/// only one that did, and it was scrapped precisely because that number could not be balanced.
 	public string DisplayText => Effect == CardEffect.None
 		? DefaultName(Value, Type)
-		: CardEffects.Glyph(Effect) + (Effect == CardEffect.Push ? DefaultName(Value, Type) : "");
+		: CardEffects.Glyph(Effect);
 
 	private static string DefaultName(int value, CardType type)
 	{

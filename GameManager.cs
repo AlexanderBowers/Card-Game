@@ -132,8 +132,8 @@ public partial class GameManager : Node
     private static readonly Rect2 RegionDeckBack = new Rect2(140, 190, 140, 190); // cardBack_green4 - face-down deck
     // The Kenney sheet has three hues and red/green/blue are already minus/main/plus, so there is
     // no fourth back to give an effect card: it takes a plain green one and wears EffectTint, or
-    // a Push landing in the opponent's grid would read as a card they just drew. Pass 3 draws the
-    // real effect face in code, the way BuildFlipFace draws the blue-over-red one.
+    // a Shave landing in the opponent's grid would read as a card they just drew. A later pass
+    // draws the real effect face in code, the way BuildFlipFace draws the blue-over-red one.
     private static readonly Rect2 RegionEffect = new Rect2(140, 0, 140, 190);     // cardBack_green1
     private static readonly Color EffectTint = new Color(1.15f, 0.85f, 1.35f);    // violet wash
     private static readonly Rect2 RegionChipWon = new Rect2(0, 194, 68, 68);    // chipGreen_border
@@ -474,10 +474,12 @@ public partial class GameManager : Node
         //
         // From stage 4 up, if the card this rung is NAMED for is not built yet, the bot carries a
         // finished effect instead of nothing. That is what Alexander was seeing as "the AI is
-        // sometimes starting a match without their new modifier card": stages 5, 6 and 8 name a
-        // Trade that pass 3 has still to wire, and stages 9-10 name nothing at all until pass 4
-        // rolls their ruleset - so at those rungs the bot was dealt four ordinary cards and the
-        // stage played exactly like the one below it.
+        // sometimes starting a match without their new modifier card": a rung naming an unwired
+        // Trade was dealt four ordinary cards and played exactly like the rung below it.
+        //
+        // Pass 5 wired both Trades, so stages 4-7 each deal the card they are named for now. What
+        // still falls back is stage 8 (no card designed yet) and stages 9-10 (which name nothing
+        // at all until the randomizer rolls their ruleset).
         //
         // Still ONE card, dealt once for the whole match and spent when it is played. Hands are
         // not topped up between rounds: the drama of a stage card is that there is one of it.
@@ -485,6 +487,14 @@ public partial class GameManager : Node
         if (!CardEffects.IsWired(aiEffect) && run.MatchNumber >= 4)
         {
             List<CardEffect> wired = CardEffects.WiredEffects();
+
+            // Only cards this rung has already EARNED. The ladder's promise is that you meet a
+            // card across the table at its own stage and can buy it one visit later; a fallback
+            // that reached for anything wired would have handed the player a stage 7 Shave at
+            // stage 5, two rungs before the game introduces it and two before the market will
+            // sell it. It became a live risk the moment stage 5 lost its own card.
+            wired.RemoveAll(effect => RunData.StageThatIntroduces(effect) > run.MatchNumber);
+
             if (wired.Count > 0) aiEffect = wired[_random.Next(wired.Count)];
         }
 
@@ -553,7 +563,7 @@ public partial class GameManager : Node
 
         Card drawnMainCard = new Card(cardValue, CardType.Main, cardValue.ToString());
         player.ActiveCardsOnBoard.Add(drawnMainCard);
-        player.LastDrawnCard = drawnMainCard; // TradeDraw needs to name this exact card
+        player.LastDrawnCard = drawnMainCard; // Copy needs to name this exact card
 
         GD.Print($"{player.PlayerName} drew a {cardValue}. Score: {player.CurrentScore}");
 
@@ -612,6 +622,12 @@ public partial class GameManager : Node
     /// At most this many ordinary cards in one deal, once the bot chains. The cap is the point:
     /// an unbounded loop empties the hand in a single deal and reads as a machine having a fit.
     private const int MaxAiChainedCards = 3;
+
+    /// Trade Hands is a bet on the rounds still to come, so the bot only makes it once its OWN
+    /// hand is spent - it must be left holding at most this many cards after the trade card goes.
+    /// Without this floor it fires on the first deal of the match, when both hands are full and
+    /// spending a card to gain one is a swap for its own sake.
+    private const int MaxHandToTradeAway = 1;
 
     private AiSkill CurrentAiSkill()
     {
@@ -732,8 +748,8 @@ public partial class GameManager : Node
     /// Whether the bot reaches across the table this deal, and with what.
     ///
     /// The rule behind every branch: an effect card is only spent when it DECIDES something. A
-    /// Push that the player simply answers with a minus card, or a Shave on a score the bot is
-    /// already beating, is the difference between a boss that feels hard and one that feels cheap.
+    /// Copy spent to move two points, or a Shave on a score the bot is already beating, is the
+    /// difference between a boss that feels hard and one that feels cheap.
     private bool TryAiPlayEffectCard()
     {
         if (_p2PlayedEffectThisDeal) return false;
@@ -742,34 +758,79 @@ public partial class GameManager : Node
         Player me = _player2;
         Player you = _player1;
 
-        // Push - only ever when it takes the round or salvages one.
+        // Trade Totals - I take their score, they take mine. The biggest reach in the game, so it
+        // is asked first: when this and a Copy would both rescue the same deal, taking a whole
+        // legal total off them beats trimming my own draw.
+        //
+        // It is never a free round. CanPlay refuses a holding opponent, so the player it lands on
+        // can always still act - and the answering rule re-opens their turn, handing them my wreck
+        // and a chance to climb out of it. What the card buys is the total, and the total has to be
+        // worth it on its own.
         foreach (Card card in me.ModifierHand)
         {
-            if (card.Effect != CardEffect.Push || !CanPlayEffect(me, card)) continue;
+            if (card.Effect != CardEffect.TradeTotals || !CanPlayEffect(me, card)) continue;
 
-            // Already beyond saving without my help: spending a card here changes nothing, and a
-            // negative Push would actually move them back TOWARDS a legal score.
-            if (you.CurrentScore > target && !CanGetUnder(you, you.CurrentScore, target, mayChain: true)) continue;
+            int theirs = you.CurrentScore;
+            if (theirs > target) continue;           // never take a bust off them
+            if (theirs <= me.CurrentScore) continue; // and never trade down
 
-            int theirScore = you.CurrentScore + card.Value;
-            if (theirScore <= target) continue; // a poke that does not bust is a wasted card
+            if (me.CurrentScore > target)
+            {
+                // Busted, and their legal total ends the problem outright - unless my own hand was
+                // going to get me under anyway, in which case keep this for a deal where nothing
+                // else will. Asked against my own skill, since from Gold up I can chain my way back.
+                if (CanGetUnder(me, me.CurrentScore, target, mayChain: CurrentAiSkill() != AiSkill.Basic)) continue;
+                return PlayEffectCard(me, card);
+            }
 
-            // The old first branch - "they are holding, so they cannot answer" - is gone with the
-            // rule that allowed it: CanPlayEffect now refuses a Push at a holder outright. What is
-            // left are the two honest reasons to spend one.
+            // Not busted. Same bar as Copy below: an effect card is not worth a point or two, so
+            // only spend it when it carries me from "not good enough" to "good enough" in one move.
+            int wantTotalAtLeast = Math.Max(10, target - 2);
+            if (me.CurrentScore >= wantTotalAtLeast) continue;   // already where I need to be
+            if (theirs < wantTotalAtLeast) continue;             // their total does not get me there
+            if (CanBeatWithOrdinary(me, wantTotalAtLeast - 1, target)) continue; // a plain card does
 
-            // I am busted with nothing to fix it: taking them over too makes the round a TIE,
-            // which is replayed rather than lost. Worth a card - but only if I really am sunk, so
-            // this has to ask the question against the bot's OWN skill: from Gold up it chains,
-            // and a bot that could climb back under with two cards is not sunk at all.
-            bool iAmSunk = me.CurrentScore > target
-                && !CanGetUnder(me, me.CurrentScore, target, mayChain: CurrentAiSkill() != AiSkill.Basic);
+            return PlayEffectCard(me, card);
+        }
 
-            // They can still act, and a person may chain as many hand cards as they like - so ask
-            // whether EVERYTHING they hold could bring them back, not just their best single card.
-            bool theyCannotAnswer = !CanGetUnder(you, theirScore, target, mayChain: true);
+        // Copy - my drawn card becomes theirs. Entirely my own business: it never touches their
+        // card, their score or their turn, so the only question is whether it changes MY result.
+        foreach (Card card in me.ModifierHand)
+        {
+            if (card.Effect != CardEffect.Copy || !CanPlayEffect(me, card)) continue;
 
-            if (iAmSunk || theyCannotAnswer) return PlayEffectCard(me, card);
+            // CanPlayEffect has already guaranteed both drawn cards exist and differ.
+            int mine = me.LastDrawnCard.Value;
+            int theirs = you.LastDrawnCard.Value;
+            int newScore = me.CurrentScore - mine + theirs;
+
+            if (newScore > target) continue; // never copy myself into a bust
+
+            if (me.CurrentScore > target)
+            {
+                // Busted, and this card takes the bust away. Spend it - unless an ordinary card
+                // would already have done the job, in which case keep the Copy for a deal where
+                // nothing else will. Asked against my OWN skill, since from Gold up I can chain
+                // two cards to climb back under.
+                if (CanGetUnder(me, me.CurrentScore, target, mayChain: CurrentAiSkill() != AiSkill.Basic)) continue;
+                return PlayEffectCard(me, card);
+            }
+
+            // Not busted. An effect card is not worth a point or two, so only spend it when it
+            // carries me from "not good enough" to "good enough" in one move.
+            if (newScore <= me.CurrentScore) continue;
+
+            int wantAtLeast = Math.Max(10, target - 2);
+            if (_player1.IsHolding && _player1.CurrentScore <= target)
+            {
+                wantAtLeast = Math.Min(target, _player1.CurrentScore + 1);
+            }
+
+            if (me.CurrentScore >= wantAtLeast) continue;   // already where I need to be
+            if (newScore < wantAtLeast) continue;           // and this does not get me there
+            if (CanBeatWithOrdinary(me, wantAtLeast - 1, target)) continue; // a plain card does it
+
+            return PlayEffectCard(me, card);
         }
 
         // Shave - their score is locked below the target, so it can never move again and there is
@@ -789,11 +850,68 @@ public partial class GameManager : Node
             return PlayEffectCard(me, card);
         }
 
+        // Trade Hands - I take everything they are still holding, they take what I have left. Last,
+        // because it decides nothing about THIS deal: it is a bet on the rounds to come, while
+        // every card above it is a bet on the one being played.
+        //
+        // The signal is my own hand being spent, not theirs being good. How many cards someone
+        // holds is visible across any real table, so every tier may count them; what is IN a hand
+        // is hidden information, and pass 3 licensed reading that at Obsidian only. So the Ruby bot
+        // that first carries this card trades on the honest signal - "I have nothing left and they
+        // do" - and the Obsidian bot additionally refuses a trade that would not gain it anything.
+        foreach (Card card in me.ModifierHand)
+        {
+            if (card.Effect != CardEffect.TradeHands || !CanPlayEffect(me, card)) continue;
+            if (me.CurrentScore > target) continue; // fix my own bust before playing for next round
+
+            // Priority 1 in the spec's decision order: if a plain card already takes the round off
+            // a score they have locked in, take the round and keep this.
+            if (you.IsHolding && CanBeatWithOrdinary(me, you.CurrentScore, target)) continue;
+
+            // This card is what empties my hand, so count what is left AFTER it goes.
+            int myRemaining = me.ModifierHand.Count - 1;
+            if (myRemaining > MaxHandToTradeAway) continue;      // my hand is not spent yet
+            if (you.ModifierHand.Count <= myRemaining) continue; // and theirs has to be bigger
+
+            if (CurrentAiSkill() == AiSkill.Reads
+                && HandStrength(you) <= HandStrength(me, ignore: card)) continue;
+
+            return PlayEffectCard(me, card);
+        }
+
         return false;
     }
 
+    /// What a hand is worth, for the one decision that needs to compare two of them.
+    ///
+    /// Deliberately NOT "cards that could be played legally this round": hands last the whole
+    /// match and are never topped up, so a +5 that is dead against 19 is the best card in the hand
+    /// next round. Magnitude is the measure that survives the round. A "+/-" card is worth more
+    /// than its number because it can be played either way up, and an effect card is worth taking
+    /// whatever it happens to be.
+    ///
+    /// `ignore` leaves out the card being spent to make the trade.
+    private static int HandStrength(Player player, Card ignore = null)
+    {
+        int strength = 0;
+        foreach (Card card in player.ModifierHand)
+        {
+            if (card == ignore) continue;
+            if (card.Effect != CardEffect.None)
+            {
+                strength += EffectCardWorth;
+                continue;
+            }
+            strength += Math.Abs(card.Value) + (card.IsFlip ? FlipCardBonus : 0);
+        }
+        return strength;
+    }
+
+    private const int FlipCardBonus = 2;
+    private const int EffectCardWorth = 5;
+
     /// Could this player still get to or under the target with the ordinary cards in their hand?
-    /// Used to ask "would a Push actually stick", so it counts a "+/-" card at its minus face.
+    /// Counts a "+/-" card at its minus face, since that is the orientation that saves a bust.
     ///
     /// mayChain says whether they get to play more than one: a person can chain hand cards for as
     /// long as they like before ending the turn, while the bot plays at most one per deal - so the
@@ -873,7 +991,7 @@ public partial class GameManager : Node
         foreach (Card card in _player2.ModifierHand)
         {
             // Effect cards are chosen by their own logic (pass 2), never scored as a gain to the
-            // bot's own total: a Push -4 is four points off PLAYER 1, and a Shave carries Value 1
+            // bot's own total: Copy takes its number from the table, and a Shave carries Value 1
             // while subtracting.
             if (card.Effect != CardEffect.None) continue;
 
@@ -998,6 +1116,15 @@ public partial class GameManager : Node
         Control board = (boardOwner == _player1) ? _p1BoardContainer : _p2BoardContainer;
         boardOwner.ActiveCardsOnBoard.Add(card);
         InstantiateCardView(card, board);
+
+        // A card that rewrote a drawn card mutated a Card object that is already face-up on a
+        // board. Without this the board still reads 10 while the score has been paid at 2, which
+        // is the one thing a card called Copy cannot afford to get wrong.
+        if (CardEffects.RewritesDrawnCards(card.Effect))
+        {
+            RefreshCardFace(owner.LastDrawnCard, (owner == _player1) ? _p1BoardContainer : _p2BoardContainer);
+            RefreshCardFace(target.LastDrawnCard, (target == _player1) ? _p1BoardContainer : _p2BoardContainer);
+        }
 
         GD.Print(result.Narration);
         ShowEffectBanner(result.Narration); // the log is not on the table - the player has to SEE it
@@ -1490,21 +1617,17 @@ public partial class GameManager : Node
 
         switch (picked.Effect)
         {
-            case CardEffect.Push:
+            case CardEffect.Copy:
             {
-                string sign = picked.Value < 0 ? "-" : "+";
-                return $"{other.PlayerName}: {other.CurrentScore} {sign} {Math.Abs(picked.Value)} = {other.CurrentScore + picked.Value}";
+                int mine = player.LastDrawnCard?.Value ?? 0;
+                int theirs = other.LastDrawnCard?.Value ?? 0;
+                int after = player.CurrentScore - mine + theirs;
+                return $"Your {mine} becomes a {theirs}: {player.CurrentScore} to {after}";
             }
             case CardEffect.Shave:
                 return $"{other.PlayerName}: {other.CurrentScore} - 1 = {other.CurrentScore - 1}";
             case CardEffect.TradeTotals:
                 return $"Trade Totals: {player.CurrentScore} and {other.CurrentScore} change places";
-            case CardEffect.TradeDraw:
-            {
-                int mine = player.LastDrawnCard?.Value ?? 0;
-                int theirs = other.LastDrawnCard?.Value ?? 0;
-                return $"Trade Draw: your {mine} for their {theirs}";
-            }
             case CardEffect.TradeHands:
                 return $"Trade Hands: your {player.ModifierHand.Count - 1} for their {other.ModifierHand.Count}";
         }
@@ -1675,7 +1798,7 @@ public partial class GameManager : Node
         SetSelection(player, null);
 
         // An effect card is not arithmetic on your own score - PlayModifierCard would quietly add
-        // a Push meant for the other player to this one instead.
+        // a Shave's Value of 1 to the score of whoever played it.
         if (card.Effect != CardEffect.None)
         {
             // A refused play puts the card back in the player's hand AND back under their finger,
@@ -1986,6 +2109,7 @@ public partial class GameManager : Node
     {
         TextureRect view = (TextureRect)_cardViewScene.Instantiate();
         view.Texture = MakeAtlas(_cardSheet, RegionFor(card));
+        view.SetMeta("cardId", card.Id); // so RefreshCardFace can find this view again
         ApplyCardSize(view, size);
 
         string text = card.DisplayText; // read from Value, so a flipped card shows its new sign
@@ -2025,6 +2149,44 @@ public partial class GameManager : Node
             };
         }
         return view;
+    }
+
+    /// Redraws the face of a card that is already on a board, after something changed its Value.
+    /// Silent when the card is not on this board - a hand card has no view to redraw, and that is
+    /// not an error.
+    private void RefreshCardFace(Card card, Control board)
+    {
+        TextureRect view = FindCardView(card, board);
+        if (view == null) return;
+
+        view.Texture = MakeAtlas(_cardSheet, RegionFor(card));
+
+        string text = card.DisplayText; // computed from Value, so the new number is already in it
+        foreach (string name in CardLabelNames)
+        {
+            Label label = view.GetNodeOrNull<Label>(name);
+            if (label != null) label.Text = text;
+        }
+    }
+
+    /// The view showing this exact card, or null. Cards live one-per-slot (FillBoardWithSlots),
+    /// so this is a walk of nine slots rather than a search.
+    private TextureRect FindCardView(Card card, Control board)
+    {
+        if (card == null || board == null) return null;
+
+        foreach (Node slot in board.GetChildren())
+        {
+            foreach (Node child in slot.GetChildren())
+            {
+                if (child is TextureRect view && view.HasMeta("cardId")
+                    && view.GetMeta("cardId").AsInt32() == card.Id)
+                {
+                    return view;
+                }
+            }
+        }
+        return null;
     }
 
     private void InstantiateCardView(Card card, Control parentContainer)

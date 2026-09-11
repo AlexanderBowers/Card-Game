@@ -50,8 +50,10 @@ public partial class ShopOverlay : Control
         // a won round off the other player, and it should cost most of a match's winnings.
         switch (def.Effect)
         {
+            // Copy is a bust-saver and nothing else - it never touches the other player, which
+            // is what keeps it the cheapest reach in the game.
+            case CardEffect.Copy: return 10;
             case CardEffect.Shave: return 10;
-            case CardEffect.TradeDraw: return 12;
             case CardEffect.TradeHands: return 14;
             case CardEffect.TradeTotals: return 18;
         }
@@ -67,14 +69,13 @@ public partial class ShopOverlay : Control
             case 5: price = 11; break;
             default: price = 14; break;
         }
-        if (def.Effect == CardEffect.Push) return price + 6; // the number is what it costs, plus the reach
         return def.IsFlip ? price * 2 : price;
     }
 
     /// The stock for one visit.
     ///
     /// Slot one is always the SIGNATURE CARD of the stage just cleared (Alexander's rule): you
-    /// lose two rounds to a Push, you clear the stage, and a Push is waiting on the next screen.
+    /// lose two rounds to a Copy, you clear the stage, and a Copy is waiting on the next screen.
     /// The rest rolls from everything unlocked so far - bigger cards and commoner +/- further up
     /// the ladder, and effects at about a quarter of the stock so the arithmetic deck still grows.
     public static List<RunData.ModifierDef> RollOffers(Random rng, RunData run, int count)
@@ -158,7 +159,7 @@ public partial class ShopOverlay : Control
         new RunData.ModifierDef(card.Value, card.IsFlip, card.Effect);
 
     /// Two offers are the same card when they would play identically. Effect cards collide on the
-    /// effect alone: two Pushes in one market is a thin visit however their numbers differ.
+    /// effect alone: two Copies in one market is a thin visit.
     private static bool IsDuplicate(List<RunData.ModifierDef> offers, RunData.ModifierDef def)
     {
         if (def.Effect != CardEffect.None) return offers.Exists(o => o.Effect == def.Effect);
