@@ -103,7 +103,7 @@ public partial class GameManager : Node
     // base (shrinking the whole UI uniformly) when a screen is too short for the full layout.
     // ------------------------------------------------------------------
     private const int BoardSlots = 9;                       // 3x3 board
-    private const int WinsToTakeMatch = 2;                  // must match GameState.CheckMatchWinner
+    private const int WinsToTakeMatch = GameState.RoundsToWinMatch;  // one chip slot per win needed
     private static readonly Vector2 BaseCardSize = new Vector2(84, 114); // Kenney cards are 140x190
     private const float HandCardScale = 0.8f;
     private const float MinCardScale = 0.6f;
@@ -710,12 +710,19 @@ public partial class GameManager : Node
         }
         else if (skill == AiSkill.Reads)
         {
-            // Level 3 weighs the MATCH, not just the round: a bust at one round each hands the
-            // whole match over, while a round down there is nothing left to protect.
+            // Level 3 weighs the MATCH, not just the round: behind, there is nothing left to
+            // protect and it pushes; level on the DECIDER, a bust loses everything and it plays
+            // safe.
+            //
+            // "The decider" was written as `mine == yours && mine > 0`, which was only ever
+            // correct because the match was best of three - 1-1 was the only level score that
+            // could end it. At best of five that test fires at 1-1 and at 2-2, and 1-1 is an
+            // ordinary mid-match round where playing safe just loses ground. The rule it was
+            // always trying to state is: level, with either side one win from the match.
             int mine = _gameState.RoundsWonPlayer2;
             int yours = _gameState.RoundsWonPlayer1;
             if (mine < yours) holdThreshold += 1;
-            else if (mine == yours && mine > 0) holdThreshold -= 1;
+            else if (mine == yours && mine == GameState.RoundsToWinMatch - 1) holdThreshold -= 1;
 
             // ...and it READS PLAYER 1'S HAND, for the one decision it otherwise gets wrong: is my
             // score actually safe? Against a player sitting on 15 with a +4 in hand, holding on 18
@@ -2456,10 +2463,10 @@ public partial class GameManager : Node
     // overlay with the rules; it can be opened at any time and changes no game state. In mirrored
     // 2-player mode a "Flip for other player" button turns the panel upside down for Player 2.
     // ------------------------------------------------------------------
-    private const string HowToPlayText =
+    private static readonly string HowToPlayText =
         "GOAL\n" +
         "Get as close to the target score (20) as you can without going over. " +
-        "Win 2 rounds to win the match.\n\n" +
+        $"Win {GameState.RoundsToWinMatch} rounds to win the match.\n\n" +
         "A ROUND\n" +
         "A round is a series of deals. Each deal, every player who isn't holding is dealt one card " +
         "(worth 1 to 10) at the same time. Both players then decide - at the same time, without waiting " +
