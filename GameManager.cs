@@ -281,17 +281,56 @@ public partial class GameManager : Node
     private static readonly Vector2 NeedPortrait = new Vector2(470, 1520);
     private static readonly Vector2 NeedLandscape = new Vector2(1040, 690);
 
+    /// The GameUI MarginContainer's margin, per side, as both .tscn files set it. The estimate
+    /// above is of MainLayout's contents; this is the frame around them.
+    private const float GameUiMargin = 20f;
+
+    // ------------------------------------------------------------------
+    // ...and the correction, because the estimate above is a GUESS.
+    //
+    // Those two constants are a hand-maintained tally of everything in the portrait/landscape
+    // column, and they have now been wrong three times: they were bumped for the confirm row, for
+    // the How to Play button, and they were STILL short - local 2-player in portrait cropped both
+    // players' End Turn / Hold rows off the top and bottom of the phone (Alexander, 2026-09-13).
+    // That is the mechanism working correctly on a wrong number, and it will go wrong again the
+    // next time anyone adds a row, silently, on a device nobody is testing on.
+    //
+    // So the estimate is now only the FIRST guess. After the layout settles, the container is
+    // asked what it actually needs - GetCombinedMinimumSize is exact, where the tally is not - and
+    // if it does not fit, the base grows and the whole UI scales down until it does.
+    //
+    // Monotonic on purpose: _fitScale only ever GROWS within a given window size, so it converges
+    // in a pass or two and cannot oscillate. A real window resize or a rotation resets it, so the
+    // UI grows back when there is room again - the one thing a grow-only correction would
+    // otherwise get wrong.
+    // ------------------------------------------------------------------
+    private float _fitScale = 1f;
+    private int _fitAttempts;
+    private bool _fitCheckPending;
+    private Vector2 _fitWindow = Vector2.Zero;
+    private const int MaxFitAttempts = 4;
+
     private void ApplyResponsiveLayout()
     {
         Window root = GetTree().Root;
         Vector2 win = root.Size;
         bool portrait = win.Y > win.X;
 
+        // A genuine resize or rotation: start the correction over, so the UI can grow back into a
+        // window that has room for it. Re-running ourselves from EnsureLayoutFits changes
+        // ContentScaleSize, not the window, so this does not fire on our own passes.
+        if (win != _fitWindow)
+        {
+            _fitWindow = win;
+            _fitScale = 1f;
+            _fitAttempts = 0;
+        }
+
         // What the viewport would be at the plain 720px base, and how much bigger it must be.
         float baseScale = Mathf.Min(win.X / BaseSide, win.Y / BaseSide);
         Vector2 baseViewport = win / Mathf.Max(baseScale, 0.001f);
         Vector2 need = portrait ? NeedPortrait : NeedLandscape;
-        float k = Mathf.Max(1f, Mathf.Max(need.X / baseViewport.X, need.Y / baseViewport.Y));
+        float k = Mathf.Max(1f, Mathf.Max(need.X / baseViewport.X, need.Y / baseViewport.Y)) * _fitScale;
         Vector2I contentSize = (Vector2I)(new Vector2(BaseSide, BaseSide) * k).Round();
         if (root.ContentScaleSize != contentSize) root.ContentScaleSize = contentSize; // re-fires SizeChanged once
 
@@ -326,6 +365,57 @@ public partial class GameManager : Node
         if (_mainDeckPosition != null) _mainDeckPosition.CustomMinimumSize = CardSize;
         RefreshHandUI();
         CallDeferred(MethodName.UpdateRotatorSize);
+        EnsureLayoutFits();
+    }
+
+    /// Asks the layout what it ACTUALLY needs, and shrinks the whole UI until it fits. This is the
+    /// backstop behind the Need* estimate; the reasoning is with those constants.
+    ///
+    /// A BoxContainer cannot go below the sum of its children's minimums - handed less room than
+    /// that it overflows its own rect and the ends are simply cut off by the screen, which is
+    /// exactly what portrait 2-player was doing. Nothing warns about it, so this looks instead.
+    private async void EnsureLayoutFits()
+    {
+        // Setting ContentScaleSize re-fires SizeChanged, so ApplyResponsiveLayout re-enters and
+        // calls this again while the first call is still waiting on its frames. Without the latch
+        // each of them would apply the SAME overflow and the UI would end up several times
+        // smaller than it needs to be.
+        if (_fitCheckPending || _mainLayout == null || _fitAttempts >= MaxFitAttempts) return;
+        _fitCheckPending = true;
+
+        try
+        {
+            // Two frames, not one. UpdateRotatorSize is deferred to the end of THIS frame and
+            // writes P2Holder's minimum size; a container's combined minimum is only correct on
+            // the pass after the one that changed it. Measuring earlier measures the old layout.
+            for (int i = 0; i < 2; i++)
+            {
+                await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+                if (!IsInsideTree() || _mainLayout == null) return; // scene restarted mid-wait
+            }
+
+            Vector2 vp = GetViewport().GetVisibleRect().Size;
+            if (vp.X <= 1f || vp.Y <= 1f) return;
+
+            Vector2 needed = _mainLayout.GetCombinedMinimumSize() + new Vector2(GameUiMargin, GameUiMargin) * 2f;
+            float overflow = Mathf.Max(needed.X / vp.X, needed.Y / vp.Y);
+            if (overflow <= 1.002f) return; // it fits, within a rounding hair
+
+            // The 1% of slack is what makes this converge in ONE step rather than creeping up on
+            // the answer a fraction at a time and spending all four attempts getting there.
+            _fitAttempts++;
+            _fitScale *= overflow * 1.01f;
+            GD.Print($"Layout did not fit ({needed.X:0}x{needed.Y:0} into {vp.X:0}x{vp.Y:0}) - "
+                   + $"scaling the UI down by {_fitScale:0.000}");
+        }
+        finally
+        {
+            _fitCheckPending = false;
+        }
+
+        // Only reached when the measurement above found an overflow - every other path returns.
+        // Outside the finally so the latch is already clear and the new pass may measure again.
+        ApplyResponsiveLayout();
     }
 
     private bool IsMirrored => _mirrorToggle != null && _mirrorToggle.ButtonPressed;
@@ -2834,13 +2924,23 @@ public partial class GameManager : Node
     private Button _newRunButton;
     private bool _newRunArmed; // "New Run" over an unfinished climb asks a second time
 
+    /// Opaque, and a deeper shade of the table's own felt so the menu still reads as this game.
+    private static readonly Color MenuBackdrop = new Color(0.04f, 0.10f, 0.07f);
+
     private void BuildStartMenu()
     {
         _startMenuOverlay = new Control { Visible = false, MouseFilter = Control.MouseFilterEnum.Stop };
         AddChild(_startMenuOverlay);
         _startMenuOverlay.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
 
-        OverlayUi.AddDim(_startMenuOverlay);
+        // OPAQUE, not OverlayUi.AddDim (Alexander, 2026-09-13). Every other overlay in the game
+        // sits on top of a live table and wants it showing through - that is the point of the dim,
+        // and why the intermission is an overlay rather than a scene change. This one is the screen
+        // BEFORE there is a table, and a dealt hand behind it says a game is already running.
+        ColorRect backdrop = new ColorRect { Color = MenuBackdrop, MouseFilter = Control.MouseFilterEnum.Ignore };
+        _startMenuOverlay.AddChild(backdrop);
+        backdrop.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
+
         _startMenuBox = OverlayUi.AddPanel(_startMenuOverlay, contentMargin: 28, separation: 10);
     }
 
@@ -2851,8 +2951,8 @@ public partial class GameManager : Node
         FillStartMenu();
         _startMenuOverlay.Visible = true;
 
-        // The menu replaces them both. Leaving a live Start button and a mode dropdown sitting
-        // under the dim is two ways to do one thing, and the dropdown's answer is not the menu's.
+        // The menu replaces them both, and they are behind an opaque backdrop anyway. Leaving them
+        // live is two ways to do one thing, and the dropdown's answer is not the menu's.
         if (_startButton != null) _startButton.Visible = false;
         if (_gameModeButton != null) _gameModeButton.Visible = false;
     }
@@ -2896,9 +2996,7 @@ public partial class GameManager : Node
         // tap is the cheapest confirmation there is and it costs no second overlay.
         _newRunButton = AddMenuButton(
             runInProgress ? "New Run" : "Start a Run",
-            runInProgress
-                ? "Gives up the climb above. Your cards and medals stay."
-                : $"{RunData.LadderLength} matches, best of {GameState.RoundsToWinMatch * 2 - 1}, a new card most rungs.",
+            runInProgress ? "Gives up the climb above. Your cards and medals stay." : null,
             () =>
             {
                 if (runInProgress && !_newRunArmed)
@@ -2910,9 +3008,10 @@ public partial class GameManager : Node
                 MenuStartRun(fresh: true);
             });
 
-        AddMenuButton("Local 2-Player",
-                      "Two players, one device. No run, no medals, target 20.",
-                      MenuStartLocal2Player);
+        // No explanatory line under either of the two plain modes (Alexander, 2026-09-13): a menu
+        // that describes its own buttons is a menu that does not trust them. The one note that
+        // stays is the New Run warning, which is not a description - it is a consequence.
+        AddMenuButton("Local 2-Player", null, MenuStartLocal2Player);
 
         _startMenuBox.AddChild(MenuSpacer());
         AddMenuButton("How to Play", null, ShowHowToPlay);
