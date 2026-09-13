@@ -308,6 +308,7 @@ public partial class GameManager : Node
     private int _fitAttempts;
     private bool _fitCheckPending;
     private Vector2 _fitWindow = Vector2.Zero;
+    private Vector2 _fitLastNeeded = Vector2.Zero;
     private const int MaxFitAttempts = 4;
 
     private void ApplyResponsiveLayout()
@@ -324,6 +325,7 @@ public partial class GameManager : Node
             _fitWindow = win;
             _fitScale = 1f;
             _fitAttempts = 0;
+            _fitLastNeeded = Vector2.Zero;
         }
 
         // What the viewport would be at the plain 720px base, and how much bigger it must be.
@@ -380,7 +382,7 @@ public partial class GameManager : Node
         // calls this again while the first call is still waiting on its frames. Without the latch
         // each of them would apply the SAME overflow and the UI would end up several times
         // smaller than it needs to be.
-        if (_fitCheckPending || _mainLayout == null || _fitAttempts >= MaxFitAttempts) return;
+        if (_fitCheckPending || _mainLayout == null) return;
         _fitCheckPending = true;
 
         try
@@ -398,8 +400,27 @@ public partial class GameManager : Node
             if (vp.X <= 1f || vp.Y <= 1f) return;
 
             Vector2 needed = _mainLayout.GetCombinedMinimumSize() + new Vector2(GameUiMargin, GameUiMargin) * 2f;
+
+            // A high-water mark, and the thing that tells a LOOP apart from real GROWTH. A loop
+            // that will not settle re-measures the same content over and over; content that has
+            // genuinely grown measures bigger than anything seen before, and deserves a fresh
+            // budget of attempts rather than being refused because an earlier fit spent them.
+            //
+            // This is not hypothetical - it is the bug. The first check runs from _Ready, and with
+            // the start menu up the hands are not dealt until the player taps a mode seconds
+            // later. The table measured on an EMPTY layout, two hand rows short, and nothing
+            // re-measured once the cards landed (Alexander, 2026-09-13: toggling the mirror, which
+            // re-runs the layout, was what fixed it by hand).
+            if (needed.X > _fitLastNeeded.X + 1f || needed.Y > _fitLastNeeded.Y + 1f)
+            {
+                _fitAttempts = 0;
+                _fitLastNeeded = new Vector2(Mathf.Max(_fitLastNeeded.X, needed.X),
+                                             Mathf.Max(_fitLastNeeded.Y, needed.Y));
+            }
+
             float overflow = Mathf.Max(needed.X / vp.X, needed.Y / vp.Y);
-            if (overflow <= 1.002f) return; // it fits, within a rounding hair
+            if (overflow <= 1.002f) return;          // it fits, within a rounding hair
+            if (_fitAttempts >= MaxFitAttempts) return; // ...and this one really is a loop
 
             // The 1% of slack is what makes this converge in ONE step rather than creeping up on
             // the answer a fraction at a time and spending all four attempts getting there.
@@ -1860,6 +1881,12 @@ public partial class GameManager : Node
 
         RefreshHandUI();
         CallDeferred(MethodName.UpdateRotatorSize);
+
+        // The layout is only as big as what is IN it, and what is in it changes here - the hands
+        // are dealt, and the confirm row (four buttons) swaps in for End Turn / Hold (two). A
+        // check that only ran on resize measured the table before any of that existed. The latch
+        // inside makes this cheap: at most one measurement is ever in flight.
+        EnsureLayoutFits();
     }
 
     /// What the middle panel says about the current deal.
