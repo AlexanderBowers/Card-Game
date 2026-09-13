@@ -56,6 +56,14 @@ public partial class ShopOverlay : Control
             case CardEffect.Shave: return 10;
             case CardEffect.TradeHands: return 14;
             case CardEffect.TradeTotals: return 18;
+            // Recall is the only effect in the game that is never a dead card: every other one
+            // needs something true of the table, this one needs one card in your own spent pile,
+            // which is true from the second deal of a match onward. A card that always works
+            // should not be the cheapest thing in the shop, whatever its ceiling.
+            case CardEffect.Recall: return 12;
+            // The only card that takes something away permanently. At best of five with a
+            // match-long four-card hand, destroying one is a quarter of the opponent's match.
+            case CardEffect.Veto: return 16;
         }
 
         int magnitude = Math.Abs(def.Value);

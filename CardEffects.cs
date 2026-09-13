@@ -33,6 +33,8 @@ public enum CardEffect
     Shave,         // stage 6: -1 to an opponent who is holding below the target
     TradeHands,    // stage 7: swap the two remaining hands
     Copy,          // stage 4: YOUR drawn card becomes a copy of theirs - they are untouched
+    Recall,        // stage 8: take one card you already spent this match back into your hand
+    Veto,          // stage 9: destroy the last hand card they played; their score reverts
 }
 
 /// <summary>
@@ -54,8 +56,9 @@ public static class CardEffects
     // up none of them: the model, the legality gate and the answering rule land first, so the
     // stage recipes below can name their card without the ladder dealing something inert.
     // Pass 2 wired Push and Shave; pass 4 scrapped Push and put Copy in its place at stage 4;
-    // pass 5 wired the two remaining Trades. Stages 4-7 now each deal their own card, and stage 8
-    // is the only rung still without one.
+    // pass 5 wired the two remaining Trades; pass 6 added Recall and pass 7 Veto. Stages 4-9 now
+    // each deal their own card, so every rung of the ladder below the finale teaches exactly one
+    // new thing - which was the ladder's whole promise. Stage 10 is the randomised boss rung.
     // ------------------------------------------------------------------
     private static readonly HashSet<CardEffect> Wired = new HashSet<CardEffect>
     {
@@ -63,7 +66,24 @@ public static class CardEffects
         CardEffect.TradeTotals, // pass 5 - stage 5
         CardEffect.Shave,       // pass 2 - stage 6
         CardEffect.TradeHands,  // pass 5 - stage 7
+        CardEffect.Recall,      // pass 6 - stage 8
+        // Pass 7. The un-hold this card needs is EffectResult.ReleasesHold, which pass 6 laid down
+        // and PlayEffectCard already honours, so turning Veto on really was the one line it said
+        // it would be. Every rule landed a pass before the card went live - the pass 1 pattern.
+        CardEffect.Veto,        // pass 7 - stage 9
     };
+
+    /// THE INVARIANT: no effect card may be the target of another effect card.
+    ///
+    /// Recall returns plain modifiers only and Veto destroys plain modifiers only, and they need
+    /// it for different reasons that both land here. Recall: bringing back a Trade Totals means
+    /// playing the game's dearest card twice in one match, and bringing back a Recall is a loop.
+    /// Veto: a vetoed Trade Hands cannot be undone - the hands have already swapped and cards may
+    /// have been played out of the swapped hand, so there is no state left to restore.
+    ///
+    /// Stated once, here, so that a sixth card does not have to be checked against the other five.
+    public static bool IsPlainModifier(Card card) =>
+        card != null && card.Type == CardType.Modifier && card.Effect == CardEffect.None;
 
     public static bool Implemented(CardEffect effect) =>
         effect == CardEffect.None || Wired.Contains(effect);
@@ -91,12 +111,22 @@ public static class CardEffects
         /// for this deal. GameManager still refuses to re-open a player who is HOLDING - which is
         /// exactly the state Shave exists to punish.
         public readonly bool ReopensTarget;
+        /// Veto only. ReopensTarget clears HasEndedTurn; this additionally clears IsHolding, which
+        /// no other card in the game does. Separate flags because they are separate claims: every
+        /// effect that touches the target re-opens their turn, and exactly one un-locks a score
+        /// that was already committed.
+        ///
+        /// Neither flag ever deals a card. A re-opened player may play a hand card, hold, or end
+        /// the turn - nothing else. Main-deck cards come from DealCards and nowhere else, and an
+        /// effect that handed one out would give a free draw with no bust risk taken to earn it.
+        public readonly bool ReleasesHold;
         public readonly string Narration;
 
-        public EffectResult(bool applied, bool reopensTarget, string narration)
+        public EffectResult(bool applied, bool reopensTarget, string narration, bool releasesHold = false)
         {
             Applied = applied;
             ReopensTarget = reopensTarget;
+            ReleasesHold = releasesHold;
             Narration = narration;
         }
 
@@ -141,6 +171,22 @@ public static class CardEffects
             // (take theirs, give nothing). What has to be true is that there is something to take.
             case CardEffect.TradeHands:
                 return opponent.ModifierHand.Count > 0;
+
+            // Only my own spent pile matters. Nothing about the target, the scores or who is
+            // holding - Recall is the one effect that never reaches across the table at all.
+            // Dead on the first deal of a match and live from the second onward, forever.
+            case CardEffect.Recall:
+                return self.SpentCards.Exists(IsPlainModifier);
+
+            // They must have played a card THIS DEAL. A player who has been holding for a deal or
+            // two has played nothing, so Veto is dead against them - the card has a one-deal
+            // reaction window and no extra rule is needed to give it one.
+            //
+            // Note what is deliberately absent: any test on opponent.IsHolding. Veto is legal
+            // against a holder and un-locks them (Alexander, 2026-09-13) - do NOT "fix" this to
+            // match TradeTotals. The card being destroyed is what pays for the un-hold.
+            case CardEffect.Veto:
+                return IsPlainModifier(opponent.LastPlayedModifier);
         }
 
         return false;
@@ -179,6 +225,14 @@ public static class CardEffects
 
             case CardEffect.TradeHands:
                 return $"{them} has no cards left to take.";
+
+            case CardEffect.Recall:
+                return "You have not spent a card yet this match.";
+
+            // Only PlayModifierCard sets LastPlayedModifier and it is never called for an effect
+            // card, so "they played an effect card" cannot reach here - there is one real reason.
+            case CardEffect.Veto:
+                return $"{them} has not played a card this deal.";
         }
 
         return $"{Label(card.Effect)} cannot be played right now.";
@@ -189,10 +243,12 @@ public static class CardEffects
     {
         switch (effect)
         {
-            case CardEffect.Copy: return "Your drawn card becomes a copy of theirs.\nTheir card and their score do not change.";
+            case CardEffect.Copy: return "Your drawn card becomes a copy of theirs.";
             case CardEffect.TradeTotals: return "Swap the two current scores.";
             case CardEffect.Shave: return "Take 1 off an opponent who is holding\nbelow the target. They cannot answer.";
             case CardEffect.TradeHands: return "Swap the two remaining hands.";
+            case CardEffect.Recall: return "Take back a card you already spent.\nYou can play it from the next deal.";
+            case CardEffect.Veto: return "Destroy the last hand card they played.\nTheir score reverts and their turn re-opens.";
             default: return string.Empty;
         }
     }
@@ -203,7 +259,13 @@ public static class CardEffects
     // Assumes CanPlay already said yes and the card has already been removed from its owner's
     // hand. Mutates the two players and reports what happened; the caller animates and narrates.
     // ------------------------------------------------------------------
-    public static EffectResult Resolve(Card card, Player self, Player opponent, int target)
+    public static EffectResult Resolve(Card card, Player self, Player opponent, int target) =>
+        Resolve(card, self, opponent, target, null);
+
+    /// `chosen` is only read by Recall, which is the one effect whose outcome the OWNER picks
+    /// rather than the board deciding. An overload rather than a field on the class: the other
+    /// five effects stay pure functions of the two players, which is what makes them testable.
+    public static EffectResult Resolve(Card card, Player self, Player opponent, int target, Card chosen)
     {
         if (card == null || self == null || opponent == null) return EffectResult.Nothing;
 
@@ -262,6 +324,47 @@ public static class CardEffects
                 return new EffectResult(true, true,
                     $"{self.PlayerName} plays Trade Hands - takes {self.ModifierHand.Count}, gives {opponent.ModifierHand.Count}");
             }
+
+            case CardEffect.Recall:
+            {
+                // The caller picks which card comes back (the owner through an overlay, the bot
+                // through PickRecallTarget). Refusing a null rather than silently grabbing the
+                // most recent one: "whichever card it felt like" is the outcome no player means
+                // to buy, and it would hide a caller that forgot to ask.
+                if (!IsPlainModifier(chosen) || !self.SpentCards.Contains(chosen)) return EffectResult.Nothing;
+
+                self.SpentCards.Remove(chosen);
+                self.ModifierHand.Add(chosen);
+
+                // The score does NOT move. The card was already paid for when it was first played
+                // and its points are still on the board; Recall returns the card, not the points.
+                // The caller locks it out of this deal - see GameManager's recalled-card lock.
+                return new EffectResult(true, false,
+                    $"{self.PlayerName} plays Recall - takes back a {(chosen.Value > 0 ? "+" : "")}{chosen.Value}");
+            }
+
+            case CardEffect.Veto:
+            {
+                Card theirs = opponent.LastPlayedModifier;
+                if (!IsPlainModifier(theirs)) return EffectResult.Nothing;
+
+                int before = opponent.CurrentScore;
+                opponent.CurrentScore -= theirs.Value;
+                opponent.ActiveCardsOnBoard.Remove(theirs);
+                opponent.LastPlayedModifier = null;
+
+                // Destroyed, not returned - and deliberately NOT added to SpentCards either, so a
+                // Recall cannot bring back a card that a Veto burned. Returning it to their hand
+                // would let them replay it the same deal and Veto would net to zero, which is the
+                // whole reason this card is a destruction rather than an undo.
+                bool wasHolding = opponent.IsHolding;
+
+                return new EffectResult(true, true,
+                    $"{self.PlayerName} plays Veto - destroys {opponent.PlayerName}'s {(theirs.Value > 0 ? "+" : "")}{theirs.Value}. " +
+                    $"{opponent.PlayerName}: {before} back to {opponent.CurrentScore}" +
+                    (wasHolding ? " - and they are no longer holding" : ""),
+                    releasesHold: true);
+            }
         }
 
         return EffectResult.Nothing;
@@ -276,8 +379,11 @@ public static class CardEffects
     /// Only Shave. Trade Totals moves BOTH scores, so there is no single side it belongs to, and
     /// putting it on the target's board would read as "this happened to you" when half of it
     /// happened to the player who spent the card. It stays with its owner.
+    ///
+    /// Veto joins it: the card that changes is one already sitting in the OPPONENT'S grid, so that
+    /// is where the animation has to happen. Recall does not - it touches only its owner's hand.
     public static bool LandsOnTarget(CardEffect effect) =>
-        effect == CardEffect.Shave;
+        effect == CardEffect.Shave || effect == CardEffect.Veto;
 
     /// True when this effect rewrites a card that is already face-up on a board. Those cards are
     /// mutated in place rather than replaced, so whoever plays one has to redraw its FACE as well
@@ -297,6 +403,8 @@ public static class CardEffects
             case CardEffect.TradeTotals: return "Trade Totals";
             case CardEffect.Shave: return "Shave";
             case CardEffect.TradeHands: return "Trade Hands";
+            case CardEffect.Recall: return "Recall";
+            case CardEffect.Veto: return "Veto";
             default: return "Modifier";
         }
     }
@@ -319,6 +427,8 @@ public static class CardEffects
             case CardEffect.TradeTotals: return "#<>#";
             case CardEffect.TradeHands: return "[<>]";
             case CardEffect.Shave: return "-1";
+            case CardEffect.Recall: return "[<-]";   // a card comes back INTO the hand
+            case CardEffect.Veto: return "[X]";      // a hand card, cancelled
             default: return string.Empty;
         }
     }

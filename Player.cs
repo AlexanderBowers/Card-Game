@@ -24,6 +24,19 @@ public partial class Player : RefCounted
     /// board" is not the same thing once modifiers have been played on top.
     public Card LastDrawnCard { get; set; }
 
+    /// The modifier this player most recently played in the CURRENT deal, or null. Veto names
+    /// exactly this card, and "the last card on the board" is not the same thing - the board keeps
+    /// every card played all round, and Veto only reaches into the deal being played.
+    public Card LastPlayedModifier { get; set; }
+
+    /// Every plain modifier this player has spent THIS MATCH. Recall draws from here.
+    ///
+    /// Deliberately NOT cleared by ResetForNewRound: ActiveCardsOnBoard is per-round and is wiped
+    /// between rounds, this is per-match and is wiped when the match hand is dealt. Getting that
+    /// backwards makes Recall a per-round card, which still works and is quietly wrong - the whole
+    /// premise is that a four-card hand has to last every round of the match.
+    public List<Card> SpentCards { get; set; } = new List<Card>();
+
     public Player(string name)
     {
         PlayerName = name;
@@ -80,6 +93,8 @@ public partial class Player : RefCounted
 
         ModifierHand.Remove(card);
         ActiveCardsOnBoard.Add(card);
+        LastPlayedModifier = card;
+        if (CardEffects.IsPlainModifier(card)) SpentCards.Add(card);
 
         CurrentScore += card.Value;
         return true;
@@ -90,6 +105,14 @@ public partial class Player : RefCounted
         IsHolding = false;
         HasEndedTurn = false;
         LastDrawnCard = null;
+        LastPlayedModifier = null;
         ActiveCardsOnBoard.Clear();
+        // SpentCards is NOT cleared here - see the field. It belongs to the match, not the round.
+    }
+
+    /// Called when a fresh match hand is dealt. The only place SpentCards is emptied.
+    public void ResetForNewMatch()
+    {
+        SpentCards.Clear();
     }
 }

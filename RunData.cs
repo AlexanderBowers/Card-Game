@@ -112,8 +112,13 @@ public partial class RunData : Node
     /// EVERY CARD MOVED UP A RUNG on 2026-09-11 (Alexander's call), closing the hole Trade Draw
     /// left at stage 5. Trade Totals 6 to 5, Shave 7 to 6, Trade Hands 8 to 7 - so every rung from
     /// 4 to 7 still introduces exactly one new idea, which is the rule the whole ladder is built
-    /// on. STAGE 8 IS NOW THE EMPTY ONE and wants a card of its own; until it has one it deals a
-    /// wired card from further down (DealAiHand), so it plays as a harder version of a rung below.
+    /// on. Stage 8 is Recall and stage 9 is Veto (2026-09-13), so every rung from 1 to 9 now
+    /// introduces exactly one new thing and stage 10 is the single randomised finale. The
+    /// randomiser held two rungs only because that is what the table happened to have; after nine
+    /// rungs of learning, one boss rung that tests all of it is the better shape.
+    ///
+    /// Veto is not wired yet (CardEffects.Wired), so stage 9 still falls back to a card at or
+    /// below its rung until pass 7 turns it on.
     ///
     /// Note what moved WITH the cards and what did not: the targets belong to the RANKS, not to
     /// the cards, so Shave is now met at a target of 18 rather than 24. Worth watching at the
@@ -128,8 +133,8 @@ public partial class RunData : Node
         new LadderStep(2, "Gold Challenger",     18,  5, true, CardEffect.TradeTotals),     // 5
         new LadderStep(2, "Gold Champion",       18,  6, true, CardEffect.Shave),           // 6
         new LadderStep(3, "Ruby Challenger",     24,  6, true, CardEffect.TradeHands),      // 7
-        new LadderStep(3, "Ruby Champion",       24,  8, true),                             // 8  NEW CARD PENDING - see below
-        new LadderStep(4, "Obsidian Challenger", 22,  8, true),                             // 9  ruleset rolled
+        new LadderStep(3, "Ruby Champion",       24,  8, true, CardEffect.Recall),          // 8
+        new LadderStep(4, "Obsidian Challenger", 22,  8, true, CardEffect.Veto),            // 9
         new LadderStep(4, "Obsidian Champion",   25, 10, true),                             // 10 ruleset rolled
     };
 
@@ -453,7 +458,12 @@ public partial class RunData : Node
                 // Range-checked: an out-of-range int would otherwise become an undefined effect
                 // that renders blank, can never be played, and sits in a deck slot forever.
                 int rawEffect = card.TryGetValue("effect", out Variant e) ? e.AsInt32() : 0;
-                CardEffect effect = (rawEffect > 0 && rawEffect <= (int)CardEffect.Copy)
+                // Enum.IsDefined rather than a hand-written upper bound. The bound used to read
+                // "<= (int)CardEffect.Copy", which was correct only for as long as Copy happened
+                // to be the last member - appending Recall and Veto would have made every saved
+                // copy of them load as None and silently vanish from the player's collection,
+                // with no error anywhere. This version is right for every future card too.
+                CardEffect effect = (rawEffect > 0 && Enum.IsDefined(typeof(CardEffect), rawEffect))
                     ? (CardEffect)rawEffect
                     : CardEffect.None;
 

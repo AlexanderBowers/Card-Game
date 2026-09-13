@@ -59,6 +59,15 @@ public partial class GameManager : Node
     /// depends on which pause the player happened to interrupt.
     private bool _p2ReopenedMidTurn = false;
 
+    /// A card just brought back by Recall cannot be played until the NEXT deal. This is the whole
+    /// of Recall's design: without it the card is "an extra modifier exactly when I need one",
+    /// which is a rescue, and stage 8 is meant to be the rung that stops being about rescues.
+    ///
+    /// It needs its own store because _pXPlayedEffectThisDeal does NOT cover it - that flag gates
+    /// a second EFFECT card, and a recalled +4 is a plain modifier.
+    private Card _p1RecallLock;
+    private Card _p2RecallLock;
+
     // ------------------------------------------------------------------
     // Modifier hands
     //
@@ -224,6 +233,7 @@ public partial class GameManager : Node
         BuildIntermissionOverlays();
         BuildTableBanners();
         BuildDebugRow();
+        BuildStartMenu();
         ConfigureStatusLabel(_p1StatusLabel);
         ConfigureStatusLabel(_p2StatusLabel);
 
@@ -231,13 +241,26 @@ public partial class GameManager : Node
         ApplyResponsiveLayout();
         UpdateUI();
 
-        // Coming back from the deck screen: the player already pressed a button to get here, so deal
-        // the next match instead of showing them a Start button. (Solo scene only.)
-        if (_gameModeButton == null && RunData.Instance != null && RunData.Instance.AutoStartNextMatch)
+        // Two ways to arrive already holding a decision, and in both the player has pressed a
+        // button to get here - so deal the match rather than showing them a second front door.
+        //
+        // The run's note is RunData's (the deck screen, a debug stage jump, or the start menu
+        // sending the player over from the two-player table); the local 2-player note is this
+        // class's own static, for the reason written where it is declared. Both survive the
+        // reload; neither is saved to disk, because both describe THIS reload and not the run.
+        bool autoRun = _gameModeButton == null && RunData.Instance != null && RunData.Instance.AutoStartNextMatch;
+        if (autoRun) RunData.Instance.AutoStartNextMatch = false;
+
+        bool autoLocal2P = _gameModeButton != null && _pendingLocal2Player;
+        if (autoLocal2P)
         {
-            RunData.Instance.AutoStartNextMatch = false;
-            CallDeferred(MethodName.OnStartButtonPressed);
+            _pendingLocal2Player = false;
+            _gameModeButton.Select(0); // or OnStartButtonPressed routes straight back to the solo scene
+            if (_mirrorToggle != null) _mirrorToggle.Visible = true;
         }
+
+        if (autoRun || autoLocal2P) CallDeferred(MethodName.OnStartButtonPressed);
+        else ShowStartMenu();
     }
 
     public override void _ExitTree()
@@ -341,11 +364,38 @@ public partial class GameManager : Node
     // ------------------------------------------------------------------
     // Buttons
     // ------------------------------------------------------------------
-    private void OnRestartPressed()
+    /// The table's own Restart: THIS match again, in the mode already being played. Restart on a
+    /// table has never meant "back to the front door", and now that there is a front door it would
+    /// mean making the player choose their mode a second time to get back where they were.
+    private void OnRestartPressed() => RestartScene(sameMatch: true);
+
+    /// ...and the other half: reload to the start menu. This is what the end of a run wants, and
+    /// what "Play Again" after a match with nothing left to continue means - the menu is where the
+    /// medals and the record are, and where climbing again becomes a decision rather than a reflex.
+    private void RestartToMenu() => RestartScene(sameMatch: false);
+
+    private void RestartScene(bool sameMatch)
     {
         // Reloading the scene rebuilds GameManager, GameState and both Players from scratch,
-        // so this fully resets the match (round wins, scores, hands) for the current mode.
-        GD.Print("Restarting game...");
+        // so this fully resets the match (round wins, scores, hands).
+        if (sameMatch && _isGameStarted)
+        {
+            // The same notes the start menu leaves when it sends the player between scenes; _Ready
+            // reads them and deals instead of opening the menu.
+            if (_gameModeButton == null)
+            {
+                if (RunData.Instance != null) RunData.Instance.AutoStartNextMatch = true;
+            }
+            else _pendingLocal2Player = true;
+        }
+        else
+        {
+            // Land on the menu, and leave nothing behind that would skip past it.
+            if (RunData.Instance != null) RunData.Instance.AutoStartNextMatch = false;
+            _pendingLocal2Player = false;
+        }
+
+        GD.Print(sameMatch ? "Restarting match..." : "Returning to the start menu...");
         GetTree().ReloadCurrentScene();
     }
 
@@ -433,6 +483,11 @@ public partial class GameManager : Node
         {
             _player1.DealRandomModifierHand(_random, ModifierHandSize, FlipCardChance, MaxModifierMagnitude);
         }
+
+        // The spent pile is per-MATCH, which is what makes Recall a card about a hand that has to
+        // last every round rather than a card about this round. This is the only place it clears.
+        _player1.ResetForNewMatch();
+        _player2.ResetForNewMatch();
 
         DealAiHand();
         ClearSelections();
@@ -542,9 +597,16 @@ public partial class GameManager : Node
         // the table once.
         _player1.LastDrawnCard = null;
         _player2.LastDrawnCard = null;
+        _player1.LastPlayedModifier = null;
+        _player2.LastPlayedModifier = null;
         _p1PlayedEffectThisDeal = false;
         _p2PlayedEffectThisDeal = false;
         _p2ReopenedMidTurn = false;
+
+        // A card recalled during the last deal becomes playable now. This is the ONLY place the
+        // lock is lifted, so a recalled card is always dead for exactly one deal.
+        _p1RecallLock = null;
+        _p2RecallLock = null;
 
         DrawCardFor(_player1, _p1BoardContainer);
         DrawCardFor(_player2, _p2BoardContainer);
@@ -857,7 +919,44 @@ public partial class GameManager : Node
             return PlayEffectCard(me, card);
         }
 
-        // Trade Hands - I take everything they are still holding, they take what I have left. Last,
+        // Veto - destroy the card they just played. Asked AFTER Shave, which looks backwards until
+        // you read Shave's gates: Shave only fires when one point settles it, and when one point
+        // settles it one point is the cheaper card to spend. Veto is the bigger hammer and the only
+        // card in the game that takes something away forever, so it waits for a job worth it.
+        //
+        // Two things make it decisive, and nothing else does. It can push them OVER the target, or
+        // it can take a total that is beating me and drop it below mine. Short of those, they draw
+        // the points straight back next deal and I have spent the game's dearest attack on a dent.
+        foreach (Card card in me.ModifierHand)
+        {
+            if (card.Effect != CardEffect.Veto || !CanPlayEffect(me, card)) continue;
+            if (me.CurrentScore > target) continue; // fix my own bust first - Veto does nothing for it
+
+            // Never repair a bust for them. They are already over; the card they last played was
+            // either a plus that put them there (undoing it RESCUES them) or a minus that failed
+            // to save them (already losing). Both are reasons to leave them exactly where they are.
+            if (you.CurrentScore > target) continue;
+
+            // CanPlayEffect has already guaranteed this is a plain modifier played this deal.
+            Card theirs = you.LastPlayedModifier;
+            int after = you.CurrentScore - theirs.Value;
+
+            // Vetoing a MINUS card sends them up, which is how this lands as a kill: they are over
+            // the target, re-opened, and one modifier short of the hand they were going to fix it
+            // with. Vetoing a plus is the ordinary case - it takes a lead away.
+            bool bustsThem = after > target;
+            bool takesTheLead = you.CurrentScore > me.CurrentScore && after < me.CurrentScore;
+            if (!bustsThem && !takesTheLead) continue;
+
+            // Priority 1, as everywhere: if a plain card already takes the round off a score they
+            // have locked in, take the round and keep this. Doubly so here - Veto un-holds them,
+            // so spending it on a hold I was already going to beat hands the round back.
+            if (you.IsHolding && CanBeatWithOrdinary(me, you.CurrentScore, target)) continue;
+
+            return PlayEffectCard(me, card);
+        }
+
+        // Trade Hands - I take everything they are still holding, they take what I have left. Late,
         // because it decides nothing about THIS deal: it is a bet on the rounds to come, while
         // every card above it is a bet on the one being played.
         //
@@ -886,7 +985,69 @@ public partial class GameManager : Node
             return PlayEffectCard(me, card);
         }
 
+        // Recall - I take one of my own spent cards back. Asked LAST, below even Trade Hands: the
+        // card it returns cannot be played until the next deal, so it decides nothing about this
+        // one, and Trade Hands at least has a window that closes (their hand is fat NOW). Recall's
+        // window never closes, so it is always the thing to do when there is nothing better.
+        foreach (Card card in me.ModifierHand)
+        {
+            if (card.Effect != CardEffect.Recall || !CanPlayEffect(me, card)) continue;
+            if (me.CurrentScore > target) continue; // fix this deal before playing for the next
+
+            // The floor, and the same one Trade Hands uses. Without it the bot burns Recall in the
+            // first deal of a match, when its hand is full and the card it gets back is worth less
+            // than the one it spends. The moment this card is FOR is "my hand is spent".
+            if (me.ModifierHand.Count - 1 > MaxHandToTradeAway) continue;
+
+            // A card for next round is worth nothing when there may not be one. Either side one
+            // win from the match means this round can end it.
+            if (_gameState.RoundsWonPlayer1 >= GameState.RoundsToWinMatch - 1
+                || _gameState.RoundsWonPlayer2 >= GameState.RoundsToWinMatch - 1) continue;
+
+            Card wanted = PickRecallTarget(me, ignore: card);
+            if (wanted == null) continue;
+
+            return PlayEffectCard(me, card, wanted);
+        }
+
         return false;
+    }
+
+    /// Which spent card the bot brings back: the biggest one it can - unless what is left in hand
+    /// has no way DOWN, in which case the biggest minus instead.
+    ///
+    /// That second clause is Player.EnsureBothSigns' reasoning applied to a hand of one, and it is
+    /// the difference between recalling a +4 it cannot use against 23 and recalling the -3 that
+    /// saves it. Hands last the whole match and are never topped up, so "playable right now" is
+    /// the wrong measure - a card that is dead this round is the best card in the hand next round.
+    private Card PickRecallTarget(Player player, Card ignore = null)
+    {
+        bool hasWayDown = false;
+        foreach (Card held in player.ModifierHand)
+        {
+            if (held == ignore || held.Effect != CardEffect.None) continue;
+            if (held.IsFlip || held.Value < 0) { hasWayDown = true; break; }
+        }
+
+        Card best = null;
+        int bestScore = int.MinValue;
+
+        foreach (Card spent in player.SpentCards)
+        {
+            if (!CardEffects.IsPlainModifier(spent)) continue;
+
+            // A "+/-" card counts for more than its number, because it can be played either way up.
+            int score = Math.Abs(spent.Value) + (spent.IsFlip ? 1 : 0);
+
+            // ...and when the hand has no way down at all, ANY card that can go down outranks any
+            // size of plus. Scored rather than branched so the answer does not depend on the order
+            // the pile happens to be in.
+            if (!hasWayDown && (spent.IsFlip || spent.Value < 0)) score += 100;
+
+            if (score > bestScore) { best = spent; bestScore = score; }
+        }
+
+        return best;
     }
 
     /// What a hand is worth, for the one decision that needs to compare two of them.
@@ -1001,6 +1162,7 @@ public partial class GameManager : Node
             // bot's own total: Copy takes its number from the table, and a Shave carries Value 1
             // while subtracting.
             if (card.Effect != CardEffect.None) continue;
+            if (IsRecallLocked(_player2, card)) continue; // came back this deal, live from the next
 
             int[] orientations = card.IsFlip ? new[] { card.Value, -card.Value } : new[] { card.Value };
             foreach (int value in orientations)
@@ -1063,6 +1225,16 @@ public partial class GameManager : Node
     // from their hand buttons once the market sells them one; neither gets its own rules.
     // ------------------------------------------------------------------
 
+    /// True when this card came back through a Recall during THIS deal and so cannot be played
+    /// yet. Applies to both sides; the bot is bound by it exactly as the player is.
+    private bool IsRecallLocked(Player owner, Card card) =>
+        card != null && card == (owner == _player1 ? _p1RecallLock : _p2RecallLock);
+
+    /// Can this player play this ORDINARY modifier right now? The only rule is the Recall lock -
+    /// everything else about a plain card is decided by the player's own arithmetic.
+    private bool CanPlayModifierNow(Player owner, Card card) =>
+        card != null && card.Effect == CardEffect.None && !IsRecallLocked(owner, card);
+
     /// Can this player reach across the table with this card right now? Legality is the card's
     /// own business (CardEffects.CanPlay); the once-per-deal limit is the deal's.
     private bool CanPlayEffect(Player owner, Card card)
@@ -1094,13 +1266,22 @@ public partial class GameManager : Node
 
     /// Spends an effect card and applies it. Returns false without touching anything if the play
     /// was not legal, so a card is never silently eaten.
-    private bool PlayEffectCard(Player owner, Card card)
+    /// `chosen` is Recall's only: which spent card comes back. The player picks it in the Recall
+    /// overlay, the bot in PickRecallTarget; every other effect ignores it.
+    private bool PlayEffectCard(Player owner, Card card, Card chosen = null)
     {
         if (!CanPlayEffect(owner, card)) return false;
         if (!owner.ModifierHand.Remove(card)) return false;
 
         Player target = (owner == _player1) ? _player2 : _player1;
-        CardEffects.EffectResult result = CardEffects.Resolve(card, owner, target, _gameState.TargetScore);
+
+        // Veto destroys a card that is already face-up on the target's board. Resolve takes it out
+        // of ActiveCardsOnBoard and then clears LastPlayedModifier, and it knows nothing about
+        // nodes - so the card has to be grabbed HERE, before resolving, or there is nothing left
+        // to point the animation at.
+        Card destroyed = (card.Effect == CardEffect.Veto) ? target.LastPlayedModifier : null;
+
+        CardEffects.EffectResult result = CardEffects.Resolve(card, owner, target, _gameState.TargetScore, chosen);
 
         if (!result.Applied)
         {
@@ -1111,8 +1292,21 @@ public partial class GameManager : Node
         if (owner == _player1) _p1PlayedEffectThisDeal = true;
         else _p2PlayedEffectThisDeal = true;
 
+        // Recall's card is back in hand but dead until the next deal. Set AFTER Resolve, because
+        // Resolve is what moved it out of the spent pile.
+        if (card.Effect == CardEffect.Recall)
+        {
+            if (owner == _player1) _p1RecallLock = chosen;
+            else _p2RecallLock = chosen;
+        }
+
         // THE ANSWERING RULE. A card played at you re-opens your turn for this deal, so you always
         // get a say - unless you are holding, which is the locked state Shave exists to punish.
+        //
+        // ReleasesHold is the one exception to that exception (Veto, pass 7): it un-locks a score
+        // that was already committed, so the target is re-opened even from a hold. Neither flag
+        // ever deals a card - a re-opened player plays a hand card, holds, or ends the turn.
+        if (result.ReleasesHold) target.IsHolding = false;
         bool reopened = result.ReopensTarget && !target.IsHolding;
         if (reopened) target.HasEndedTurn = false;
 
@@ -1121,6 +1315,13 @@ public partial class GameManager : Node
         bool onTarget = CardEffects.LandsOnTarget(card.Effect);
         Player boardOwner = onTarget ? target : owner;
         Control board = (boardOwner == _player1) ? _p1BoardContainer : _p2BoardContainer;
+
+        // The vetoed card leaves the table. Burn it BEFORE the Veto card drops, so the eye follows
+        // the card being destroyed rather than the one arriving - a score that ticks down on its
+        // own tells the target nothing about WHICH card they just lost.
+        if (destroyed != null)
+            BurnCardView(destroyed, (target == _player1) ? _p1BoardContainer : _p2BoardContainer);
+
         boardOwner.ActiveCardsOnBoard.Add(card);
         InstantiateCardView(card, board);
 
@@ -1155,6 +1356,7 @@ public partial class GameManager : Node
     private bool HumanCanAct()
     {
         if (!_isGameStarted || _gameState.IsGameOver || _roundOverPending) return false;
+        if (_recallOverlay != null && _recallOverlay.Visible) return false;
         return true;
     }
 
@@ -1266,8 +1468,12 @@ public partial class GameManager : Node
             }
             else
             {
+                // Nothing left to continue: the ladder is finished, the run was lost, or this was
+                // a one-off local match. That is the end of something, so it goes to the start
+                // menu rather than silently dealing the next thing - the menu is where the medals
+                // and the record are, and where the next climb becomes a choice.
                 buttonText = "Play Again";
-                next = OnRestartPressed;
+                next = RestartToMenu;
             }
         }
         else
@@ -1443,7 +1649,7 @@ public partial class GameManager : Node
         {
             RunData.Instance?.DebugWipeSave();
             GD.Print("DEBUG: save wiped - collection, deck, medals and run are gone");
-            OnRestartPressed();
+            RestartToMenu(); // there is no match left to go back to
         };
         row.AddChild(wipe);
     }
@@ -1600,6 +1806,7 @@ public partial class GameManager : Node
         if (picked != null)
         {
             if (picked.Effect != CardEffect.None) return EffectPreview(player, picked);
+            if (IsRecallLocked(player, picked)) return "Just recalled - playable from the next deal";
 
             string sign = picked.Value < 0 ? "-" : "+";
             return $"{player.CurrentScore} {sign} {Math.Abs(picked.Value)} = {player.CurrentScore + picked.Value}";
@@ -1637,6 +1844,18 @@ public partial class GameManager : Node
                 return $"Trade Totals: {player.CurrentScore} and {other.CurrentScore} change places";
             case CardEffect.TradeHands:
                 return $"Trade Hands: your {player.ModifierHand.Count - 1} for their {other.ModifierHand.Count}";
+            case CardEffect.Recall:
+                return "Take a card back - you can play it from the next deal";
+            case CardEffect.Veto:
+            {
+                // EffectRefusal returned null above, so CanPlay said yes, so LastPlayedModifier is
+                // a plain modifier they played this deal. Named with its sign, because vetoing a
+                // minus card sends their score UP and the preview has to show that honestly.
+                Card theirs = other.LastPlayedModifier;
+                string theirSign = theirs.Value < 0 ? "-" : "+";
+                return $"Destroy their {theirSign}{Math.Abs(theirs.Value)}: "
+                     + $"{other.CurrentScore} back to {other.CurrentScore - theirs.Value}";
+            }
         }
 
         return name;
@@ -1808,9 +2027,25 @@ public partial class GameManager : Node
         // a Shave's Value of 1 to the score of whoever played it.
         if (card.Effect != CardEffect.None)
         {
+            // Recall is the one effect whose outcome its OWNER picks, so it asks before it spends.
+            // The card is not taken out of the hand until a choice is made - Cancel costs nothing.
+            if (card.Effect == CardEffect.Recall && CanPlayEffect(player, card))
+            {
+                ShowRecallOverlay(player, card);
+                return;
+            }
+
             // A refused play puts the card back in the player's hand AND back under their finger,
             // so the status line keeps explaining why it would not go.
             if (!PlayEffectCard(player, card)) SetSelection(player, card);
+            UpdateUI();
+            return;
+        }
+
+        // A card that came back this deal through a Recall is not playable until the next one.
+        if (IsRecallLocked(player, card))
+        {
+            SetSelection(player, card); // keep it under their finger so the status line explains
             UpdateUI();
             return;
         }
@@ -2176,6 +2411,37 @@ public partial class GameManager : Node
         }
     }
 
+    /// Takes a card off a board with an animation that reads as DESTROYED rather than moved: it
+    /// reddens, shrinks toward its own middle and fades where it sits, then frees itself. Veto's
+    /// only, and the one place in the game a card leaves a board before the round is over.
+    ///
+    /// The node is deliberately NOT pulled out of its slot up front. Leaving the slot occupied
+    /// while it burns is what stops the incoming Veto card dropping into the hole and landing on
+    /// top of the very thing the player is meant to be watching; the slot frees itself when the
+    /// tween finishes, and the board is rebuilt at the round boundary anyway.
+    private void BurnCardView(Card card, Control board)
+    {
+        TextureRect view = FindCardView(card, board);
+        if (view == null) return;
+
+        view.PivotOffset = view.Size / 2f; // shrink toward the middle, not the top-left corner
+
+        Tween tween = GetTree().CreateTween();
+        tween.SetParallel(true);
+        tween.TweenProperty(view, "modulate", new Color(1f, 0.3f, 0.25f, 0f), 0.45f)
+             .SetTrans(Tween.TransitionType.Cubic)
+             .SetEase(Tween.EaseType.In);
+        tween.TweenProperty(view, "scale", new Vector2(0.5f, 0.5f), 0.45f)
+             .SetTrans(Tween.TransitionType.Back)
+             .SetEase(Tween.EaseType.In);
+        tween.Chain().TweenCallback(Callable.From(() =>
+        {
+            if (!IsInstanceValid(view)) return;
+            view.GetParent()?.RemoveChild(view); // empties the slot for the next card
+            view.QueueFree();
+        }));
+    }
+
     /// The view showing this exact card, or null. Cards live one-per-slot (FillBoardWithSlots),
     /// so this is a walk of nine slots rather than a search.
     private TextureRect FindCardView(Card card, Control board)
@@ -2323,6 +2589,90 @@ public partial class GameManager : Node
     }
 
     // ------------------------------------------------------------------
+    // Recall: choosing which spent card comes back
+    //
+    // Built in code from OverlayUi's pieces, like every other overlay here, so both the solo and
+    // the 2-player table get it with no NodePath wiring.
+    //
+    // It asks rather than picking for you. Always returning the most recently spent card would
+    // need no screen at all, and it would turn the interesting decision - spend a +4 early KNOWING
+    // you can have it again - into a lookup.
+    // ------------------------------------------------------------------
+    private Control _recallOverlay;
+    private VBoxContainer _recallBox;
+    private Player _recallChooser;
+    private Card _recallCard;
+
+    private void ShowRecallOverlay(Player chooser, Card recallCard)
+    {
+        _recallChooser = chooser;
+        _recallCard = recallCard;
+
+        if (_recallOverlay == null)
+        {
+            _recallOverlay = new Control { MouseFilter = Control.MouseFilterEnum.Stop };
+            AddChild(_recallOverlay); // scene root, after GameUI, so it draws and takes input on top
+            _recallOverlay.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
+            OverlayUi.AddDim(_recallOverlay);
+            _recallBox = OverlayUi.AddPanel(_recallOverlay);
+        }
+
+        OverlayUi.ClearChildren(_recallBox);
+
+        _recallBox.AddChild(OverlayUi.MakeLabel("Recall", 30));
+        _recallBox.AddChild(OverlayUi.MakeLabel(
+            "Take one card back into your hand.\nYou can play it from the next deal.", 16, OverlayUi.Muted));
+
+        HBoxContainer row = new HBoxContainer { Alignment = BoxContainer.AlignmentMode.Center };
+        row.AddThemeConstantOverride("separation", 10);
+        _recallBox.AddChild(row);
+
+        foreach (Card spent in chooser.SpentCards)
+        {
+            if (!CardEffects.IsPlainModifier(spent)) continue;
+            Card choice = spent; // capture per iteration, not the loop variable
+            row.AddChild(OverlayUi.CardButton(CreateCardView(choice, HandCardSize), HandCardSize,
+                () => OnRecallChosen(choice)));
+        }
+
+        Button cancel = new Button { Text = "Cancel" };
+        cancel.Pressed += HideRecallOverlay;
+        _recallBox.AddChild(cancel);
+
+        // Mirrored 2-player: Player 2 reads the table upside down, so their chooser does too.
+        if (_recallOverlay.GetChildCount() > 1 && _recallOverlay.GetChild(1) is Control panel)
+        {
+            panel.PivotOffset = panel.Size / 2f;
+            panel.RotationDegrees = (IsMirrored && chooser == _player2) ? 180f : 0f;
+        }
+
+        _recallOverlay.Visible = true;
+        UpdateUI();
+    }
+
+    private void OnRecallChosen(Card chosen)
+    {
+        Player chooser = _recallChooser;
+        Card recallCard = _recallCard;
+        HideRecallOverlay();
+
+        if (chooser == null || recallCard == null) return;
+
+        // A refused play puts the card back under their finger with the reason showing, exactly as
+        // every other effect card does.
+        if (!PlayEffectCard(chooser, recallCard, chosen)) SetSelection(chooser, recallCard);
+        UpdateUI();
+    }
+
+    private void HideRecallOverlay()
+    {
+        if (_recallOverlay != null) _recallOverlay.Visible = false;
+        _recallChooser = null;
+        _recallCard = null;
+        UpdateUI();
+    }
+
+    // ------------------------------------------------------------------
     // Round-end overlay
     //
     // A full-screen layer over the table (blocks every tap underneath) with a centred panel:
@@ -2453,6 +2803,194 @@ public partial class GameManager : Node
         Action action = _roundEndAction;
         _roundEndAction = null;
         action?.Invoke();
+    }
+
+    // ------------------------------------------------------------------
+    // The start menu
+    //
+    // The front door. Before this the game opened straight onto a live-looking table with an empty
+    // board, a dropdown and a Start button - which named neither the game nor the fact that there
+    // was a climb waiting halfway up the ladder, and which asked for TWO presses to reach the bot:
+    // one to change scene, another in the scene it changed to.
+    //
+    // Built in code and over the table, like every other overlay here (see OverlayUi), so both
+    // scenes get it with no NodePath wiring. It is the only screen that knows about both scenes:
+    // the ladder lives in the solo scene and the mirrored face-to-face table in the other, so
+    // choosing a mode IS choosing a scene, and the menu does that itself rather than making the
+    // player discover it.
+    // ------------------------------------------------------------------
+
+    /// Set just before ChangeSceneToFile sends the player to the two-player table, and read by the
+    /// _Ready on the other side, so they land in a game rather than on a second front door.
+    ///
+    /// A static rather than a field on RunData, which is where AutoStartNextMatch lives: RunData is
+    /// the RUN, and local 2-player never touches a run - putting this there would be the first
+    /// thing to contradict that file's opening line. A static outlives ChangeSceneToFile for the
+    /// same reason the autoload does, which is the whole reason either of them works.
+    private static bool _pendingLocal2Player;
+
+    private Control _startMenuOverlay;
+    private VBoxContainer _startMenuBox;
+    private Button _newRunButton;
+    private bool _newRunArmed; // "New Run" over an unfinished climb asks a second time
+
+    private void BuildStartMenu()
+    {
+        _startMenuOverlay = new Control { Visible = false, MouseFilter = Control.MouseFilterEnum.Stop };
+        AddChild(_startMenuOverlay);
+        _startMenuOverlay.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
+
+        OverlayUi.AddDim(_startMenuOverlay);
+        _startMenuBox = OverlayUi.AddPanel(_startMenuOverlay, contentMargin: 28, separation: 10);
+    }
+
+    private void ShowStartMenu()
+    {
+        if (_startMenuOverlay == null) return;
+
+        FillStartMenu();
+        _startMenuOverlay.Visible = true;
+
+        // The menu replaces them both. Leaving a live Start button and a mode dropdown sitting
+        // under the dim is two ways to do one thing, and the dropdown's answer is not the menu's.
+        if (_startButton != null) _startButton.Visible = false;
+        if (_gameModeButton != null) _gameModeButton.Visible = false;
+    }
+
+    private void HideStartMenu()
+    {
+        if (_startMenuOverlay != null) _startMenuOverlay.Visible = false;
+    }
+
+    /// Rebuilt on every show rather than once, because what it has to say changes: whether there is
+    /// a climb to continue, which rung it is on, and what the player has banked.
+    private void FillStartMenu()
+    {
+        OverlayUi.ClearChildren(_startMenuBox);
+        _newRunArmed = false;
+
+        // The project's own name, so renaming the game renames this too instead of leaving a second
+        // copy of the title to go stale.
+        string title = ProjectSettings.GetSetting("application/config/name").AsString();
+        if (string.IsNullOrWhiteSpace(title)) title = "Card Game";
+        _startMenuBox.AddChild(OverlayUi.MakeLabel(title, 40));
+
+        RunData run = RunData.Instance;
+        bool runInProgress = run != null && run.RunActive && !run.RunComplete;
+
+        _startMenuBox.AddChild(OverlayUi.MakeLabel(
+            runInProgress ? "A climb is in progress." : "Climb the ladder, or play someone across the table.",
+            15, OverlayUi.Muted));
+        _startMenuBox.AddChild(MenuSpacer());
+
+        // First, and named with the rung, because a player who left mid-ladder came back for this
+        // one thing and should not have to guess which button keeps their climb.
+        if (runInProgress)
+        {
+            AddMenuButton($"Continue - Match {run.MatchNumber} of {RunData.LadderLength}",
+                          $"{run.CurrentStep.Opponent}   -   target {run.CurrentTarget}",
+                          () => MenuStartRun(fresh: false));
+        }
+
+        // Over an unfinished climb this button throws the climb away, so it asks twice. A second
+        // tap is the cheapest confirmation there is and it costs no second overlay.
+        _newRunButton = AddMenuButton(
+            runInProgress ? "New Run" : "Start a Run",
+            runInProgress
+                ? "Gives up the climb above. Your cards and medals stay."
+                : $"{RunData.LadderLength} matches, best of {GameState.RoundsToWinMatch * 2 - 1}, a new card most rungs.",
+            () =>
+            {
+                if (runInProgress && !_newRunArmed)
+                {
+                    _newRunArmed = true;
+                    _newRunButton.Text = "New Run - tap again to give up the climb";
+                    return;
+                }
+                MenuStartRun(fresh: true);
+            });
+
+        AddMenuButton("Local 2-Player",
+                      "Two players, one device. No run, no medals, target 20.",
+                      MenuStartLocal2Player);
+
+        _startMenuBox.AddChild(MenuSpacer());
+        AddMenuButton("How to Play", null, ShowHowToPlay);
+
+        // A mobile app does not quit itself; the OS does that, and a Quit button there is a button
+        // that breaks the platform's own back gesture.
+        if (!OS.HasFeature("mobile")) AddMenuButton("Quit", null, () => GetTree().Quit());
+
+        // The proof that a lost run did not erase anything - which is the promise the run makes,
+        // and the one place the player can be shown it before deciding to climb again.
+        if (run != null && (run.Medals > 0 || run.FurthestStep > 0))
+        {
+            _startMenuBox.AddChild(MenuSpacer());
+            _startMenuBox.AddChild(OverlayUi.MakeLabel(
+                $"{run.Medals} medals   -   {run.Inventory.Count} cards owned   -   best: match {run.FurthestStep + 1}",
+                13, OverlayUi.Muted));
+        }
+    }
+
+    /// One row of the menu: a wide button, and optionally a line under it saying what it does. The
+    /// note is a separate label rather than a second line inside the button so that arming the New
+    /// Run button has exactly one string to rewrite.
+    private Button AddMenuButton(string text, string note, Action onPressed)
+    {
+        Button button = new Button { Text = text, CustomMinimumSize = new Vector2(MenuButtonWidth, 44) };
+        button.AddThemeFontSizeOverride("font_size", 18);
+        if (onPressed != null) button.Pressed += onPressed;
+        _startMenuBox.AddChild(button);
+
+        if (!string.IsNullOrEmpty(note))
+        {
+            Label label = OverlayUi.MakeLabel(note, 12, OverlayUi.Muted);
+            label.AutowrapMode = TextServer.AutowrapMode.WordSmart;
+            label.CustomMinimumSize = new Vector2(MenuButtonWidth, 0);
+            _startMenuBox.AddChild(label);
+        }
+
+        return button;
+    }
+
+    private const int MenuButtonWidth = 340;
+
+    private static Control MenuSpacer() => new Control { CustomMinimumSize = new Vector2(0, 8) };
+
+    /// The ladder lives in the solo scene. From the two-player table that is a scene change, and
+    /// the note RunData already keeps for the deck screen is what makes the new scene deal itself.
+    private void MenuStartRun(bool fresh)
+    {
+        if (fresh) RunData.Instance?.StartNewRun();
+
+        if (_gameModeButton != null)
+        {
+            if (RunData.Instance != null) RunData.Instance.AutoStartNextMatch = true;
+            GetTree().ChangeSceneToFile("res://solo_table_scene.tscn");
+            return;
+        }
+
+        HideStartMenu();
+        OnStartButtonPressed();
+    }
+
+    /// ...and the mirrored face-to-face table lives in the other scene.
+    private void MenuStartLocal2Player()
+    {
+        if (_gameModeButton == null)
+        {
+            _pendingLocal2Player = true;
+            GetTree().ChangeSceneToFile("res://table_scene.tscn");
+            return;
+        }
+
+        // Before starting, not after: OnStartButtonPressed reads this dropdown to decide whether to
+        // route to the solo scene, and on "vs. Bot" it would send us straight back out again.
+        _gameModeButton.Select(0);
+        if (_mirrorToggle != null) _mirrorToggle.Visible = true;
+
+        HideStartMenu();
+        OnStartButtonPressed();
     }
 
     // ------------------------------------------------------------------
