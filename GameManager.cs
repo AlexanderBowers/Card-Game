@@ -229,6 +229,7 @@ public partial class GameManager : Node
 
         BuildRoundEndOverlay();
         BuildHowToPlay();
+        CompactControlPanel(); // must precede BuildConfirmRows - see the method
         BuildConfirmRows();
         BuildIntermissionOverlays();
         BuildTableBanners();
@@ -236,6 +237,7 @@ public partial class GameManager : Node
         BuildStartMenu();
         ConfigureStatusLabel(_p1StatusLabel);
         ConfigureStatusLabel(_p2StatusLabel);
+        StyleTableForReadability(); // after BuildConfirmRows: it styles those buttons too
 
         GetTree().Root.SizeChanged += ApplyResponsiveLayout;
         ApplyResponsiveLayout();
@@ -1691,18 +1693,22 @@ public partial class GameManager : Node
             return;
         }
 
-        _targetLabel.Text = $"TARGET  {_gameState.TargetScore}";
-        _targetLabel.RemoveThemeColorOverride("font_color");
-
-        // And when stepping onto this rung MOVED it, say so on the rung where it happens. A target
-        // that changes quietly is the game changing its own rules behind the player's back.
+        // The target lives on each player's own score line now ("17 / 20"), so this banner is no
+        // longer where the target is READ - it is where the game says the target has MOVED. A
+        // permanent "TARGET 20" here as well was one line of the clutter the playtest complained
+        // about, and it said nothing the score line does not say closer to the number it governs.
         RunData run = _inRun ? RunData.Instance : null;
-        if (run != null && run.TargetMovedThisStage)
+        if (run == null || !run.TargetMovedThisStage)
         {
-            string direction = run.CurrentTarget > run.PreviousTarget ? "up" : "down";
-            _targetLabel.Text += $"   ({direction} from {run.PreviousTarget})";
-            _targetLabel.AddThemeColorOverride("font_color", OverlayUi.MedalGold);
+            _targetLabel.Text = string.Empty;
+            _targetLabel.RemoveThemeColorOverride("font_color");
+            return;
         }
+
+        // A target that changes quietly is the game changing its own rules behind the player's back.
+        string direction = run.CurrentTarget > run.PreviousTarget ? "up" : "down";
+        _targetLabel.Text = $"TARGET  {_gameState.TargetScore}   ({direction} from {run.PreviousTarget})";
+        _targetLabel.AddThemeColorOverride("font_color", OverlayUi.MedalGold);
     }
 
     /// What an effect card just did, on the table. The explanation already existed - CardEffects
@@ -1828,20 +1834,38 @@ public partial class GameManager : Node
         // dropped before anything is drawn, so the status line and the buttons agree.
         ValidateSelections();
 
-        // When P2's side is flipped, each player sees both scores on their own (readable) row.
-        // Otherwise everyone can read both rows, so each side just shows its own score.
+        // The score is the number the whole decision hangs on, so it now says whose it is and
+        // what it is chasing - "You  17/20" - rather than making the player find two labels on
+        // opposite sides of the screen and hold a target in their head (playtest, 2026-09-14).
+        //
+        // The target appears once per READER, never twice. Against the bot one person is looking
+        // at the screen, so it rides on their row only; in local 2-player each player reads their
+        // own row, so both carry it.
+        //
+        // The size is set every refresh rather than once in _Ready, because the mirror toggle
+        // changes which of the two forms is on screen while the game is running.
+        int scoreFont = IsMirrored ? ScoreFontSizeMirrored : ScoreFontSize;
+        foreach (Label score in new[] { _p1ScoreLabel, _p2ScoreLabel })
+            score?.AddThemeFontSizeOverride("font_size", scoreFont);
+
         if (IsMirrored)
         {
+            // Mirrored: each player reads BOTH scores the right way up, on their own row.
             if (_p1ScoreLabel != null)
-                _p1ScoreLabel.Text = $"P1: {_player1.CurrentScore} | P2: {_player2.CurrentScore}";
+                _p1ScoreLabel.Text = $"P1  {ScoreOf(_player1)}    P2  {_player2.CurrentScore}";
 
             if (_p2ScoreLabel != null)
-                _p2ScoreLabel.Text = $"P2: {_player2.CurrentScore} | P1: {_player1.CurrentScore}";
+                _p2ScoreLabel.Text = $"P2  {ScoreOf(_player2)}    P1  {_player1.CurrentScore}";
+        }
+        else if (_isVsBot)
+        {
+            if (_p1ScoreLabel != null) _p1ScoreLabel.Text = $"You  {ScoreOf(_player1)}";
+            if (_p2ScoreLabel != null) _p2ScoreLabel.Text = $"Them  {_player2.CurrentScore}";
         }
         else
         {
-            if (_p1ScoreLabel != null) _p1ScoreLabel.Text = $"Score: {_player1.CurrentScore}";
-            if (_p2ScoreLabel != null) _p2ScoreLabel.Text = $"Score: {_player2.CurrentScore}";
+            if (_p1ScoreLabel != null) _p1ScoreLabel.Text = $"P1  {ScoreOf(_player1)}";
+            if (_p2ScoreLabel != null) _p2ScoreLabel.Text = $"P2  {ScoreOf(_player2)}";
         }
 
         UpdateTargetLabel();
@@ -2349,34 +2373,130 @@ public partial class GameManager : Node
     // When P2's side is mirrored, every card shows its value twice - like the corner indices on
     // a real playing card: once in the top half and once upside down in the bottom half - so
     // both players can read every card. Otherwise a single centred value is used.
-    private static readonly string[] CardLabelNames = { "Label", "LabelFlipped" };
+    // ------------------------------------------------------------------
+    // Card faces: corners and pips (playtest feedback, 2026-09-14)
+    //
+    // The 55+ blackjack players could not read the table. Two changes, both taken straight from
+    // how an ordinary playing card works: the number sits in two OPPOSITE corners, and the middle
+    // of a main-deck card carries pips.
+    //
+    // The corners also replace what LabelFlipped used to do on a mirrored board - a second,
+    // upside-down copy of the number in the lower half, so the player across the table could read
+    // it. Two opposite corners do that permanently, for every card, in both scenes, and they leave
+    // the middle of the card free for the pips. LabelFlipped is now ONLY the minus half of a "+/-"
+    // card, which is the one job the corners cannot do.
+    // ------------------------------------------------------------------
+
+    /// Pips in the middle of a main-deck card, or the plain big number. Flip this and look at it
+    /// on the phone: at 84x114 ten dots may read as texture rather than as a number, and that is a
+    /// question for a screen rather than for a spec (claude/playtest-feedback-family.md).
+    private const bool PipsOnMainCards = true;
+
+    private const float CornerFontScale = 0.20f;
+
+    private static readonly string[] CardLabelNames = { "Label", "LabelFlipped", "CornerTL", "CornerBR" };
+    private static readonly string[] CardCornerNames = { "CornerTL", "CornerBR" };
 
     private void ApplyCardSize(TextureRect view, Vector2 size)
     {
         view.CustomMinimumSize = size;
 
-        // A "+/-" card is always drawn two-way - blue +n above, red -n below - whether or not the
-        // table is mirrored, because that split IS how you tell it from an ordinary modifier.
-        bool twoWay = IsMirrored || view.HasNode("FlipBottom");
+        // A "+/-" card is always drawn two-way - blue +n above, red -n below - because that split
+        // IS how you tell it from an ordinary modifier. Nothing else uses the lower label now.
+        bool flipFace = view.HasNode("FlipBottom");
+        bool pipped = view.HasMeta("pips");
 
         // An effect card's face is a mark rather than one number ("->+4", "-1"), so it needs a
         // smaller font than a card showing a single digit or two.
-        float fontScale = view.HasMeta("effectCard") ? 0.22f : (twoWay ? 0.33f : 0.36f);
+        float fontScale = view.HasMeta("effectCard") ? 0.22f : (flipFace ? 0.33f : 0.36f);
         int fontSize = Mathf.RoundToInt(size.Y * fontScale);
 
         Label label = view.GetNodeOrNull<Label>("Label");
         if (label != null)
         {
             label.AddThemeFontSizeOverride("font_size", fontSize);
-            label.AnchorBottom = twoWay ? 0.5f : 1f; // top half, or the whole card
+            label.AnchorBottom = flipFace ? 0.5f : 1f; // top half, or the whole card
+            label.Visible = !pipped;                   // the pips ARE the number when they are on
         }
 
         Label flipped = view.GetNodeOrNull<Label>("LabelFlipped");
         if (flipped != null)
         {
             flipped.AddThemeFontSizeOverride("font_size", fontSize);
-            flipped.Visible = twoWay;
-            flipped.RotationDegrees = IsMirrored ? 180f : 0f; // upright unless P2 is reading it
+            flipped.Visible = flipFace;
+            flipped.RotationDegrees = 0f; // upright for its owner; the CORNERS face the other way
+        }
+
+        int cornerFont = Mathf.Max(10, Mathf.RoundToInt(size.Y * CornerFontScale));
+        foreach (string name in CardCornerNames)
+        {
+            Label corner = view.GetNodeOrNull<Label>(name);
+            if (corner != null) corner.AddThemeFontSizeOverride("font_size", cornerFont);
+        }
+
+        // A pip is a Panel with a fully rounded StyleBoxFlat, and a corner radius is an integer
+        // number of pixels - so a resized dot has to be re-made rather than scaled to stay round.
+        if (pipped) BuildPips(view, view.GetMeta("pips").AsInt32(), size);
+    }
+
+    /// The dots in the middle of a main-deck card, in two columns the way a real card lays them
+    /// out: ceil(n/2) rows of two, with a single centred dot on the last row when n is odd.
+    private static void BuildPips(TextureRect view, int count, Vector2 size)
+    {
+        Control existing = view.GetNodeOrNull<Control>("Pips");
+        if (existing != null)
+        {
+            view.RemoveChild(existing);
+            existing.QueueFree();
+        }
+        if (count < 1 || count > 10) return;
+
+        Control host = new Control { Name = "Pips", MouseFilter = Control.MouseFilterEnum.Ignore };
+        view.AddChild(host);
+        host.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
+        host.AnchorLeft = 0.26f;
+        host.AnchorRight = 0.74f;
+        host.AnchorTop = 0.15f;
+        host.AnchorBottom = 0.85f;
+
+        float dot = Mathf.Max(4f, size.Y * 0.082f);
+        int gap = Mathf.Max(2, Mathf.RoundToInt(dot * 0.7f));
+
+        VBoxContainer rows = new VBoxContainer
+        {
+            Alignment = BoxContainer.AlignmentMode.Center,
+            MouseFilter = Control.MouseFilterEnum.Ignore,
+        };
+        rows.AddThemeConstantOverride("separation", gap);
+        host.AddChild(rows);
+        rows.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
+
+        StyleBoxFlat pip = new StyleBoxFlat { BgColor = Colors.White };
+        pip.SetCornerRadiusAll(Mathf.Max(2, Mathf.RoundToInt(dot / 2f)));
+
+        for (int remaining = count; remaining > 0; )
+        {
+            int inRow = Mathf.Min(2, remaining);
+            remaining -= inRow;
+
+            HBoxContainer row = new HBoxContainer
+            {
+                Alignment = BoxContainer.AlignmentMode.Center,
+                MouseFilter = Control.MouseFilterEnum.Ignore,
+            };
+            row.AddThemeConstantOverride("separation", gap);
+            rows.AddChild(row);
+
+            for (int i = 0; i < inRow; i++)
+            {
+                Panel dotNode = new Panel
+                {
+                    CustomMinimumSize = new Vector2(dot, dot),
+                    MouseFilter = Control.MouseFilterEnum.Ignore,
+                };
+                dotNode.AddThemeStyleboxOverride("panel", pip);
+                row.AddChild(dotNode);
+            }
         }
     }
 
@@ -2448,6 +2568,150 @@ public partial class GameManager : Node
         bottom.Modulate = plusChosen ? DimmedHalf : Colors.White;
     }
 
+    // ------------------------------------------------------------------
+    // Reading the table at arm's length (playtest feedback, 2026-09-14)
+    // ------------------------------------------------------------------
+
+    /// Two sizes, because the mirrored row carries two scores and one row that is wider than the
+    /// screen is worse than a smaller number on it: a too-wide side inside a CenterContainer
+    /// spills off BOTH screen edges, and EnsureLayoutFits answers it by shrinking the WHOLE UI.
+    private const int ScoreFontSize = 34;
+    private const int ScoreFontSizeMirrored = 26;
+    private const int ActionFontSize = 30;
+    private const float ActionButtonHeight = 76f;
+
+    /// A player's score with the target behind it - "17/20" - so "how close am I" is one glance
+    /// rather than arithmetic against a number somewhere else on the screen.
+    private string ScoreOf(Player player) =>
+        _isGameStarted ? $"{player.CurrentScore}/{_gameState.TargetScore}" : "-";
+
+    /// The score is the biggest thing on the table and End Turn / Hold are the biggest buttons,
+    /// both from the same note: the 55+ players could not read either at arm's length.
+    ///
+    /// ONLY those two buttons grow. Restart / Exit / How to Play serve presses that happen once a
+    /// session and sit behind the Menu button now; growing them as well would spend the portrait
+    /// column's whole height budget, and EnsureLayoutFits would take it straight back by scaling
+    /// the entire UI down - which is the trap this pass had to be built around, not sprung.
+    private void StyleTableForReadability()
+    {
+        foreach (Button button in new[] { _endTurnButton, _holdButton, _p1EndTurnButton,
+                                          _p1HoldButton, _p2EndTurnButton, _p2HoldButton })
+        {
+            StyleActionButton(button);
+        }
+
+        // The confirm row stands in for End Turn / Hold in the same slot, so it has to be the same
+        // height - otherwise the whole side jumps every time a card is picked up or put back.
+        foreach (Control row in new Control[] { _p1ConfirmRow, _p2ConfirmRow })
+        {
+            if (row == null) continue;
+            foreach (Node child in row.GetChildren())
+                if (child is Button button) StyleActionButton(button);
+        }
+    }
+
+    private static void StyleActionButton(Button button)
+    {
+        if (button == null) return;
+        button.AddThemeFontSizeOverride("font_size", ActionFontSize);
+        button.CustomMinimumSize = new Vector2(button.CustomMinimumSize.X, ActionButtonHeight);
+    }
+
+    /// Portrait feedback: "centre is too clustered in portrait mode, but landscape feels nice".
+    /// Landscape has a whole extra axis to spread the same content across, so the fix is NOT a
+    /// landscape lock (the orientation lock was removed deliberately) - it is that the middle
+    /// column carries too much for one phone-width strip.
+    ///
+    /// Three things move:
+    ///  - How to Play / Restart / Exit / the mirror toggle go behind one "Menu" button. All four
+    ///    were permanently on screen to serve presses that happen once a session.
+    ///  - The solo scene's End Turn / Hold leave the middle panel for Player 1's own side, under
+    ///    the hand they act on and near the thumb, which is where the 2-player scene already has
+    ///    them. (In the 2-player scene _endTurnButton is null and this does nothing.)
+    ///  - The mode dropdown is hidden: the start menu has owned mode selection since pass 7. The
+    ///    NODE stays, because "_gameModeButton != null" is how this class tells the two scenes
+    ///    apart - deleting it would break the auto-start routing on both sides.
+    ///
+    /// Runs BEFORE BuildConfirmRows, which finds each action row from its exported button and
+    /// inserts the Play / +- / Put back row next to it. Moving the row afterwards would leave the
+    /// confirm row behind in the middle panel, which is exactly the bug this ordering prevents.
+    private void CompactControlPanel()
+    {
+        if (_gameModeButton != null) _gameModeButton.Visible = false;
+
+        Control actionRow = _endTurnButton?.GetParent() as Control;
+        Control p1Layout = GetNodeOrNull<Control>("GameUI/MainLayout/Player1Side/Layout");
+        if (actionRow != null && p1Layout != null && actionRow.GetParent() != p1Layout)
+        {
+            actionRow.GetParent().RemoveChild(actionRow);
+            p1Layout.AddChild(actionRow);
+        }
+
+        BuildTableMenu();
+    }
+
+    private Control _tableMenuOverlay;
+
+    private void BuildTableMenu()
+    {
+        Node systemRow = _restartButton?.GetParent();
+        Control column = systemRow?.GetParent() as Control;
+        if (column == null) return;
+
+        _tableMenuOverlay = new Control { Visible = false, MouseFilter = Control.MouseFilterEnum.Stop };
+        AddChild(_tableMenuOverlay);
+        _tableMenuOverlay.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
+        OverlayUi.AddDim(_tableMenuOverlay);
+
+        VBoxContainer box = OverlayUi.AddPanel(_tableMenuOverlay);
+        box.AddChild(OverlayUi.MakeLabel("Menu", 30));
+
+        Button howTo = new Button { Text = "How to Play" };
+        howTo.Pressed += () => { HideTableMenu(); ShowHowToPlay(); };
+        box.AddChild(howTo);
+
+        // Restart, Exit and the mirror toggle MOVE rather than being rebuilt here. They are
+        // exported nodes whose signals are already connected in _Ready, and a rebuilt copy would
+        // need a second connection to the same handlers - two buttons, one of them dead.
+        if (_mirrorToggle != null)
+        {
+            _mirrorToggle.GetParent()?.RemoveChild(_mirrorToggle);
+            box.AddChild(_mirrorToggle);
+        }
+        foreach (Button moved in new[] { _restartButton, _exitButton })
+        {
+            if (moved == null) continue;
+            moved.GetParent()?.RemoveChild(moved);
+            box.AddChild(moved);
+        }
+
+        Button close = new Button { Text = "Back to the table" };
+        close.Pressed += HideTableMenu;
+        box.AddChild(close);
+
+        // ...and the one button left on the table, in the slot the Restart / Exit row had.
+        Button open = new Button { Text = "Menu" };
+        open.Pressed += ShowTableMenu;
+        column.AddChild(open);
+        if (systemRow.GetParent() == column) column.MoveChild(open, systemRow.GetIndex());
+    }
+
+    private void ShowTableMenu()
+    {
+        if (_tableMenuOverlay == null) return;
+
+        // The toggle only means anything with two people at one device.
+        if (_mirrorToggle != null) _mirrorToggle.Visible = !_isVsBot;
+
+        MoveChild(_tableMenuOverlay, GetChildCount() - 1); // above every other overlay
+        _tableMenuOverlay.Visible = true;
+    }
+
+    private void HideTableMenu()
+    {
+        if (_tableMenuOverlay != null) _tableMenuOverlay.Visible = false;
+    }
+
     /// Repaints the table and the standard cards for the rank the player is on. This is the whole
     /// progression display: no invented venue names, just a board that looks different every two
     /// rungs (Alexander, 2026-09-07).
@@ -2494,17 +2758,24 @@ public partial class GameManager : Node
         // ordinary card gets it - a hand-edited save carrying both flags cannot lie about itself.
         if (card.IsFlip && card.Effect == CardEffect.None) BuildFlipFace(view, card, size);
 
-        // The bottom label is rotated about its own centre once the layout has given it a size -
-        // but ONLY when someone is sitting on that side of the table. On a mirrored 2-player board
-        // it is P2's corner index; in solo (and in the market and the deck screen) there is nobody
-        // down there, and an upside-down "-1" on a +/- card just reads as broken art.
-        Label flipped = view.GetNodeOrNull<Label>("LabelFlipped");
-        if (flipped != null)
+        // Pips, and only on main-deck cards: they pip the 1-10 an ordinary playing card pips, and
+        // a modifier is signed - there is no such thing as minus three dots.
+        if (PipsOnMainCards && card.Type == CardType.Main)
         {
-            flipped.Resized += () =>
+            view.SetMeta("pips", card.Value);
+            ApplyCardSize(view, size); // builds them from the meta, and hides the centre number
+        }
+
+        // The bottom-right corner is the top-left one turned round, which is the whole reason the
+        // card can be read from the other side of the table. Rotated about its own centre once the
+        // layout has given it a size - PivotOffset means nothing before that.
+        Label corner = view.GetNodeOrNull<Label>("CornerBR");
+        if (corner != null)
+        {
+            corner.Resized += () =>
             {
-                flipped.PivotOffset = flipped.Size / 2f;
-                flipped.RotationDegrees = IsMirrored ? 180f : 0f;
+                corner.PivotOffset = corner.Size / 2f;
+                corner.RotationDegrees = 180f;
             };
         }
         return view;
@@ -2525,6 +2796,14 @@ public partial class GameManager : Node
         {
             Label label = view.GetNodeOrNull<Label>(name);
             if (label != null) label.Text = text;
+        }
+
+        // Copy rewrites a drawn main card's value, so its pips have to be re-counted - otherwise
+        // the number in the corners and the dots in the middle disagree about the same card.
+        if (view.HasMeta("pips"))
+        {
+            view.SetMeta("pips", card.Value);
+            BuildPips(view, card.Value, CardSize);
         }
     }
 
@@ -3174,21 +3453,11 @@ public partial class GameManager : Node
 
     private void BuildHowToPlay()
     {
-        // 1. The button, in the middle panel's ButtonColumn just above the Restart / Exit row.
-        Control column = GetNodeOrNull<Control>("GameUI/MainLayout/SharedControlPanel/VBoxContainer/TableRow/ButtonColumn");
-        Node systemButtons = _restartButton?.GetParent();
-        if (column == null && systemButtons?.GetParent() is Control fallback) column = fallback;
-        if (column == null) return;
-
-        Button open = new Button { Text = "How to Play" };
-        open.Pressed += ShowHowToPlay;
-        column.AddChild(open);
-        if (systemButtons != null && systemButtons.GetParent() == column)
-        {
-            column.MoveChild(open, systemButtons.GetIndex());
-        }
-
-        // 2. The overlay: dim + centred panel + scrolling rules + Close (and Flip when mirrored).
+        // The button that opens this lives in the table menu now (CompactControlPanel) - it was
+        // one of four things permanently on screen in a middle column the playtest called
+        // cluttered, and it is pressed once a session.
+        //
+        // The overlay: dim + centred panel + scrolling rules + Close (and Flip when mirrored).
         _howToPlayOverlay = new Control { Visible = false, MouseFilter = Control.MouseFilterEnum.Stop };
         AddChild(_howToPlayOverlay);
         _howToPlayOverlay.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
