@@ -379,6 +379,7 @@ public partial class GameManager : Node
         _deckCountLabel?.AddThemeFontSizeOverride("font_size", Mathf.RoundToInt(CardSize.Y * 0.30f));
         RefreshHandUI();
         CallDeferred(MethodName.UpdateRotatorSize);
+        CallDeferred(MethodName.RefreshSpotlight); // a rotation moves whatever is being highlighted
         EnsureLayoutFits();
     }
 
@@ -637,6 +638,7 @@ public partial class GameManager : Node
 
         DealAiHand();
         ClearSelections();
+        QueueCoachMarksForHand();
     }
 
     /// The AI's hand for this match, built to the rung's recipe rather than rolled flat: stage 1
@@ -1609,6 +1611,10 @@ public partial class GameManager : Node
 
         GD.Print(result.Narration);
         ShowEffectBanner(result.Narration); // the log is not on the table - the player has to SEE it
+
+        // The ladder's promise, kept: you meet a card when it is used on you, and the game says
+        // once what it was. Only the bot's cards - your own were introduced when you were dealt them.
+        if (owner == _player2) QueueCoachMark(card, fromOpponent: true);
         UpdateUI();
 
         // A re-opened BOT has to be sent round again: ResolveDeal refuses to move while either
@@ -2066,6 +2072,7 @@ public partial class GameManager : Node
 
         RefreshHandUI();
         CheckTutorialProgress();
+        DrainCoachMarks();
         CallDeferred(MethodName.UpdateRotatorSize);
 
         // The layout is only as big as what is IN it, and what is in it changes here - the hands
@@ -3628,6 +3635,7 @@ public partial class GameManager : Node
     private PanelContainer _spotlightCaption;
     private Label _spotlightLabel;
     private Button _spotlightNext;
+    private Button _spotlightSkip;
 
     // ---- the overlay -------------------------------------------------
 
@@ -3689,12 +3697,12 @@ public partial class GameManager : Node
         // Skip is on EVERY step, not earned by sitting through the first one. Somebody who has
         // played this kind of game before does not want six taps, and making them work for the
         // way out is how you lose them on the first screen.
-        Button skip = new Button { Text = "Skip" };
-        skip.Pressed += () => FinishTutorial();
-        buttons.AddChild(skip);
+        _spotlightSkip = new Button { Text = "Skip" };
+        _spotlightSkip.Pressed += () => FinishTutorial();
+        buttons.AddChild(_spotlightSkip);
 
         _spotlightNext = new Button { Text = "Got it" };
-        _spotlightNext.Pressed += AdvanceTutorial;
+        _spotlightNext.Pressed += OnSpotlightNextPressed;
         buttons.AddChild(_spotlightNext);
     }
 
@@ -3881,7 +3889,16 @@ public partial class GameManager : Node
 
     private void RefreshSpotlight()
     {
-        if (!_tutorialActive || _spotlightOverlay == null || !_spotlightOverlay.Visible) return;
+        if (_spotlightOverlay == null || !_spotlightOverlay.Visible) return;
+
+        // A coach-mark borrows the same overlay, so it has to be re-placed on a rotation too.
+        if (_coachShowing.HasValue)
+        {
+            PlaceSpotlight(CoachTarget(_coachShowing.Value), blockHole: true);
+            return;
+        }
+
+        if (!_tutorialActive) return;
 
         bool doStep = TutorialIsDoStep(_tutorialIndex);
         _spotlightLabel.Text = TutorialTextFor(_tutorialIndex);
@@ -3921,6 +3938,118 @@ public partial class GameManager : Node
         // Deferred: FinishTutorial can be reached from inside UpdateUI (a DO step completing on
         // the last one), and a re-entrant refresh is the kind of thing that works until it doesn't.
         CallDeferred(MethodName.UpdateUI);
+    }
+
+    // ------------------------------------------------------------------
+    // Coach-marks: one line, the first time you meet a card
+    //
+    // This is what actually delivers the ladder's promise. The ladder introduces one new card per
+    // rung and the market sells it to you straight afterwards - but until now the card simply
+    // appeared and something happened to your score. One highlight and one sentence, once ever.
+    //
+    // The sentence is CardEffects.Introduction, which is the market's own Description. Two copies
+    // of an explanation drift, and the player would end up being told two different things about
+    // one card.
+    //
+    // "Met" is profile level (RunData.CardsMet), so a lost run does not un-teach it, and it is the
+    // same set a collection log will read.
+    // ------------------------------------------------------------------
+
+    private readonly struct CoachMark
+    {
+        public readonly Card Card;
+        public readonly bool FromOpponent;
+
+        public CoachMark(Card card, bool fromOpponent)
+        {
+            Card = card;
+            FromOpponent = fromOpponent;
+        }
+    }
+
+    private readonly Queue<CoachMark> _coachQueue = new Queue<CoachMark>();
+    private CoachMark? _coachShowing;
+
+    /// Where the highlight goes: the middle panel's banner when the card was played AT you (the
+    /// banner is the thing that just narrated it), your own hand when it is a card you now hold.
+    private Control CoachTarget(CoachMark mark) =>
+        mark.FromOpponent ? (Control)_effectBanner : _p1HandContainer;
+
+    private void QueueCoachMark(Card card, bool fromOpponent)
+    {
+        string key = CardEffects.MetKey(card);
+        if (key == null) return; // a plain +3 explains itself
+
+        RunData run = RunData.Instance;
+        if (run == null || run.HasMetCard(key)) return;
+
+        // The same card can arrive twice in one deal - once in the hand and once across the table
+        // - and the same explanation twice is worse than none.
+        foreach (CoachMark queued in _coachQueue)
+            if (CardEffects.MetKey(queued.Card) == key) return;
+        if (_coachShowing.HasValue && CardEffects.MetKey(_coachShowing.Value.Card) == key) return;
+
+        _coachQueue.Enqueue(new CoachMark(card, fromOpponent));
+    }
+
+    /// Local 2-player is left alone on purpose: there is a person in the room to explain, which is
+    /// the same reason that mode's How to Play is short.
+    private void QueueCoachMarksForHand()
+    {
+        if (!_isVsBot) return;
+        foreach (Card card in _player1.ModifierHand) QueueCoachMark(card, fromOpponent: false);
+    }
+
+    /// Runs from UpdateUI. Shows at most one at a time, and only when nothing else owns the
+    /// screen - a card explained over the top of a round-end panel teaches nobody anything.
+    private void DrainCoachMarks()
+    {
+        if (_coachShowing.HasValue)
+        {
+            CallDeferred(MethodName.RefreshSpotlight); // the highlighted control may have moved
+            return;
+        }
+
+        if (_tutorialActive || _coachQueue.Count == 0) return;
+        if (!_isGameStarted || _gameState.IsGameOver || _roundOverPending) return;
+        if (_howToPlayOverlay != null && _howToPlayOverlay.Visible) return;
+        if (_tableMenuOverlay != null && _tableMenuOverlay.Visible) return;
+        if (_recallOverlay != null && _recallOverlay.Visible) return;
+
+        ShowCoachMark(_coachQueue.Dequeue());
+    }
+
+    private void ShowCoachMark(CoachMark mark)
+    {
+        _coachShowing = mark;
+
+        _spotlightLabel.Text = CardEffects.Introduction(mark.Card);
+        _spotlightNext.Visible = true;
+        _spotlightSkip.Visible = false; // there is nothing to skip: it is one line, once ever
+
+        MoveChild(_spotlightOverlay, GetChildCount() - 1);
+        _spotlightOverlay.Visible = true;
+        PlaceSpotlight(CoachTarget(mark), blockHole: true);
+    }
+
+    private void DismissCoachMark()
+    {
+        if (!_coachShowing.HasValue) return;
+
+        RunData.Instance?.MarkCardMet(CardEffects.MetKey(_coachShowing.Value.Card));
+        _coachShowing = null;
+
+        if (_spotlightOverlay != null) _spotlightOverlay.Visible = false;
+        if (_spotlightSkip != null) _spotlightSkip.Visible = true;
+
+        CallDeferred(MethodName.UpdateUI); // which drains the next one, if there is one
+    }
+
+    /// One button, two owners. The tutorial advances; a coach-mark is simply done.
+    private void OnSpotlightNextPressed()
+    {
+        if (_coachShowing.HasValue) DismissCoachMark();
+        else AdvanceTutorial();
     }
 
     // ------------------------------------------------------------------

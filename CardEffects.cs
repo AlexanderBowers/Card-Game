@@ -238,6 +238,35 @@ public static class CardEffects
         return $"{Label(card.Effect)} cannot be played right now.";
     }
 
+    /// What this card is called in the "cards you have met" set, or null for a card that needs no
+    /// introduction. A plain +3 explains itself; an effect card and the "+/-" card do not.
+    ///
+    /// The effect's NAME rather than its number: the enum's ints are save slots and a scrapped
+    /// card keeps its slot, but a name is stable and readable in the save file, and it leaves room
+    /// for keys that are not effects at all.
+    public static string MetKey(Card card)
+    {
+        if (card == null) return null;
+        if (card.Effect != CardEffect.None) return card.Effect.ToString();
+        return card.IsFlip ? "flip" : null;
+    }
+
+    /// The one line shown the first time a player meets this card. Deliberately the SAME sentence
+    /// the market uses - two copies of an explanation drift, and the player would then be told two
+    /// different things about one card.
+    public static string Introduction(Card card)
+    {
+        if (card == null) return string.Empty;
+
+        if (card.Effect != CardEffect.None)
+            return $"{Label(card.Effect)} - {Description(card.Effect)}";
+
+        return card.IsFlip
+            ? "A \"+/-\" card can be played either way round. Pick it up and press + / - to swap it "
+            + "between plus and minus before you play it."
+            : string.Empty;
+    }
+
     /// One line for the market: what the card does, before the player has ever been hit with it.
     public static string Description(CardEffect effect)
     {

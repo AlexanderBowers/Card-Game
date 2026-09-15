@@ -163,6 +163,23 @@ public partial class RunData : Node
     /// has changed a great deal since they last read anything about it.
     public bool TutorialSeen { get; private set; }
 
+    /// Every card TYPE this player has been introduced to - see CardEffects.MetKey for what a key
+    /// is. Profile level, for the same reason TutorialSeen is: meeting a card is something that
+    /// happened to the player, not to a run, and a lost run must not un-teach it.
+    ///
+    /// This is also the set a collection log will read. It is keyed by string rather than by
+    /// CardEffect so it can hold the "+/-" card, which is not an effect at all, and later the
+    /// plain magnitudes - without renumbering anything already written to a save.
+    public HashSet<string> CardsMet { get; } = new HashSet<string>();
+
+    public bool HasMetCard(string key) => key == null || CardsMet.Contains(key);
+
+    public void MarkCardMet(string key)
+    {
+        if (key == null || !CardsMet.Add(key)) return;
+        Save();
+    }
+
     /// Set by the deck screen just before the table scene is reloaded for the next rung, so the player
     /// walks straight into the match instead of landing back on a Start button. Deliberately not
     /// saved: it is about this reload, not about the run. (This autoload survives the reload.)
@@ -361,6 +378,7 @@ public partial class RunData : Node
         StepIndex = 0;
         FurthestStep = 0;
         TutorialSeen = false; // a wiped save IS a first launch, tutorial included
+        CardsMet.Clear();
         Inventory.Clear();
         SideDeck.Clear();
         if (FileAccess.FileExists(SavePath)) DirAccess.RemoveAbsolute(ProjectSettings.GlobalizePath(SavePath));
@@ -437,14 +455,18 @@ public partial class RunData : Node
         Godot.Collections.Array sideDeck = new Godot.Collections.Array();
         foreach (int index in SideDeck) sideDeck.Add(index);
 
+        Godot.Collections.Array cardsMet = new Godot.Collections.Array();
+        foreach (string key in CardsMet) cardsMet.Add(key);
+
         Godot.Collections.Dictionary data = new Godot.Collections.Dictionary
         {
-            { "version", 4 },
+            { "version", 5 },
             { "active", RunActive },
             { "medals", Medals },
             { "step", StepIndex },
             { "furthest", FurthestStep },
             { "tutorialSeen", TutorialSeen },
+            { "cardsMet", cardsMet },
             { "inventory", inventory },
             { "sideDeck", sideDeck },
         };
@@ -475,6 +497,19 @@ public partial class RunData : Node
         StepIndex = data.TryGetValue("step", out Variant step) ? step.AsInt32() : 0;
         FurthestStep = data.TryGetValue("furthest", out Variant furthest) ? furthest.AsInt32() : StepIndex;
         TutorialSeen = data.TryGetValue("tutorialSeen", out Variant taught) && taught.AsBool();
+
+        // A version 4 save has no key and loads as an empty set, so an existing player is
+        // introduced to each card once more. That is the right way round: the alternative is
+        // assuming they have met cards nobody ever showed them.
+        CardsMet.Clear();
+        if (data.TryGetValue("cardsMet", out Variant met))
+        {
+            foreach (Variant entry in met.AsGodotArray())
+            {
+                string key = entry.AsString();
+                if (!string.IsNullOrEmpty(key)) CardsMet.Add(key);
+            }
+        }
 
         Inventory.Clear();
         if (data.TryGetValue("inventory", out Variant inventoryVariant))
