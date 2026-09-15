@@ -235,6 +235,7 @@ public partial class GameManager : Node
         _p2WinChips = EnsureWinChips(_p2WinsLabel);
 
         BuildDeckCounter();
+        BuildSpotlight();
         BuildRoundEndOverlay();
         BuildHowToPlay();
         CompactControlPanel(); // must precede BuildConfirmRows - see the method
@@ -556,9 +557,17 @@ public partial class GameManager : Node
         if (_gameModeButton != null) _gameModeButton.Visible = false;
 
         BeginRunMatch();
+
+        // Decided BEFORE the hand is dealt and before the first shuffle, because staging is a
+        // change to both of them.
+        bool tutorial = ShouldRunTutorial();
+        _tutorialStaged = tutorial && ShouldStageTutorial();
+
         DealMatchHands(); // the hand has to last all three rounds of the match
 
         StartNewRound(); // UpdateUI enables the End Turn / Hold buttons
+
+        if (tutorial) StartTutorial();
     }
 
     /// Puts the solo scene onto the ladder: picks up the run in progress (or starts one), and takes
@@ -595,6 +604,21 @@ public partial class GameManager : Node
     /// the hand is dealt at random.
     private void DealMatchHands()
     {
+        // The staged hand for the tutorial. The +4 is the lesson - it takes the staged opening of
+        // 16 to exactly 20 - and the other three are there so the hand looks like a normal one.
+        if (_tutorialStaged)
+        {
+            _player1.ModifierHand.Clear();
+            foreach (int value in TutorialHand)
+                _player1.ModifierHand.Add(new Card(value, CardType.Modifier));
+
+            _player1.ResetForNewMatch();
+            _player2.ResetForNewMatch();
+            DealAiHand();
+            ClearSelections();
+            return;
+        }
+
         List<Card> runHand = _inRun ? RunData.Instance?.DrawMatchHand() : null;
         if (runHand != null && runHand.Count > 0)
         {
@@ -746,6 +770,15 @@ public partial class GameManager : Node
             int swap = _mainDeck[i];
             _mainDeck[i] = _mainDeck[j];
             _mainDeck[j] = swap;
+        }
+
+        // The staged opening for the tutorial's first round. Each value is REMOVED from the
+        // shuffled remainder before being appended, so the deck still holds exactly four of each
+        // and the rest of the round is as random as any other.
+        if (_tutorialStaged && _gameState.CurrentRound == 1)
+        {
+            foreach (int value in TutorialOpening) _mainDeck.Remove(value);
+            _mainDeck.AddRange(TutorialOpening);
         }
     }
 
@@ -942,6 +975,11 @@ public partial class GameManager : Node
 
     private async void ProcessAiTurn()
     {
+        // Held for the whole walkthrough. The game is simultaneous and the bot acts on a timer, so
+        // a tutorial step that waited while the bot played would teach a table that had already
+        // moved. FinishTutorial calls this again to release it.
+        if (_tutorialActive) return;
+
         if (_aiTurnInProgress || !_player2.CanAct) return; // never run two AI turns at once
         _aiTurnInProgress = true;
         UpdateUI(); // shows "Thinking..." on the bot's side
@@ -2027,6 +2065,7 @@ public partial class GameManager : Node
         UpdateConfirmRow(_player2, _p2ConfirmRow, _p2PlayButton, _p2FlipButton, _p2ActionRow);
 
         RefreshHandUI();
+        CheckTutorialProgress();
         CallDeferred(MethodName.UpdateRotatorSize);
 
         // The layout is only as big as what is IN it, and what is in it changes here - the hands
@@ -2808,6 +2847,18 @@ public partial class GameManager : Node
             box.AddChild(moved);
         }
 
+        // Replaying reloads the match, because the walkthrough is staged into the deal - so it
+        // has to be decided before the cards are dealt, not after. The static survives the reload.
+        Button replay = new Button { Text = "Replay the tutorial" };
+        replay.Pressed += () =>
+        {
+            HideTableMenu();
+            _pendingTutorial = true;
+            RunData.Instance?.ReplayTutorial();
+            OnRestartPressed();
+        };
+        box.AddChild(replay);
+
         Button close = new Button { Text = "Back to the table" };
         close.Pressed += HideTableMenu;
         box.AddChild(close);
@@ -3530,6 +3581,346 @@ public partial class GameManager : Node
 
         HideStartMenu();
         OnStartButtonPressed();
+    }
+
+    // ------------------------------------------------------------------
+    // The first-launch tutorial (Alexander, 2026-09-15)
+    //
+    // Against the bot there is nobody in the room to explain the game, so the game has to teach
+    // it. Six steps, each highlighting ONE control with one or two lines - the anti-wall-of-text
+    // the tenets ask for, and the only form that works at both ends of the 5-to-85 range.
+    //
+    // It teaches THE TABLE AND ONLY THE TABLE. The ladder is already the tutorial for the cards:
+    // ten rungs, one new card each, used on you by an opponent before the market will sell it to
+    // you. A tutorial that also explained effect cards would be competing with a teaching
+    // structure that already works, and would have to explain six cards the player cannot yet own.
+    //
+    // THE FIRST MATCH IS STAGED (Alexander's call): the deck is stacked so the opening deal is
+    // 10 + 6 = 16 against the bot's 9 + 5, and the hand holds a +4. The lesson therefore ends with
+    // the player making the RIGHT play - picking up the +4, seeing 16 + 4 = 20 in green, playing
+    // it and holding on the target - rather than any play. Staging only happens at a target of 20
+    // (see ShouldStageTutorial); replayed at any other rung the same six steps run on a real deal,
+    // and every caption reads live values so none of them can lie.
+    // ------------------------------------------------------------------
+
+    /// The opening cards, APPENDED in this order - the deck is drawn from the end, and the deal
+    /// order is P1, P2, P1, P2. So the last entry is Player 1's first card.
+    private static readonly int[] TutorialOpening = { 5, 6, 9, 10 };
+
+    /// Player 1's staged hand. The +4 is the lesson; the rest are there so the hand looks normal.
+    private static readonly int[] TutorialHand = { 4, 3, -2, -1 };
+
+    private const int TutorialSteps = 6;
+    private const float SpotlightPad = 10f;
+
+    /// Set by "Replay the tutorial", which reloads the scene - so it is a static, for the same
+    /// reason _pendingLocal2Player is. It survives the reload; it is never saved to disk.
+    private static bool _pendingTutorial;
+
+    private bool _tutorialActive;
+    private bool _tutorialStaged;   // this match's deck and hand are stacked for the lesson
+    private int _tutorialIndex;
+    private int _tutorialHandSize;  // to notice a card actually being played
+
+    private Control _spotlightOverlay;
+    private ColorRect[] _spotlightShades;
+    private ColorRect _spotlightHoleBlock;
+    private PanelContainer _spotlightCaption;
+    private Label _spotlightLabel;
+    private Button _spotlightNext;
+
+    // ---- the overlay -------------------------------------------------
+
+    /// A hole cut in a dim, made of FOUR rects around the highlighted control rather than a
+    /// shader. Cheap, no material, correct at every scale and orientation - and it degrades
+    /// honestly: a wrong rect shows a misplaced hole rather than a black screen.
+    ///
+    /// The shades are the input gate as well as the dim. They stop mouse events; the hole has no
+    /// child, so taps inside it fall straight through to the control being taught. That is the
+    /// whole mechanism behind a "do" step, and it needs no changes to HumanCanActFor at all. A
+    /// "tell" step drops a transparent blocker over the hole as well, and nothing is clickable.
+    private void BuildSpotlight()
+    {
+        _spotlightOverlay = new Control { Visible = false, MouseFilter = Control.MouseFilterEnum.Ignore };
+        AddChild(_spotlightOverlay);
+        _spotlightOverlay.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
+
+        Color shade = new Color(0, 0, 0, 0.72f);
+        _spotlightShades = new ColorRect[4];
+        for (int i = 0; i < _spotlightShades.Length; i++)
+        {
+            ColorRect rect = new ColorRect { Color = shade, MouseFilter = Control.MouseFilterEnum.Stop };
+            _spotlightOverlay.AddChild(rect);
+            _spotlightShades[i] = rect;
+        }
+
+        _spotlightHoleBlock = new ColorRect
+        {
+            Color = new Color(0, 0, 0, 0),
+            MouseFilter = Control.MouseFilterEnum.Stop,
+            Visible = false,
+        };
+        _spotlightOverlay.AddChild(_spotlightHoleBlock);
+
+        _spotlightCaption = new PanelContainer();
+        StyleBoxFlat style = new StyleBoxFlat { BgColor = OverlayUi.PanelBg, BorderColor = OverlayUi.PanelBorder };
+        style.SetBorderWidthAll(2);
+        style.SetCornerRadiusAll(12);
+        style.SetContentMarginAll(18);
+        _spotlightCaption.AddThemeStyleboxOverride("panel", style);
+        _spotlightOverlay.AddChild(_spotlightCaption);
+
+        VBoxContainer box = new VBoxContainer();
+        box.AddThemeConstantOverride("separation", 12);
+        _spotlightCaption.AddChild(box);
+
+        _spotlightLabel = new Label
+        {
+            AutowrapMode = TextServer.AutowrapMode.WordSmart,
+            HorizontalAlignment = HorizontalAlignment.Center,
+        };
+        _spotlightLabel.AddThemeFontSizeOverride("font_size", 22);
+        box.AddChild(_spotlightLabel);
+
+        HBoxContainer buttons = new HBoxContainer { Alignment = BoxContainer.AlignmentMode.Center };
+        buttons.AddThemeConstantOverride("separation", 16);
+        box.AddChild(buttons);
+
+        // Skip is on EVERY step, not earned by sitting through the first one. Somebody who has
+        // played this kind of game before does not want six taps, and making them work for the
+        // way out is how you lose them on the first screen.
+        Button skip = new Button { Text = "Skip" };
+        skip.Pressed += () => FinishTutorial();
+        buttons.AddChild(skip);
+
+        _spotlightNext = new Button { Text = "Got it" };
+        _spotlightNext.Pressed += AdvanceTutorial;
+        buttons.AddChild(_spotlightNext);
+    }
+
+    /// The highlighted control's axis-aligned box in screen space. Taken through the full
+    /// transform rather than GlobalPosition, for the same reason AnimateCardDrop does it: a side
+    /// of the table may be rotated 180 degrees, and a rotated control's position is not its corner.
+    private static Rect2 ScreenRectOf(Control target)
+    {
+        Transform2D t = target.GetGlobalTransform();
+        Vector2 size = target.Size;
+        Vector2 a = t * Vector2.Zero;
+        Vector2 b = t * new Vector2(size.X, 0f);
+        Vector2 c = t * new Vector2(0f, size.Y);
+        Vector2 d = t * size;
+
+        Vector2 min = new Vector2(Mathf.Min(Mathf.Min(a.X, b.X), Mathf.Min(c.X, d.X)),
+                                  Mathf.Min(Mathf.Min(a.Y, b.Y), Mathf.Min(c.Y, d.Y)));
+        Vector2 max = new Vector2(Mathf.Max(Mathf.Max(a.X, b.X), Mathf.Max(c.X, d.X)),
+                                  Mathf.Max(Mathf.Max(a.Y, b.Y), Mathf.Max(c.Y, d.Y)));
+        return new Rect2(min, max - min);
+    }
+
+    private void PlaceSpotlight(Control target, bool blockHole)
+    {
+        if (_spotlightOverlay == null) return;
+
+        Vector2 vp = GetViewport().GetVisibleRect().Size;
+        Rect2 hole = (target != null && target.IsInsideTree() && target.Size.X > 1f)
+            ? ScreenRectOf(target).Grow(SpotlightPad)
+            : new Rect2(vp / 2f, Vector2.Zero); // no target: a plain dim, no hole
+
+        float left = Mathf.Clamp(hole.Position.X, 0f, vp.X);
+        float top = Mathf.Clamp(hole.Position.Y, 0f, vp.Y);
+        float right = Mathf.Clamp(hole.End.X, 0f, vp.X);
+        float bottom = Mathf.Clamp(hole.End.Y, 0f, vp.Y);
+
+        SetRect(_spotlightShades[0], 0f, 0f, vp.X, top);                       // above
+        SetRect(_spotlightShades[1], 0f, bottom, vp.X, vp.Y - bottom);         // below
+        SetRect(_spotlightShades[2], 0f, top, left, bottom - top);             // left
+        SetRect(_spotlightShades[3], right, top, vp.X - right, bottom - top);  // right
+
+        SetRect(_spotlightHoleBlock, left, top, right - left, bottom - top);
+        _spotlightHoleBlock.Visible = blockHole;
+
+        // The caption goes under the hole, or over it when the hole is low - it must never cover
+        // the thing it is pointing at.
+        //
+        // The width comes from the VIEWPORT, never from the caption's own minimum: an autowrapping
+        // Label reports its UNWRAPPED single-line width as its minimum until it has been laid out
+        // once. Measure first and the panel comes out screen-wide and one line tall, with the text
+        // clipped - the same trap the stats row hit with HFlowContainer. Give it the width, and
+        // the height follows from it. The floor covers the frame before that height is right.
+        float width = Mathf.Min(vp.X * 0.72f, vp.X - 32f);
+        _spotlightLabel.CustomMinimumSize = new Vector2(Mathf.Max(80f, width - 40f), 0f);
+
+        float height = Mathf.Max(_spotlightCaption.GetCombinedMinimumSize().Y, vp.Y * 0.14f);
+        float x = Mathf.Max(16f, (vp.X - width) / 2f);
+        float y = (bottom + 16f + height <= vp.Y - 16f) ? bottom + 16f : Mathf.Max(16f, top - 16f - height);
+        SetRect(_spotlightCaption, x, y, width, height);
+    }
+
+    private static void SetRect(Control control, float x, float y, float width, float height)
+    {
+        control.SetAnchorsPreset(Control.LayoutPreset.TopLeft);
+        control.Position = new Vector2(x, y);
+        control.Size = new Vector2(Mathf.Max(0f, width), Mathf.Max(0f, height));
+    }
+
+    // ---- the steps ---------------------------------------------------
+
+    private Control TutorialTarget(int step)
+    {
+        switch (step)
+        {
+            case 0: return _p1ScoreLabel;
+            case 1: return _mainDeckPosition;
+            case 2: return _p1HandContainer;
+            case 3: return _p1ConfirmRow;
+            case 4: return _p1ActionRow;
+            case 5: return _p1WinsLabel?.GetParent() as Control;
+            default: return null;
+        }
+    }
+
+    /// Steps 2-4 are DO steps: the player performs the thing rather than reading about it. That is
+    /// the difference between a tutorial and a slideshow, and for both ends of the 5-to-85 range
+    /// it is the whole point - "tap the card, then tap Play" is learned by doing it once.
+    private static bool TutorialIsDoStep(int step) => step >= 2 && step <= 4;
+
+    private string TutorialTextFor(int step)
+    {
+        switch (step)
+        {
+            case 0:
+                return $"This is your score. You are at {_player1.CurrentScore}, and you are aiming "
+                     + $"for {_gameState.TargetScore} without going over.";
+            case 1:
+                return "One deck of 40, shared by both of you - four each of 1 to 10. The number on "
+                     + "it is how many are left, so it can be counted.";
+            case 2:
+                return "These cards are yours for the whole match. Tap one to pick it up.";
+            case 3:
+                return "Nothing is spent yet. The line under your cards shows the score it would "
+                     + "make - green is safe, red goes over. Tap Play.";
+            case 4:
+                // Reads the live score, so it is honest on a staged first match and on a replay.
+                return (_player1.CurrentScore >= _gameState.TargetScore - 2)
+                    ? "You are on target. Hold stops you taking cards and locks your score in for "
+                    + "the rest of the round."
+                    : "End Turn takes another card next deal. Hold stops you there and locks your "
+                    + "score in. Choose one.";
+            case 5:
+                return $"Win {GameState.RoundsToWinMatch} rounds to take the match. These are yours "
+                     + "so far. That is everything - good luck.";
+            default:
+                return string.Empty;
+        }
+    }
+
+    /// True once the player has done the thing the current DO step asked for.
+    private bool TutorialStepDone(int step)
+    {
+        switch (step)
+        {
+            case 2: return _p1SelectedCard != null;
+            case 3: return _player1.ModifierHand.Count < _tutorialHandSize;
+            case 4: return !_player1.CanAct;
+            default: return false;
+        }
+    }
+
+    // ---- running it --------------------------------------------------
+
+    /// First launch, or an explicit replay. Gated on the run's OWN step rather than the all-time
+    /// best, and on the profile-level flag, so it happens once and never nags.
+    private bool ShouldRunTutorial()
+    {
+        if (!_isVsBot || !_inRun) return false;
+        if (_pendingTutorial) return true;
+
+        RunData run = RunData.Instance;
+        return run != null && !run.TutorialSeen && run.StepIndex == 0;
+    }
+
+    /// Only stage the deal where the staged numbers are true. The lesson lands on exactly the
+    /// target, which needs a two-card opening (target 20 or more) and a +4 that reaches it from
+    /// 16 - so it is stage 1's ruleset or nothing. A replay at any other rung runs the same six
+    /// steps on a real deal, and every caption reads live values, so nothing said is ever wrong.
+    private bool ShouldStageTutorial() => _gameState.TargetScore == 20;
+
+    private async void StartTutorial()
+    {
+        _tutorialActive = true;
+        _tutorialIndex = 0;
+        _tutorialHandSize = _player1.ModifierHand.Count;
+
+        // Let the opening deal land first - being taught about a score before the cards that made
+        // it have arrived is worse than waiting half a second.
+        for (int i = 0; i < 40; i++)
+        {
+            await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+            if (!IsInsideTree() || !_tutorialActive) return;
+        }
+
+        MoveChild(_spotlightOverlay, GetChildCount() - 1);
+        _spotlightOverlay.Visible = true;
+        RefreshSpotlight();
+    }
+
+    private void AdvanceTutorial()
+    {
+        if (!_tutorialActive) return;
+
+        _tutorialIndex++;
+        if (_tutorialIndex >= TutorialSteps)
+        {
+            FinishTutorial();
+            return;
+        }
+
+        if (_tutorialIndex == 3) _tutorialHandSize = _player1.ModifierHand.Count;
+        RefreshSpotlight();
+    }
+
+    private void RefreshSpotlight()
+    {
+        if (!_tutorialActive || _spotlightOverlay == null || !_spotlightOverlay.Visible) return;
+
+        bool doStep = TutorialIsDoStep(_tutorialIndex);
+        _spotlightLabel.Text = TutorialTextFor(_tutorialIndex);
+        _spotlightNext.Visible = !doStep;   // a DO step is finished by doing it, not by a button
+        PlaceSpotlight(TutorialTarget(_tutorialIndex), blockHole: !doStep);
+    }
+
+    /// Runs from UpdateUI, which is called after every action that could complete a step - so a
+    /// step's completion never has to be wired into the five handlers that could cause it.
+    private void CheckTutorialProgress()
+    {
+        if (!_tutorialActive || _spotlightOverlay == null || !_spotlightOverlay.Visible) return;
+
+        if (TutorialIsDoStep(_tutorialIndex) && TutorialStepDone(_tutorialIndex))
+        {
+            AdvanceTutorial();
+            return;
+        }
+
+        CallDeferred(MethodName.RefreshSpotlight); // the highlighted control may have moved
+    }
+
+    private void FinishTutorial()
+    {
+        if (!_tutorialActive) return;
+
+        _tutorialActive = false;
+        _pendingTutorial = false;
+        if (_spotlightOverlay != null) _spotlightOverlay.Visible = false;
+        RunData.Instance?.MarkTutorialSeen();
+
+        // The bot has been held for the whole walkthrough (ProcessAiTurn refuses to run while the
+        // tutorial is up) so the lesson could not desync from a table moving underneath it. Let it
+        // think now, and the deal resolves normally from here.
+        if (_isVsBot && _isGameStarted && !_gameState.IsGameOver) ProcessAiTurn();
+
+        // Deferred: FinishTutorial can be reached from inside UpdateUI (a DO step completing on
+        // the last one), and a re-entrant refresh is the kind of thing that works until it doesn't.
+        CallDeferred(MethodName.UpdateUI);
     }
 
     // ------------------------------------------------------------------
