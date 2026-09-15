@@ -150,6 +150,19 @@ public partial class RunData : Node
     /// player's record, and the proof on the losing screen that a loss did not erase them.
     public int FurthestStep { get; private set; }
 
+    /// Whether this player has been walked through the table once.
+    ///
+    /// PROFILE level, not run level - what the player has been TAUGHT survives a lost run, exactly
+    /// as the collection does. StartNewRun deliberately leaves it alone, and that is the one line
+    /// worth guarding: clearing it there would replay the tutorial at the top of every new run, on
+    /// a player who has already climbed nine rungs.
+    ///
+    /// A version 3 save has no key for this and so loads as false. That is right rather than
+    /// unfortunate: the tutorial only ever triggers on stage 1 of a fresh run, so an existing
+    /// player mid-ladder never sees it, and one who starts over gets a walkthrough of a table that
+    /// has changed a great deal since they last read anything about it.
+    public bool TutorialSeen { get; private set; }
+
     /// Set by the deck screen just before the table scene is reloaded for the next rung, so the player
     /// walks straight into the match instead of landing back on a Start button. Deliberately not
     /// saved: it is about this reload, not about the run. (This autoload survives the reload.)
@@ -222,6 +235,22 @@ public partial class RunData : Node
             if (!SideDeck.Contains(i)) SideDeck.Add(i);
         }
 
+        Save();
+    }
+
+    /// Called once the walkthrough finishes or is skipped. Skipping counts as seen - a player who
+    /// skipped it chose that, and asking again next launch is nagging, not teaching. The table
+    /// menu's "Replay the tutorial" is how they get it back.
+    public void MarkTutorialSeen()
+    {
+        if (TutorialSeen) return;
+        TutorialSeen = true;
+        Save();
+    }
+
+    public void ReplayTutorial()
+    {
+        TutorialSeen = false;
         Save();
     }
 
@@ -331,6 +360,7 @@ public partial class RunData : Node
         Medals = 0;
         StepIndex = 0;
         FurthestStep = 0;
+        TutorialSeen = false; // a wiped save IS a first launch, tutorial included
         Inventory.Clear();
         SideDeck.Clear();
         if (FileAccess.FileExists(SavePath)) DirAccess.RemoveAbsolute(ProjectSettings.GlobalizePath(SavePath));
@@ -409,11 +439,12 @@ public partial class RunData : Node
 
         Godot.Collections.Dictionary data = new Godot.Collections.Dictionary
         {
-            { "version", 3 },
+            { "version", 4 },
             { "active", RunActive },
             { "medals", Medals },
             { "step", StepIndex },
             { "furthest", FurthestStep },
+            { "tutorialSeen", TutorialSeen },
             { "inventory", inventory },
             { "sideDeck", sideDeck },
         };
@@ -443,6 +474,7 @@ public partial class RunData : Node
         Medals = data.TryGetValue("medals", out Variant medals) ? medals.AsInt32() : 0;
         StepIndex = data.TryGetValue("step", out Variant step) ? step.AsInt32() : 0;
         FurthestStep = data.TryGetValue("furthest", out Variant furthest) ? furthest.AsInt32() : StepIndex;
+        TutorialSeen = data.TryGetValue("tutorialSeen", out Variant taught) && taught.AsBool();
 
         Inventory.Clear();
         if (data.TryGetValue("inventory", out Variant inventoryVariant))
