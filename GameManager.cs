@@ -3540,18 +3540,54 @@ public partial class GameManager : Node
     // overlay with the rules; it can be opened at any time and changes no game state. In mirrored
     // 2-player mode a "Flip for other player" button turns the panel upside down for Player 2.
     // ------------------------------------------------------------------
-    private static readonly string HowToPlayText =
+    // TWO texts, because the two modes have different learners (Alexander, 2026-09-15).
+    //
+    // In local 2-player somebody who already knows the game is sitting next to somebody who does
+    // not, and a person explains it far better than a panel does. That screen only has to carry
+    // the handful of rules the explainer might forget - so it is short on purpose, and making it
+    // longer would make it worse.
+    //
+    // Against the bot nobody is there to explain, so the game has to teach. The first-launch
+    // tutorial does that (claude/tutorial-and-how-to-play-spec.md); this text is the reference
+    // you come back to, and it deliberately does NOT enumerate the six effect cards - the ladder
+    // introduces them one rung at a time and explains each one where you meet it. A list of all
+    // six here would undo that, and it is exactly the "text-heavy wall" the tenets rule out.
+    private static readonly string HowToPlayShort =
         "GOAL\n" +
-        "Get as close to the target score (20) as you can without going over. " +
-        $"Win {GameState.RoundsToWinMatch} rounds to win the match.\n\n" +
+        "Get as close to the target without going over. The target is on your score line - " +
+        $"\"You  17/20\". Win {GameState.RoundsToWinMatch} rounds to win the match.\n\n" +
+        "EACH DEAL\n" +
+        "Both players are dealt a card at the same time. You both decide at the same time too - " +
+        "nobody waits for anyone.\n\n" +
+        "YOUR HAND\n" +
+        "Tap a card to pick it up, then Play. It adds its value to your score. Four cards, and they " +
+        "have to last the whole match.\n\n" +
+        "END TURN or HOLD\n" +
+        "End Turn: you are done for this deal, and you get another card next deal.\n" +
+        "Hold: you stop taking cards, and your score is locked for the rest of the round.\n\n" +
+        "GOING OVER\n" +
+        "Over the target is only a warning until you End Turn or Hold - a minus card can still save " +
+        "you. End the turn while over, and you bust.\n\n" +
+        "That is the whole game. Everything else is a card that explains itself when you meet it.";
+
+    private static readonly string HowToPlayFull =
+        "GOAL\n" +
+        "Get as close to the target as you can without going over. The target is on your own score " +
+        "line - \"You  17/20\" - and it CHANGES as you climb: 20 at first, then 23, then 18, and on " +
+        $"up. Win {GameState.RoundsToWinMatch} rounds to win the match.\n\n" +
+        "THE DECK\n" +
+        "One deck of 40 cards, shared by both players: four each of 1 to 10. It is shuffled fresh " +
+        "every round, and the number on it is how many cards are left - so it can be counted.\n\n" +
         "A ROUND\n" +
         "A round is a series of deals. Each deal, every player who isn't holding is dealt one card " +
-        "(worth 1 to 10) at the same time. Both players then decide - at the same time, without waiting " +
-        "for each other - whether to play a modifier card, and then press End Turn or Hold.\n\n" +
-        "MODIFIER CARDS\n" +
-        "Each player is dealt a hand of 4 random modifier cards at the start of the match. They are " +
-        "worth anywhere from -4 to +4, and playing one adds its value to your score. Each card can " +
-        "only be used once per match, so spend them wisely.\n\n" +
+        "at the same time. Both players then decide - at the same time, without waiting for each " +
+        "other - whether to play a hand card, and then press End Turn or Hold.\n" +
+        "When the target is 20 or more, the FIRST deal of a round gives everyone two cards. Two " +
+        "cards can never total more than 20, so that opening can never bust you.\n\n" +
+        "YOUR HAND\n" +
+        "You are dealt 4 cards at the start of a match, and they have to last every round of it - " +
+        "a card spent in round one is gone in round three. Plain ones are worth -4 to +4 and add " +
+        "their value to your score.\n\n" +
         "PLAYING A CARD\n" +
         "Tap a card in your hand to pick it up. It lifts, and your status line shows the sum it would " +
         "make - for example \"17 + 3 = 20\". Green means you would still be at or under the target, " +
@@ -3576,11 +3612,23 @@ public partial class GameManager : Node
         "is replayed.\n" +
         "- Otherwise the next deal is dealt to everyone who isn't holding.\n\n" +
         "Filling all 9 board slots without busting is still a good place to be - hold!\n\n" +
-        "VS. BOT\n" +
-        "The bot plays the same rules as you and decides at the same time as you do - you never have " +
-        "to wait for it to take your turn.";
+        "THE BOT\n" +
+        "It plays the same rules as you and decides at the same time as you do - you never wait for " +
+        "it to take its turn. It gets sharper as you climb: the early opponents play their own hand, " +
+        "the last ones play yours.\n\n" +
+        "THE CLIMB\n" +
+        "Ten matches, each against a tougher opponent at a different target. Winning pays medals; " +
+        "medals buy cards in the market between matches; the cards you own are slotted into a deck " +
+        "of 12, and 4 of those 12 are dealt to you each match. Losing a match ends the run - but " +
+        "nothing you own is ever taken away.\n\n" +
+        "SPECIAL CARDS\n" +
+        "Most rungs of the climb introduce one new card that does something other than add a number - " +
+        "changing a card, taking a score, undoing a play. Each one is explained the first time you " +
+        "meet it, and the market sells it to you straight afterwards. There is nothing to memorise " +
+        "here: you will always have met a card before you can buy it.";
 
     private Control _howToPlayOverlay;
+    private Label _howToPlayRules;
     private PanelContainer _howToPlayPanel;
     private Button _howToPlayFlipButton;
     private bool _howToPlayFlipped = false;
@@ -3638,14 +3686,14 @@ public partial class GameManager : Node
         };
         box.AddChild(scroll);
 
-        Label rules = new Label
+        _howToPlayRules = new Label
         {
-            Text = HowToPlayText,
+            Text = HowToPlayShort,
             AutowrapMode = TextServer.AutowrapMode.Word,
             SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
         };
-        rules.AddThemeFontSizeOverride("font_size", 20);
-        scroll.AddChild(rules);
+        _howToPlayRules.AddThemeFontSizeOverride("font_size", 20);
+        scroll.AddChild(_howToPlayRules);
 
         HBoxContainer buttons = new HBoxContainer { Alignment = BoxContainer.AlignmentMode.Center };
         buttons.AddThemeConstantOverride("separation", 16);
@@ -3665,9 +3713,17 @@ public partial class GameManager : Node
         buttons.AddChild(close);
     }
 
+    /// Which of the two texts this screen is showing. Against the bot, the long one; with two
+    /// people at one device, the short one. From the start menu - before a mode has been picked -
+    /// the short one too: somebody who has not started yet wants to know what the game IS, and the
+    /// tutorial will teach them the rest at the table.
+    private string HowToPlayForThisMode() =>
+        (_isGameStarted && _isVsBot) ? HowToPlayFull : HowToPlayShort;
+
     private void ShowHowToPlay()
     {
         if (_howToPlayOverlay == null) return;
+        if (_howToPlayRules != null) _howToPlayRules.Text = HowToPlayForThisMode();
         _howToPlayFlipped = false;
         _howToPlayPanel.RotationDegrees = 0f;
         _howToPlayFlipButton.Visible = IsMirrored;
