@@ -17,7 +17,7 @@ compatibility/default_parent_skeleton_in_mesh_instance_3d=true
 config/name="Aim for 20"
 run/main_scene="uid://b7qn5xyxoj23q"
 config/features=PackedStringArray("4.7", "C#", "Mobile")
-config/icon="res://icon.svg"
+config/icon="res://assets/icon/icon_256.png"
 
 [autoload]
 
