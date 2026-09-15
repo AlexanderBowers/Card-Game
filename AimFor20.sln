@@ -1,6 +1,6 @@
 ﻿Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio 2012
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CardGame2", "CardGame2.csproj", "{BBD6CE75-B093-47AE-8691-55BB5F3DF1E2}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AimFor20", "AimFor20.csproj", "{BBD6CE75-B093-47AE-8691-55BB5F3DF1E2}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution

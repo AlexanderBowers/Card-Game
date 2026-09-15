@@ -34,7 +34,7 @@ There are two update loops. Use both:
 ## 3. Commit-based updates (GitHub Actions)
 
 `.github/workflows/android.yml` runs on every push to `main`:
-downloads Godot 4.7.2 .NET + templates, exports a debug APK, stamps `versionCode` with the run number, and publishes a GitHub Release tagged `android-v<N>` with `CardGame2.apk` attached.
+downloads Godot 4.7.2 .NET + templates, exports a debug APK, stamps `versionCode` with the run number, and publishes a GitHub Release tagged `android-v<N>` with `AimFor20.apk` attached.
 
 ### 3a. Shared signing key (do this once — important)
 Android refuses to install an update unless it is signed with the same key as the installed app. Generate one key and store it as a repo secret so every CI build uses it:
@@ -59,7 +59,7 @@ Also point the Godot editor at this same file (*Editor Settings → Export → A
 
 1. Install Obtainium (F-Droid, or the APK from its GitHub releases).
 2. Obtainium → **+** → App source URL: `https://github.com/AlexanderBowers/Card-Game`
-3. It will pick up the newest `android-v<N>` release and install `CardGame2.apk`. Allow "Install unknown apps" for Obtainium when prompted.
+3. It will pick up the newest `android-v<N>` release and install `AimFor20.apk`. Allow "Install unknown apps" for Obtainium when prompted.
 4. Obtainium checks for new releases in the background (interval configurable in its settings) and shows an install prompt when a new build lands. Pull-to-refresh forces a check.
 
 (Alternative without Obtainium: open the repo's **Releases** page in the phone browser and tap the APK.)
@@ -71,7 +71,7 @@ Also point the Godot editor at this same file (*Editor Settings → Export → A
 Progress: GitHub → *Actions*. The first run is slower (downloads Godot, ~1 GB); later runs hit the cache.
 
 ## Notes
-- `export_presets.cfg` is committed on purpose — CI needs it. The package id is `com.alexbowers.cardgame2`; change it in the preset if you want something else **before** the first install (changing it later creates a second app).
+- `export_presets.cfg` is committed on purpose — CI needs it. The package id is `com.alexbowers.aimfor20`; change it in the preset if you want something else **before** the first install (changing it later creates a second app).
 - Display settings in `project.godot` were set to `canvas_items` stretch / `expand` aspect / sensor orientation: the 2-player table (vertical layout) reads best in portrait, the vs-bot table (side-by-side) in landscape — rotate the phone.
 - The Android back gesture and the in-game **Exit** button both quit the app; **Restart** reloads the current scene (fresh match, same mode).
 - C# on Android is still flagged "experimental" by Godot; if an export fails, the error log in *Actions* (or the editor Output panel) is the first place to look.

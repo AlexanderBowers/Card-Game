@@ -100,7 +100,7 @@ jobs:
         run: |
           set -euo pipefail
           echo "dotnet: $(dotnet --version)"
-          TFM=$(dotnet build CardGame2.csproj /p:GodotTargetPlatform=android --getProperty:TargetFramework 2>&1 | tee build/tfm-check.log | tail -1) || true
+          TFM=$(dotnet build AimFor20.csproj /p:GodotTargetPlatform=android --getProperty:TargetFramework 2>&1 | tee build/tfm-check.log | tail -1) || true
           echo "TargetFramework for android => '${TFM}'"
           if [ "${TFM}" != "net9.0" ]; then
             echo "::error::Godot needs the Android TargetFramework to resolve to net9.0 but got '${TFM}'. Build output follows."
@@ -121,10 +121,10 @@ jobs:
           echo "ANDROID_HOME=${ANDROID_HOME:-<unset>}  JAVA_HOME=${JAVA_HOME:-<unset>}"
           ls "${ANDROID_HOME}/build-tools" "${ANDROID_HOME}/platform-tools" 2>&1 | head -20
           set +e
-          godot --headless --path . --verbose --export-debug "Android" build/CardGame2.apk 2>&1 | tee build/export.log
+          godot --headless --path . --verbose --export-debug "Android" build/AimFor20.apk 2>&1 | tee build/export.log
           STATUS=${PIPESTATUS[0]}
           set -e
-          if [ "${STATUS}" != "0" ] || [ ! -s build/CardGame2.apk ]; then
+          if [ "${STATUS}" != "0" ] || [ ! -s build/AimFor20.apk ]; then
             # Full log tail into the job summary (public), key lines into annotations.
             {
               echo "## Godot export failed (exit ${STATUS})"
@@ -149,8 +149,8 @@ jobs:
       - name: Upload APK as workflow artifact
         uses: actions/upload-artifact@v4
         with:
-          name: CardGame2-android-${{ github.run_number }}
-          path: build/CardGame2.apk
+          name: AimFor20-android-${{ github.run_number }}
+          path: build/AimFor20.apk
 
       - name: Publish GitHub Release (phone auto-updates from here)
         uses: softprops/action-gh-release@v2
@@ -160,4 +160,4 @@ jobs:
           body: |
             Debug APK built from ${{ github.sha }}
             ${{ github.event.head_commit.message }}
-          files: build/CardGame2.apk
+          files: build/AimFor20.apk
