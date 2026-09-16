@@ -719,6 +719,7 @@ public partial class GameManager : Node
         }
 
         if (!run.RunActive || run.RunComplete) run.StartNewRun();
+        run.EnsureRuleset(); // a save from before the finale was rolled on arrival
 
         _inRun = true;
         _gameState.TargetScore = run.CurrentTarget;
@@ -816,6 +817,25 @@ public partial class GameManager : Node
         //
         // Still ONE card, dealt once for the whole match and spent when it is played. Hands are
         // not topped up between sets: the drama of a stage card is that there is one of it.
+        // The finale: two plain cards (one of them the "+/-") and one of each rolled effect.
+        List<CardEffect> rolled = run.CurrentRolledEffects;
+        if (rolled != null && rolled.Count > 0)
+        {
+            List<int> free = new List<int>();
+            for (int i = 0; i < hand.Count; i++) if (i != flipValueIndex) free.Add(i);
+            foreach (CardEffect effect in rolled)
+            {
+                if (free.Count == 0) break;
+                int pick = _random.Next(free.Count);
+                hand[free[pick]] = CardEffects.Create(effect, _random);
+                free.RemoveAt(pick);
+            }
+
+            _player2.Modifiers = hand;
+            _player2.EnsureBothSigns(_random);
+            return;
+        }
+
         CardEffect aiEffect = step.AiEffect;
         if (!CardEffects.IsWired(aiEffect) && run.MatchNumber >= 4)
         {
@@ -1925,7 +1945,8 @@ public partial class GameManager : Node
 
         RunData.LadderStep next = run.CurrentStep;
         return $"\n\nYou earned {earned} medals ({run.Medals} banked)." +
-               $"\nNext, stage {run.MatchNumber}: {next.Opponent}, target {next.TargetScore}." +
+               $"\nNext, stage {run.MatchNumber}: {next.Opponent}, target {run.CurrentTarget}." +
+               FinaleRulesLine(run, "\n") +
                "\nThe market is open first.";
     }
 
@@ -1992,6 +2013,16 @@ public partial class GameManager : Node
         // permanent "TARGET 20" here as well was one line of the clutter the playtest complained
         // about, and it said nothing the score line does not say closer to the number it governs.
         RunData run = _inRun ? RunData.Instance : null;
+
+        // The finale's rules were rolled, so they are news every time - say them whether or not
+        // the target happens to have moved.
+        if (run != null && run.CurrentRolledEffects != null)
+        {
+            _targetLabel.Text = $"FINAL  -  TARGET {_gameState.TargetScore}{FinaleRulesLine(run, "\n")}";
+            _targetLabel.AddThemeColorOverride("font_color", OverlayUi.MedalGold);
+            return;
+        }
+
         if (run == null || !run.TargetMovedThisStage)
         {
             _targetLabel.Text = string.Empty;
@@ -2003,6 +2034,16 @@ public partial class GameManager : Node
         string direction = run.CurrentTarget > run.PreviousTarget ? "up" : "down";
         _targetLabel.Text = $"TARGET  {_gameState.TargetScore}   ({direction} from {run.PreviousTarget})";
         _targetLabel.AddThemeColorOverride("font_color", OverlayUi.MedalGold);
+    }
+
+    /// "Rules: Copy + Shave" for the finale, prefixed; empty on any other rung.
+    private static string FinaleRulesLine(RunData run, string prefix)
+    {
+        List<CardEffect> rolled = run?.CurrentRolledEffects;
+        if (rolled == null || rolled.Count == 0) return string.Empty;
+        List<string> names = new List<string>();
+        foreach (CardEffect effect in rolled) names.Add(CardEffects.Label(effect));
+        return $"{prefix}Rules: {string.Join(" + ", names)}";
     }
 
     /// What an effect card just did, on the table. The explanation already existed - CardEffects

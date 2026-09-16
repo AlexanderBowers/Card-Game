@@ -68,9 +68,15 @@ public partial class RunData : Node
         /// lasts the whole match, so one effect card is about one dramatic moment per match.
         public readonly CardEffect AiEffect;
 
+        /// The finale: target and effect cards are rolled when the player arrives on this rung
+        /// (RunData.EnsureRuleset). TargetScore is then only a fallback that nothing should reach.
+        public readonly bool Randomised;
+
         public LadderStep(int rank, string opponent, int targetScore, int medalReward,
-                          bool aiHasFlipValueCards = true, CardEffect aiEffect = CardEffect.None)
+                          bool aiHasFlipValueCards = true, CardEffect aiEffect = CardEffect.None,
+                          bool randomised = false)
         {
+            Randomised = randomised;
             Rank = rank;
             Opponent = opponent;
             TargetScore = targetScore;
@@ -135,7 +141,7 @@ public partial class RunData : Node
         new LadderStep(3, "Ruby Challenger",     24,  6, true, CardEffect.TradeHands),      // 7
         new LadderStep(3, "Ruby Champion",       24,  8, true, CardEffect.Recall),          // 8
         new LadderStep(4, "Obsidian Challenger", 22,  8, true, CardEffect.Veto),            // 9
-        new LadderStep(4, "Obsidian Champion",   25, 10, true),                             // 10 ruleset rolled
+        new LadderStep(4, "Obsidian Champion",   25, 10, true, randomised: true),           // 10 ruleset rolled
     };
 
     public static int LadderLength => Ladder.Length;
@@ -313,7 +319,8 @@ public partial class RunData : Node
     // The ladder
     // ------------------------------------------------------------------
     public LadderStep CurrentStep => Ladder[Mathf.Clamp(StepIndex, 0, Ladder.Length - 1)];
-    public int CurrentTarget => CurrentStep.TargetScore;
+    public int CurrentTarget =>
+        (CurrentStep.Randomised && RolledStep == StepIndex) ? RolledTarget : CurrentStep.TargetScore;
     public Rank CurrentRank => Ranks[Mathf.Clamp(CurrentStep.Rank, 0, Ranks.Length - 1)];
     public int MatchNumber => Mathf.Clamp(StepIndex, 0, Ladder.Length - 1) + 1;
     public bool RunComplete => StepIndex >= Ladder.Length;
@@ -326,6 +333,72 @@ public partial class RunData : Node
     /// that number quietly - the player has to be told, on the rung where it happens.
     public bool TargetMovedThisStage => StepIndex > 0 && CurrentTarget != PreviousTarget;
 
+    // ------------------------------------------------------------------
+    // The randomised finale (stage-ladder-spec.md, "Stage 9+")
+    //
+    // Rolled when the player ARRIVES on the rung and saved with the run, so quitting and resuming
+    // plays the same match rather than re-rolling until the dice are kind. Endless mode rolls with
+    // the same method.
+    // ------------------------------------------------------------------
+    public readonly struct Ruleset
+    {
+        public readonly int Target;
+        public readonly CardEffect[] Effects;
+        public Ruleset(int target, CardEffect[] effects) { Target = target; Effects = effects; }
+    }
+
+    /// The rung the saved roll belongs to, or -1. A roll for a rung the player is not on is stale.
+    public int RolledStep { get; private set; } = -1;
+    public int RolledTarget { get; private set; }
+    public List<CardEffect> RolledEffects { get; } = new List<CardEffect>();
+
+    /// The finale's rules, if the player is standing on it; otherwise null.
+    public List<CardEffect> CurrentRolledEffects =>
+        (CurrentStep.Randomised && RolledStep == StepIndex) ? RolledEffects : null;
+
+    /// A target away from the familiar 20, and two different effect cards - never Copy with
+    /// Trade Totals, which are both "the AI undoes the draw that ruined it" and together read as
+    /// the game cheating rather than as two rules.
+    public static Ruleset RollRuleset(Random rng, int minTarget = 18, int maxTarget = 25)
+    {
+        int target;
+        do target = rng.Next(minTarget, maxTarget + 1); while (target == 20 && minTarget < maxTarget);
+
+        List<CardEffect> pool = CardEffects.WiredEffects();
+        CardEffect first = pool[rng.Next(pool.Count)];
+        pool.Remove(first);
+        if (first == CardEffect.Copy) pool.Remove(CardEffect.TradeTotals);
+        if (first == CardEffect.TradeTotals) pool.Remove(CardEffect.Copy);
+        if (pool.Count == 0) return new Ruleset(target, new[] { first });
+        CardEffect second = pool[rng.Next(pool.Count)];
+
+        // Stage order, so the finale names them the way the ladder taught them.
+        CardEffect[] effects = { first, second };
+        Array.Sort(effects, (a, b) => StageThatIntroduces(a).CompareTo(StageThatIntroduces(b)));
+        return new Ruleset(target, effects);
+    }
+
+    /// Rolls the current rung's rules if it is randomised and has not been rolled. Safe to call
+    /// any number of times: the second call is a no-op, which is the whole point.
+    public void EnsureRuleset()
+    {
+        if (!CurrentStep.Randomised || RolledStep == StepIndex) return;
+
+        Ruleset rolled = RollRuleset(_random);
+        RolledStep = StepIndex;
+        RolledTarget = rolled.Target;
+        RolledEffects.Clear();
+        RolledEffects.AddRange(rolled.Effects);
+        Save();
+    }
+
+    private void ClearRuleset()
+    {
+        RolledStep = -1;
+        RolledTarget = 0;
+        RolledEffects.Clear();
+    }
+
     /// Starts a run at the bottom of the ladder. The LADDER resets; the COLLECTION does not.
     ///
     /// Losing must not wipe singleplayer progress (Alexander, 2026-09-07): every card the player
@@ -335,6 +408,7 @@ public partial class RunData : Node
     {
         RunActive = true;
         StepIndex = 0;
+        ClearRuleset();
 
         if (Inventory.Count == 0) Inventory.AddRange(StarterCollection);
         foreach (ModifierDef def in Inventory) CardsMet.Add(LogKey(def.Value, def.CanFlipValue, def.Effect));
@@ -383,6 +457,8 @@ public partial class RunData : Node
             Medals += setsWon + CurrentStep.MedalReward;
             StepIndex++;
             if (StepIndex > FurthestStep) FurthestStep = StepIndex;
+            // Rolled now, not when the match starts, so the market can already say what is next.
+            if (!RunComplete) EnsureRuleset();
         }
         else
         {
@@ -462,6 +538,8 @@ public partial class RunData : Node
         if (!RunActive) StartNewRun();
         StepIndex = Mathf.Clamp(stepIndex, 0, Ladder.Length - 1);
         if (StepIndex > FurthestStep) FurthestStep = StepIndex;
+        ClearRuleset();
+        EnsureRuleset(); // a debug jump onto the finale re-rolls it, which is what testing wants
         Save();
     }
 
@@ -472,6 +550,7 @@ public partial class RunData : Node
         Medals = 0;
         StepIndex = 0;
         FurthestStep = 0;
+        ClearRuleset();
         TutorialSeen = false; // a wiped save IS a first launch, tutorial included
         CardsMet.Clear();
         CollectorBack = false;
@@ -556,6 +635,9 @@ public partial class RunData : Node
         Godot.Collections.Array sideDeck = new Godot.Collections.Array();
         foreach (int index in SideDeck) sideDeck.Add(index);
 
+        Godot.Collections.Array rolledEffects = new Godot.Collections.Array();
+        foreach (CardEffect effect in RolledEffects) rolledEffects.Add((int)effect);
+
         Godot.Collections.Array cardsMet = new Godot.Collections.Array();
         foreach (string key in CardsMet) cardsMet.Add(key);
 
@@ -569,6 +651,9 @@ public partial class RunData : Node
             { "tutorialSeen", TutorialSeen },
             { "cardsMet", cardsMet },
             { "collectorBack", CollectorBack },
+            { "rolledStep", RolledStep },
+            { "rolledTarget", RolledTarget },
+            { "rolledEffects", rolledEffects },
             { "inventory", inventory },
             { "sideDeck", sideDeck },
         };
@@ -666,6 +751,23 @@ public partial class RunData : Node
         CollectorBack = data.TryGetValue("collectorBack", out Variant gilded)
             ? gilded.AsBool()
             : CollectionComplete;
+
+        // The finale's roll. Anything unreadable is dropped and re-rolled on arrival, which only
+        // costs the player a different - still fair - set of rules.
+        ClearRuleset();
+        if (data.TryGetValue("rolledStep", out Variant rolledStep) && rolledStep.AsInt32() >= 0
+            && data.TryGetValue("rolledEffects", out Variant rolledEffects))
+        {
+            foreach (Variant entry in rolledEffects.AsGodotArray())
+            {
+                int raw = entry.AsInt32();
+                if (Enum.IsDefined(typeof(CardEffect), raw) && CardEffects.IsWired((CardEffect)raw))
+                    RolledEffects.Add((CardEffect)raw);
+            }
+            RolledTarget = data.TryGetValue("rolledTarget", out Variant t) ? t.AsInt32() : 0;
+            RolledStep = (RolledEffects.Count > 0 && RolledTarget > 0) ? rolledStep.AsInt32() : -1;
+            if (RolledStep < 0) ClearRuleset();
+        }
 
         SideDeck.Clear();
         if (data.TryGetValue("sideDeck", out Variant deckVariant))

@@ -247,7 +247,7 @@ public partial class ShopOverlay : Control
             _offers.Add(new Offer { Def = def, Price = PriceOf(def) });
 
         RunData.LadderStep next = run.CurrentStep;
-        _subtitle.Text = $"Next: {next.Opponent} - target {next.TargetScore}";
+        _subtitle.Text = $"Next: {next.Opponent} - target {run.CurrentTarget}";
 
         // Above the set-end overlay and any stray animation card.
         Node parent = GetParent();
