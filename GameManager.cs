@@ -148,6 +148,9 @@ public partial class GameManager : Node
     private static readonly Rect2 RegionPlus = new Rect2(280, 380, 140, 190);   // cardBack_blue3  - positive modifiers
     private static readonly Rect2 RegionMinus = new Rect2(0, 380, 140, 190);    // cardBack_red3   - negative modifiers
     private static readonly Rect2 RegionDeckBack = new Rect2(140, 190, 140, 190); // cardBack_green4 - face-down deck
+    // The collection log's reward: a different back pattern, gilded. Cosmetic only.
+    private static readonly Rect2 RegionCollectorBack = new Rect2(140, 570, 140, 190); // cardBack_green5
+    private static readonly Color CollectorBackTint = new Color(1.45f, 1.2f, 0.45f);
     // The Kenney sheet has three hues and red/green/blue are already minus/main/plus, so there is
     // no fourth back to give an effect card: it takes a plain green one and wears EffectTint, or
     // a Shave landing in the opponent's grid would read as a card they just drew. A later pass
@@ -165,6 +168,11 @@ public partial class GameManager : Node
 
     /// Tint applied to the standard (main deck) card art for the rank in play. See ApplyRankTheme.
     private Color _rankCardTint = Colors.White;
+
+    /// The face-down deck: the rank's own back, or the collection reward when it is switched on.
+    private bool GildedDeck => RunData.Instance != null && RunData.Instance.UseCollectorBack;
+    private Rect2 DeckBackRegion => GildedDeck ? RegionCollectorBack : RegionDeckBack;
+    private Color DeckBackTint => GildedDeck ? CollectorBackTint : _rankCardTint;
 
     private AudioStreamPlayer _sfxSlide;
     private AudioStreamPlayer _sfxPlace;
@@ -760,6 +768,7 @@ public partial class GameManager : Node
         DealAiModifiers();
         ClearSelections();
         QueueCoachMarksForModifiers();
+        foreach (Card card in _player1.Modifiers) NoteModifierMet(card);
     }
 
     /// The AI's hand for this match, built to the rung's recipe rather than rolled flat: stage 1
@@ -1607,6 +1616,7 @@ public partial class GameManager : Node
 
         GD.Print($"AI Bot plays modifier {bestCard.CardName}. New Score: {bestResult} (Target: {target})");
         _player2.PlayModifierCard(bestCard, _gameState);
+        NoteModifierMet(bestCard); // played at you, so you have met it
         InstantiateCardView(bestCard, _p2BoardContainer);
 
         UpdateUI();
@@ -3042,7 +3052,12 @@ public partial class GameManager : Node
         _rankCardTint = (run == null) ? Colors.White : run.CurrentRank.CardTint;
 
         RenderingServer.SetDefaultClearColor(table);
-        if (_mainDeckPosition is TextureRect deck) deck.SelfModulate = _rankCardTint;
+        if (_mainDeckPosition is TextureRect deck)
+        {
+            // The gilded back is a profile reward, so it shows in local 2-player too.
+            if (_cardSheet != null) deck.Texture = MakeAtlas(_cardSheet, DeckBackRegion);
+            deck.SelfModulate = DeckBackTint;
+        }
     }
 
     private TextureRect CreateCardView(Card card, Vector2 size)
@@ -3210,13 +3225,13 @@ public partial class GameManager : Node
         // 1. A face-down card that flies from the deck to the slot
         TextureRect fakeCard = new TextureRect
         {
-            Texture = MakeAtlas(_cardSheet, RegionDeckBack),
+            Texture = MakeAtlas(_cardSheet, DeckBackRegion),
             ExpandMode = TextureRect.ExpandModeEnum.IgnoreSize,
             StretchMode = TextureRect.StretchModeEnum.KeepAspectCentered,
             Size = CardSize,
             PivotOffset = CardSize / 2f,
             MouseFilter = Control.MouseFilterEnum.Ignore,
-            SelfModulate = _rankCardTint,
+            SelfModulate = DeckBackTint,
         };
         AddChild(fakeCard); // on the scene root so it draws above everything
 
@@ -3576,6 +3591,38 @@ public partial class GameManager : Node
         backdrop.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
 
         _startMenuBox = OverlayUi.AddPanel(_startMenuOverlay, contentMargin: 28, separation: 10);
+
+        _collectionOverlay = new CollectionOverlay();
+        AddChild(_collectionOverlay);
+        _collectionOverlay.Setup(CreateCardView);
+    }
+
+    // ------------------------------------------------------------------
+    // The collection log
+    // ------------------------------------------------------------------
+    private CollectionOverlay _collectionOverlay;
+
+    /// Fixed rather than scaled with the table: six across has to fit a phone held upright.
+    private static readonly Vector2 CollectionCardSize = BaseCardSize * 0.65f;
+
+    private void OpenCollection()
+    {
+        // Closing refreshes the menu (the count on its button) and the deck back (the toggle).
+        _collectionOverlay?.Open(CollectionCardSize, () => { FillStartMenu(); ApplyRankTheme(); });
+    }
+
+    /// Plain and flip-value Modifiers only; effect cards are marked when a coach-mark explains
+    /// them. Ladder only - local 2-player deals random hands and has no profile to write to.
+    private void NoteModifierMet(Card card)
+    {
+        if (!_inRun || RunData.Instance == null) return;
+        if (RunData.Instance.MarkPlainModifierMet(card)) AnnounceCollectionComplete();
+    }
+
+    private void AnnounceCollectionComplete()
+    {
+        ShowEffectBanner("Collection complete! Your deck now has a gilded back.");
+        ApplyRankTheme();
     }
 
     private void ShowStartMenu()
@@ -3649,6 +3696,8 @@ public partial class GameManager : Node
 
         _startMenuBox.AddChild(MenuSpacer());
         AddMenuButton("How to Play", null, ShowHowToPlay);
+        if (run != null)
+            AddMenuButton($"Collection   {run.CollectionFound}/{RunData.CollectionKeys.Length}", null, OpenCollection);
 
         // A mobile app does not quit itself; the OS does that, and a Quit button there is a button
         // that breaks the platform's own back gesture.
@@ -4213,7 +4262,8 @@ public partial class GameManager : Node
     {
         if (!_coachShowing.HasValue) return;
 
-        RunData.Instance?.MarkCardMet(CardEffects.MetKey(_coachShowing.Value.Card));
+        if (RunData.Instance != null && RunData.Instance.MarkCardMet(CardEffects.MetKey(_coachShowing.Value.Card)))
+            AnnounceCollectionComplete();
         _coachShowing = null;
 
         if (_spotlightOverlay != null) _spotlightOverlay.Visible = false;

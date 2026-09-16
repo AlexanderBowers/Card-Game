@@ -174,10 +174,104 @@ public partial class RunData : Node
 
     public bool HasMetCard(string key) => key == null || CardsMet.Contains(key);
 
-    public void MarkCardMet(string key)
+    /// Records a card as met. Returns true only on the call that completes the collection log,
+    /// so the table can say so at the moment it happens - and switches the reward on, because a
+    /// prize the player has to go and find a toggle for is a prize most players never see.
+    public bool MarkCardMet(string key)
     {
-        if (key == null || !CardsMet.Add(key)) return;
+        if (key == null) return false;
+        bool wasComplete = CollectionComplete;
+        if (!CardsMet.Add(key)) return false;
+
+        bool justCompleted = !wasComplete && CollectionComplete;
+        if (justCompleted) CollectorBack = true;
         Save();
+        return justCompleted;
+    }
+
+    // ------------------------------------------------------------------
+    // The collection log (playtest-feedback-family.md §5.2)
+    //
+    // Read straight from CardsMet - the same set the coach-marks use, so an effect card is "met"
+    // on exactly the occasion the game explained it. Plain and flip-value Modifiers need no
+    // explanation, so they get their own keys ("+3", "-3", "flip3") and are marked when they
+    // enter the collection, are dealt to you, or are played at you.
+    // ------------------------------------------------------------------
+    public const int LogMaxMagnitude = 6;   // the market's own ceiling (ShopOverlay.RollOffers)
+
+    private static readonly CardEffect[] LogEffects =
+    {
+        CardEffect.Copy, CardEffect.TradeTotals, CardEffect.Shave,
+        CardEffect.TradeHands, CardEffect.Recall, CardEffect.Veto,
+    };
+
+    /// Every entry, in display order: four rows of six - plus, minus, flip value, special.
+    public static readonly string[] CollectionKeys = BuildCollectionKeys();
+
+    private static string[] BuildCollectionKeys()
+    {
+        List<string> keys = new List<string>();
+        for (int m = 1; m <= LogMaxMagnitude; m++) keys.Add(LogKey(m, false, CardEffect.None));
+        for (int m = 1; m <= LogMaxMagnitude; m++) keys.Add(LogKey(-m, false, CardEffect.None));
+        for (int m = 1; m <= LogMaxMagnitude; m++) keys.Add(LogKey(m, true, CardEffect.None));
+        foreach (CardEffect effect in LogEffects) keys.Add(LogKey(0, false, effect));
+        return keys.ToArray();
+    }
+
+    /// The effect's NAME for an effect card (the same key CardEffects.MetKey gives it), otherwise
+    /// the signed magnitude. Null for a card that is not a Modifier at all.
+    public static string LogKey(int value, bool canFlipValue, CardEffect effect)
+    {
+        if (effect != CardEffect.None) return effect.ToString();
+        int magnitude = Math.Abs(value);
+        if (magnitude == 0) return null;
+        if (canFlipValue) return "flip" + magnitude;
+        return (value > 0 ? "+" : "-") + magnitude;
+    }
+
+    public static string LogKey(Card card) =>
+        (card == null || card.Type != CardType.Modifier) ? null : LogKey(card.Value, card.CanFlipValue, card.Effect);
+
+    /// The card a log key stands for, so the screen can draw it.
+    public static ModifierDef CollectionEntry(string key)
+    {
+        if (key.StartsWith("flip")) return new ModifierDef(int.Parse(key.Substring(4)), canFlipValue: true);
+        if (key[0] == '+' || key[0] == '-') return new ModifierDef(int.Parse(key));
+        return new ModifierDef(0, false, Enum.Parse<CardEffect>(key));
+    }
+
+    public int CollectionFound
+    {
+        get
+        {
+            int found = 0;
+            foreach (string key in CollectionKeys) if (CardsMet.Contains(key)) found++;
+            return found;
+        }
+    }
+
+    public bool CollectionComplete => CollectionFound == CollectionKeys.Length;
+
+    /// The log's reward: the face-down deck wears a gilded back. Cosmetic, and switchable, because
+    /// the rank's own colour on the deck is part of how the ladder shows progress.
+    public bool CollectorBack { get; private set; }
+
+    /// True when the gilded back should actually be drawn.
+    public bool UseCollectorBack => CollectorBack && CollectionComplete;
+
+    public void SetCollectorBack(bool on)
+    {
+        if (CollectorBack == on) return;
+        CollectorBack = on;
+        Save();
+    }
+
+    /// Marks a plain or flip-value Modifier as met. Effect cards are left to the coach-marks,
+    /// which mark them when they are explained - marking one here first would skip its explanation.
+    public bool MarkPlainModifierMet(Card card)
+    {
+        if (card == null || card.Effect != CardEffect.None) return false;
+        return MarkCardMet(LogKey(card));
     }
 
     /// Set by the deck screen just before the table scene is reloaded for the next rung, so the player
@@ -243,6 +337,7 @@ public partial class RunData : Node
         StepIndex = 0;
 
         if (Inventory.Count == 0) Inventory.AddRange(StarterCollection);
+        foreach (ModifierDef def in Inventory) CardsMet.Add(LogKey(def.Value, def.CanFlipValue, def.Effect));
 
         // Keep the deck they last built; only fill it in if it is missing or has gone stale.
         SideDeck.RemoveAll(index => index < 0 || index >= Inventory.Count);
@@ -379,6 +474,7 @@ public partial class RunData : Node
         FurthestStep = 0;
         TutorialSeen = false; // a wiped save IS a first launch, tutorial included
         CardsMet.Clear();
+        CollectorBack = false;
         Inventory.Clear();
         SideDeck.Clear();
         if (FileAccess.FileExists(SavePath)) DirAccess.RemoveAbsolute(ProjectSettings.GlobalizePath(SavePath));
@@ -392,6 +488,11 @@ public partial class RunData : Node
     public int AddToInventory(ModifierDef def)
     {
         Inventory.Add(def);
+        // Bought is met. For an effect card that is already true - the market only sells a card
+        // you have been shown - so this never skips an explanation.
+        bool wasComplete = CollectionComplete;
+        CardsMet.Add(LogKey(def.Value, def.CanFlipValue, def.Effect));
+        if (!wasComplete && CollectionComplete) CollectorBack = true;
         Save();
         return Inventory.Count - 1;
     }
@@ -460,13 +561,14 @@ public partial class RunData : Node
 
         Godot.Collections.Dictionary data = new Godot.Collections.Dictionary
         {
-            { "version", 5 },
+            { "version", 6 },
             { "active", RunActive },
             { "medals", Medals },
             { "step", StepIndex },
             { "furthest", FurthestStep },
             { "tutorialSeen", TutorialSeen },
             { "cardsMet", cardsMet },
+            { "collectorBack", CollectorBack },
             { "inventory", inventory },
             { "sideDeck", sideDeck },
         };
@@ -556,6 +658,14 @@ public partial class RunData : Node
                 if (value != 0 || effect != CardEffect.None) Inventory.Add(new ModifierDef(value, flip, effect));
             }
         }
+
+        // Version 6 adds the collection log. An older save knows nothing of plain magnitudes, but
+        // everything in the collection has plainly been met, so the log starts from what is owned
+        // rather than from nothing.
+        foreach (ModifierDef def in Inventory) CardsMet.Add(LogKey(def.Value, def.CanFlipValue, def.Effect));
+        CollectorBack = data.TryGetValue("collectorBack", out Variant gilded)
+            ? gilded.AsBool()
+            : CollectionComplete;
 
         SideDeck.Clear();
         if (data.TryGetValue("sideDeck", out Variant deckVariant))
