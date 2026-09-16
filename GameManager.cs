@@ -1073,11 +1073,86 @@ public partial class GameManager : Node
 
         if (anyBust || bothHolding)
         {
+            if (OfferEndlessRescue()) return;
             EndSet();
             return;
         }
 
         DealCards();
+    }
+
+    // ------------------------------------------------------------------
+    // "Try again?" - the free half of the endless rescue (playtest-feedback-family.md §5.3)
+    //
+    // The first time you bust in an endless run, the set waits and offers one random minus
+    // Modifier. Take it and your turn re-opens with the card in hand; it might save you and it
+    // might not, which is the gamble. The ad-for-a-choice half is deliberately not built: that is
+    // a store-listing decision, not a code one.
+    // ------------------------------------------------------------------
+    private Control _rescueOverlay;
+    private const int RescueMaxMagnitude = 6;
+
+    private bool RescueShowing => _rescueOverlay != null && _rescueOverlay.Visible;
+
+    /// True if the prompt is now up and the set must wait for it.
+    private bool OfferEndlessRescue()
+    {
+        RunData run = _inRun ? RunData.Instance : null;
+        if (run == null || !run.Endless || run.EndlessRescueUsed || !_isVsBot) return false;
+
+        int target = _gameState.TargetScore;
+        // Only a bust that LOSES the set. Both over is a tie and is replayed anyway.
+        if (_player1.CurrentScore <= target || _player2.CurrentScore > target) return false;
+
+        if (_rescueOverlay == null)
+        {
+            _rescueOverlay = new Control { MouseFilter = Control.MouseFilterEnum.Stop };
+            AddChild(_rescueOverlay);
+            _rescueOverlay.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
+            OverlayUi.AddDim(_rescueOverlay);
+            VBoxContainer box = OverlayUi.AddPanel(_rescueOverlay);
+
+            box.AddChild(OverlayUi.MakeLabel("Bust!  Try again?", 30, OverlayUi.MedalGold));
+            box.AddChild(OverlayUi.MakeLabel(
+                "Once per endless run: take a random minus Modifier and your turn re-opens.\n"
+                + "It might be enough. It might not.", 16, OverlayUi.Muted));
+
+            Button take = new Button { Text = "Take a random card", CustomMinimumSize = new Vector2(280, 48) };
+            take.Pressed += TakeEndlessRescue;
+            box.AddChild(take);
+
+            Button decline = new Button { Text = "Accept the bust", CustomMinimumSize = new Vector2(280, 40) };
+            decline.Pressed += DeclineEndlessRescue;
+            box.AddChild(decline);
+        }
+
+        MoveChild(_rescueOverlay, GetChildCount() - 1);
+        _rescueOverlay.Visible = true;
+        UpdateUI();
+        return true;
+    }
+
+    private void TakeEndlessRescue()
+    {
+        _rescueOverlay.Visible = false;
+        RunData.Instance?.UseEndlessRescue();
+
+        Card rescue = new Card(-_random.Next(1, RescueMaxMagnitude + 1), CardType.Modifier);
+        _player1.Modifiers.Add(rescue);
+        NoteModifierMet(rescue);
+
+        // Re-open the turn exactly as an effect card does: no new draw, just a chance to play.
+        _player1.IsHolding = false;
+        _player1.HasEndedTurn = false;
+        ShowEffectBanner($"Rescue: you take a {rescue.DisplayText}.");
+        UpdateUI();
+    }
+
+    private void DeclineEndlessRescue()
+    {
+        _rescueOverlay.Visible = false;
+        RunData.Instance?.UseEndlessRescue(); // declined is spent: it is a moment, not a menu
+        EndSet();
     }
 
     // ------------------------------------------------------------------
@@ -1787,6 +1862,7 @@ public partial class GameManager : Node
     {
         if (!_isGameStarted || _gameState.IsGameOver || _setOverPending) return false;
         if (_recallOverlay != null && _recallOverlay.Visible) return false;
+        if (RescueShowing) return false;
         return true;
     }
 
@@ -4322,6 +4398,7 @@ public partial class GameManager : Node
         if (_howToPlayOverlay != null && _howToPlayOverlay.Visible) return;
         if (_tableMenuOverlay != null && _tableMenuOverlay.Visible) return;
         if (_recallOverlay != null && _recallOverlay.Visible) return;
+        if (RescueShowing) return;
 
         ShowCoachMark(_coachQueue.Dequeue());
     }

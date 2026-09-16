@@ -343,6 +343,16 @@ public partial class RunData : Node
 
     public bool EndlessUnlocked => FurthestStep >= Ladder.Length;
 
+    /// "Try again?" is offered on the FIRST bust of an endless run, not of each match - otherwise
+    /// it appears every match and stops being a moment (playtest-feedback-family.md §5.3).
+    public bool EndlessRescueUsed { get; private set; }
+
+    public void UseEndlessRescue()
+    {
+        EndlessRescueUsed = true;
+        Save();
+    }
+
     /// The target range widens as the streak grows - one step further from 20 on each side every
     /// two wins - so a long streak is harder arithmetic, never bigger multipliers. Capped where
     /// a 9-slot board and a shared 40-card deck still comfortably reach it.
@@ -456,6 +466,7 @@ public partial class RunData : Node
         StepIndex = 0;
         Endless = false;
         EndlessStreak = 0;
+        EndlessRescueUsed = false;
         ClearRuleset();
 
         if (Inventory.Count == 0) Inventory.AddRange(StarterCollection);
@@ -717,6 +728,7 @@ public partial class RunData : Node
             { "endless", Endless },
             { "endlessStreak", EndlessStreak },
             { "endlessBest", EndlessBest },
+            { "endlessRescueUsed", EndlessRescueUsed },
             { "rolledStep", RolledStep },
             { "rolledTarget", RolledTarget },
             { "rolledEffects", rolledEffects },
@@ -753,6 +765,7 @@ public partial class RunData : Node
         Endless = data.TryGetValue("endless", out Variant endless) && endless.AsBool();
         EndlessStreak = data.TryGetValue("endlessStreak", out Variant streak) ? streak.AsInt32() : 0;
         EndlessBest = data.TryGetValue("endlessBest", out Variant best) ? best.AsInt32() : 0;
+        EndlessRescueUsed = data.TryGetValue("endlessRescueUsed", out Variant rescued) && rescued.AsBool();
         if (Endless) StepIndex = Ladder.Length - 1;
 
         // A version 4 save has no key and loads as an empty set, so an existing player is
