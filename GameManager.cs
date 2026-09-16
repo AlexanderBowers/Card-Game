@@ -262,7 +262,10 @@ public partial class GameManager : Node
         BuildConfirmRows();
         BuildIntermissionOverlays();
         BuildTableBanners();
+        GameSettings.EnsureLoaded();
+        GameSettings.Changed += OnSettingsChanged;
         BuildDebugRow();
+        BuildOptions();
         BuildStartMenu();
         ConfigureStatusLabel(_p1StatusLabel);
         ConfigureStatusLabel(_p2StatusLabel);
@@ -297,6 +300,32 @@ public partial class GameManager : Node
     public override void _ExitTree()
     {
         if (GetTree() != null) GetTree().Root.SizeChanged -= ApplyResponsiveLayout;
+        // A static event outlives the scene; a Restart would otherwise leave it calling a freed table.
+        GameSettings.Changed -= OnSettingsChanged;
+    }
+
+    // ------------------------------------------------------------------
+    // Options (GameSettings / OptionsOverlay)
+    // ------------------------------------------------------------------
+    private OptionsOverlay _optionsOverlay;
+    private readonly List<Control> _debugRows = new List<Control>();
+
+    private void BuildOptions()
+    {
+        _optionsOverlay = new OptionsOverlay();
+        AddChild(_optionsOverlay);
+        _optionsOverlay.Build();
+    }
+
+    private void OpenOptions(Action onClosed = null) => _optionsOverlay?.Open(onClosed);
+
+    private void OnSettingsChanged()
+    {
+        if (!IsInsideTree()) return;
+        foreach (Control row in _debugRows)
+            if (IsInstanceValid(row)) row.Visible = GameSettings.ShowDebugButtons;
+        // The debug rows sit in the middle column, so showing or hiding them changes its height.
+        EnsureLayoutFits();
     }
 
     // ------------------------------------------------------------------
@@ -2384,6 +2413,8 @@ public partial class GameManager : Node
         HBoxContainer row = new HBoxContainer { Alignment = BoxContainer.AlignmentMode.Center };
         row.AddThemeConstantOverride("separation", 6);
         column.AddChild(row);
+        _debugRows.Add(row);
+        row.Visible = GameSettings.ShowDebugButtons;   // Options > Debug
 
         row.AddChild(OverlayUi.MakeLabel("debug", 12, OverlayUi.Muted));
 
@@ -2408,6 +2439,8 @@ public partial class GameManager : Node
         HBoxContainer adRow = new HBoxContainer { Alignment = BoxContainer.AlignmentMode.Center };
         adRow.AddThemeConstantOverride("separation", 6);
         column.AddChild(adRow);
+        _debugRows.Add(adRow);
+        adRow.Visible = GameSettings.ShowDebugButtons;
 
         Button rescue = new Button();
         void RescueText() => rescue.Text = _debugAlwaysRescue ? "Rescue 100%" : "Rescue 15%";
@@ -3348,6 +3381,11 @@ public partial class GameManager : Node
         howTo.Pressed += () => { HideTableMenu(); ShowHowToPlay(); };
         box.AddChild(howTo);
 
+        // Closing Options lands back on this menu, where the player opened it from.
+        Button options = new Button { Text = "Options" };
+        options.Pressed += () => { HideTableMenu(); OpenOptions(ShowTableMenu); };
+        box.AddChild(options);
+
         // Restart, Exit and the mirror toggle MOVE rather than being rebuilt here. They are
         // exported nodes whose signals are already connected in _Ready, and a rebuilt copy would
         // need a second connection to the same handlers - two buttons, one of them dead.
@@ -3519,6 +3557,13 @@ public partial class GameManager : Node
         TextureRect view = FindCardView(card, board);
         if (view == null) return;
 
+        if (!GameSettings.CardAnimations)   // Options > Battery: the card simply goes
+        {
+            view.GetParent()?.RemoveChild(view);
+            view.QueueFree();
+            return;
+        }
+
         view.PivotOffset = view.Size / 2f; // shrink toward the middle, not the top-left corner
 
         Tween tween = GetTree().CreateTween();
@@ -3589,6 +3634,15 @@ public partial class GameManager : Node
             return;
         }
 
+        // Options > Battery: no flight. The card appears in place, with its sound, after the
+        // same stagger - so a two-card opening still lands one card then the other.
+        if (!GameSettings.CardAnimations)
+        {
+            if (delay <= 0f) { RevealWithoutFlight(realCard); return; }
+            GetTree().CreateTimer(delay).Timeout += () => RevealWithoutFlight(realCard);
+            return;
+        }
+
         // 1. A face-down card that flies from the deck to the slot
         TextureRect fakeCard = new TextureRect
         {
@@ -3644,6 +3698,13 @@ public partial class GameManager : Node
             if (IsInstanceValid(realCard)) realCard.Modulate = Colors.White;
             if (_sfxPlace != null) _sfxPlace.Play();
         }));
+    }
+
+    private void RevealWithoutFlight(Control realCard)
+    {
+        if (!IsInstanceValid(realCard)) return;
+        realCard.Modulate = Colors.White;
+        if (_sfxPlace != null) _sfxPlace.Play();
     }
 
     // ------------------------------------------------------------------
@@ -4092,6 +4153,7 @@ public partial class GameManager : Node
 
         _startMenuBox.AddChild(MenuSpacer());
         AddMenuButton("How to Play", null, ShowHowToPlay);
+        AddMenuButton("Options", null, () => OpenOptions());
         if (run != null)
             AddMenuButton($"Collection   {run.CollectionFound}/{RunData.CollectionKeys.Length}", null, OpenCollection);
 
@@ -5007,7 +5069,7 @@ public partial class GameManager : Node
     {
         AudioStream stream = GD.Load<AudioStream>(path);
         if (stream == null) return null;
-        AudioStreamPlayer player = new AudioStreamPlayer { Stream = stream, VolumeDb = -4f };
+        AudioStreamPlayer player = new AudioStreamPlayer { Stream = stream, VolumeDb = -4f, Bus = GameSettings.SfxBus };
         AddChild(player);
         return player;
     }
