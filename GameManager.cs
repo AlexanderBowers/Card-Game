@@ -899,7 +899,7 @@ public partial class GameManager : Node
         // The staged opening for the tutorial's first round. Each value is REMOVED from the
         // shuffled remainder before being appended, so the deck still holds exactly four of each
         // and the rest of the round is as random as any other.
-        if (_tutorialStaged && _gameState.CurrentRound == 1)
+        if (_tutorialStaged && _gameState.IsFirstSet)
         {
             foreach (int value in TutorialOpening) _mainDeck.Remove(value);
             _mainDeck.AddRange(TutorialOpening);
@@ -1655,7 +1655,7 @@ public partial class GameManager : Node
         if (card == null || card.Effect == CardEffect.None) return null;
 
         if (owner == _player1 ? _p1PlayedEffectThisDeal : _p2PlayedEffectThisDeal)
-            return "one card across the table per deal, and you have played yours.";
+            return "one card across the table per turn, and you have played yours.";
 
         Player target = (owner == _player1) ? _player2 : _player1;
         return CardEffects.RefusalReason(card, owner, target, _gameState.TargetScore);
@@ -1815,8 +1815,6 @@ public partial class GameManager : Node
         else if (p1 == p2) roundWinner = 0;
         else roundWinner = (p1 > p2) ? 1 : 2; // both under the target: the higher score is closer
 
-        int roundNumber = _gameState.CurrentRound;
-
         // Why the round ended.
         bool anyBust = p1Bust || p2Bust;
         string why;
@@ -1834,18 +1832,17 @@ public partial class GameManager : Node
         string buttonText;
         if (roundWinner == 0)
         {
-            title = $"Round {roundNumber} is a tie";
-            why += "\nSame score, so the round is replayed.";
-            buttonText = "Replay Round";
+            title = "The set is a tie";
+            why += "\nSame score, so the set is replayed.";
+            buttonText = "Replay Set";
         }
         else
         {
             Player winner = (roundWinner == 1) ? _player1 : _player2;
             _gameState.RecordRoundWinner(roundWinner);
-            _gameState.CurrentRound++;
             if (!anyBust) why += $"\n{winner.PlayerName} is closest to {target}.";
-            title = $"{winner.PlayerName} wins round {roundNumber}!";
-            buttonText = "Next Round";
+            title = $"{winner.PlayerName} wins the set!";
+            buttonText = "Next Set";
         }
 
         Action next;
@@ -1855,7 +1852,7 @@ public partial class GameManager : Node
             int champWins = (matchWinner == 1) ? _gameState.RoundsWonPlayer1 : _gameState.RoundsWonPlayer2;
             int otherWins = (matchWinner == 1) ? _gameState.RoundsWonPlayer2 : _gameState.RoundsWonPlayer1;
             title = $"{champion.PlayerName} wins the match!";
-            why += $"\n{champion.PlayerName} took the match {champWins} rounds to {otherWins}.";
+            why += $"\n{champion.PlayerName} took the match {champWins} sets to {otherWins}.";
             why += ReportRunResult(matchWinner == 1, _gameState.RoundsWonPlayer1);
             // A won match on a live run goes to the market and the deck before the next rung;
             // a loss (or the end of the ladder) just offers a fresh run. ReportRunResult above has
@@ -1887,7 +1884,7 @@ public partial class GameManager : Node
         }
 
         string whyOneLine = why.Replace('\n', ' ');
-        GD.Print($"Round {roundNumber} over: {title} ({whyOneLine})");
+        GD.Print($"Set over: {title} ({whyOneLine})");
 
         _roundOverPending = true;
         UpdateUI(); // locks every button and hand card; sides show Bust! / Holding
@@ -2176,7 +2173,7 @@ public partial class GameManager : Node
         // While the round-end explanation is up, EndRound owns this label.
         if (_isGameStarted && _roundInfoLabel != null && !_gameState.IsGameOver && !_roundOverPending)
         {
-            _roundInfoLabel.Text = $"{RunHeader()}Round {_gameState.CurrentRound} | {DealStatusText()}";
+            _roundInfoLabel.Text = $"{RunHeader()}{DealStatusText()}";
         }
 
         // Both sides act at once: each player's row stays live until THAT player has ended the
@@ -2242,14 +2239,14 @@ public partial class GameManager : Node
         if (picked != null)
         {
             if (picked.Effect != CardEffect.None) return EffectPreview(player, picked);
-            if (IsRecallLocked(player, picked)) return "Just recalled - playable from the next deal";
+            if (IsRecallLocked(player, picked)) return "Just recalled - playable from your next turn";
 
             string sign = picked.Value < 0 ? "-" : "+";
             return $"{player.CurrentScore} {sign} {Math.Abs(picked.Value)} = {player.CurrentScore + picked.Value}";
         }
 
-        // Still acting this deal.
-        if (over) return "Over target!"; // a warning, not a bust yet: play a minus card before ending the turn
+        // Still acting this turn.
+        if (over) return "Over target!"; // a warning, not a bust yet: play a minus Modifier before ending the turn
         if (_isVsBot && player == _player2) return "Thinking...";
         return "Your move";
     }
@@ -2279,9 +2276,9 @@ public partial class GameManager : Node
             case CardEffect.TradeTotals:
                 return $"Trade Totals: {player.CurrentScore} and {other.CurrentScore} change places";
             case CardEffect.TradeHands:
-                return $"Trade Hands: your {player.ModifierHand.Count - 1} for their {other.ModifierHand.Count}";
+                return $"Trade Hands: your {player.ModifierHand.Count - 1} Modifiers for their {other.ModifierHand.Count}";
             case CardEffect.Recall:
-                return "Take a card back - you can play it from the next deal";
+                return "Take a Modifier back - you can play it from your next turn";
             case CardEffect.Veto:
             {
                 // EffectRefusal returned null above, so CanPlay said yes, so LastPlayedModifier is
@@ -2390,7 +2387,7 @@ public partial class GameManager : Node
         row.AddChild(play);
         playButton = play;
 
-        flipButton = MakeConfirmButton("+ / -", new Color(0.22f, 0.44f, 0.78f));
+        flipButton = MakeConfirmButton("Flip Value", new Color(0.22f, 0.44f, 0.78f));
         flipButton.Pressed += () => FlipSelectedCard(player);
         row.AddChild(flipButton);
 
@@ -3349,7 +3346,7 @@ public partial class GameManager : Node
 
         _recallBox.AddChild(OverlayUi.MakeLabel("Recall", 30));
         _recallBox.AddChild(OverlayUi.MakeLabel(
-            "Take one card back into your hand.\nYou can play it from the next deal.", 16, OverlayUi.Muted));
+            "Take one spent Modifier back.\nYou can play it from your next turn.", 16, OverlayUi.Muted));
 
         HBoxContainer row = new HBoxContainer { Alignment = BoxContainer.AlignmentMode.Center };
         row.AddThemeConstantOverride("separation", 10);
@@ -3474,7 +3471,7 @@ public partial class GameManager : Node
         box.AddChild(_roundEndTitle);
         box.AddChild(_roundEndBody);
 
-        _roundEndButton = new Button { Text = "Next Round" };
+        _roundEndButton = new Button { Text = "Next Set" };
         _roundEndButton.Pressed += OnRoundEndButtonPressed;
         box.AddChild(_roundEndButton);
     }
@@ -3955,11 +3952,11 @@ public partial class GameManager : Node
                 // Reads the live score, so it is honest on a staged first match and on a replay.
                 return (_player1.CurrentScore >= _gameState.TargetScore - 2)
                     ? "You are on target. Hold stops you taking cards and locks your score in for "
-                    + "the rest of the round."
-                    : "Draw Card takes another card next deal. Hold stops you there and locks your "
+                    + "the rest of the set."
+                    : "Draw Card takes another card next turn. Hold stops you there and locks your "
                     + "score in. Choose one.";
             case 4:
-                return $"Win {GameState.RoundsToWinMatch} rounds to take the match. These are yours "
+                return $"Win {GameState.RoundsToWinMatch} sets to take the match. These are yours "
                      + "so far. That is everything - good luck.";
             default:
                 return string.Empty;
@@ -4256,77 +4253,80 @@ public partial class GameManager : Node
     private static readonly string HowToPlayShort =
         "GOAL\n" +
         "Get as close to the target without going over. The target is on your score line - " +
-        $"\"You  17/20\". Win {GameState.RoundsToWinMatch} rounds to win the match.\n\n" +
-        "EACH DEAL\n" +
+        $"\"You  17/20\". Win {GameState.RoundsToWinMatch} sets to win the match.\n\n" +
+        "EACH TURN\n" +
         "Both players are dealt a card at the same time. You both decide at the same time too - " +
         "nobody waits for anyone.\n\n" +
-        "YOUR HAND\n" +
-        "Tap a card to pick it up, then tap it again to play it. It adds its value to your score. " +
-        "Four cards, and they have to last the whole match.\n\n" +
+        "MODIFIERS\n" +
+        "Tap a Modifier to see its effect, then tap it again to play it. It adds its value to your " +
+        "score. You get four, and they have to last the whole match.\n\n" +
         "DRAW CARD or HOLD\n" +
-        "Draw Card: you are done for this deal, and you take another card on the next one.\n" +
-        "Hold: you stop taking cards, and your score is locked for the rest of the round.\n\n" +
+        "Draw Card: you are done for this turn, and you take another card on the next one.\n" +
+        "Hold: you stop taking cards, and your score is locked for the rest of the set.\n\n" +
         "GOING OVER\n" +
-        "Over the target is only a warning until you press Draw Card or Hold - a minus card can " +
+        "Over the target is only a warning until you press Draw Card or Hold - a minus Modifier can " +
         "still save you. Draw while over, and you bust.\n\n" +
-        "That is the whole game. Everything else is a card that explains itself when you meet it.";
+        "That is the whole game. Everything else is a Modifier that explains itself when you meet it.";
 
     private static readonly string HowToPlayFull =
         "GOAL\n" +
         "Get as close to the target as you can without going over. The target is on your own score " +
         "line - \"You  17/20\" - and it CHANGES as you climb: 20 at first, then 23, then 18, and on " +
-        $"up. Win {GameState.RoundsToWinMatch} rounds to win the match.\n\n" +
+        $"up. Win {GameState.RoundsToWinMatch} sets to win the match.\n\n" +
+        "MATCH, SET, TURN\n" +
+        "A match is played in sets, and a set is played in turns. Win a set by finishing closer to " +
+        "the target than your opponent.\n\n" +
         "THE DECK\n" +
         "One deck of 40 cards, shared by both players: four each of 1 to 10. It is shuffled fresh " +
-        "every round, and the number on it is how many cards are left - so it can be counted.\n\n" +
-        "A ROUND\n" +
-        "A round is a series of deals. Each deal, every player who isn't holding is dealt one card " +
-        "at the same time. Both players then decide - at the same time, without waiting for each " +
-        "other - whether to play a hand card, and then press Draw Card or Hold.\n" +
-        "When the target is 20 or more, the FIRST deal of a round gives everyone two cards. Two " +
+        "every set, and the number on it is how many cards are left - so it can be counted.\n\n" +
+        "A TURN\n" +
+        "Each turn, every player who isn't holding is dealt one card at the same time. Both players " +
+        "then decide - at the same time, without waiting for each other - whether to play a " +
+        "Modifier, and then press Draw Card or Hold.\n" +
+        "When the target is 20 or more, the FIRST turn of a set gives everyone two cards. Two " +
         "cards can never total more than 20, so that opening can never bust you.\n\n" +
-        "YOUR HAND\n" +
-        "You are dealt 4 cards at the start of a match, and they have to last every round of it - " +
-        "a card spent in round one is gone in round three. Plain ones are worth -4 to +4 and add " +
-        "their value to your score.\n\n" +
-        "PLAYING A CARD\n" +
-        "Tap a card in your hand to pick it up. It lifts, and your status line shows the sum it would " +
+        "MODIFIERS\n" +
+        "You get 4 Modifiers at the start of a match, and they have to last every set of it - " +
+        "a Modifier spent in the first set is gone for the rest. Plain ones are worth -4 to +4 and " +
+        "add their value to your score.\n\n" +
+        "PLAYING A MODIFIER\n" +
+        "Tap a Modifier to pick it up. It lifts, and your status line shows the sum it would " +
         "make - for example \"17 + 3 = 20\". Green means you would still be at or under the target, " +
-        "red means it would take you over. Nothing is spent yet: tap Play (or tap the card again) to " +
+        "red means it would take you over. Nothing is spent yet: tap Play (or tap it again) to " +
         "commit it, or Put back to change your mind.\n\n" +
-        "+/- CARDS\n" +
-        "A card marked with a small yellow +/- can be played either way round. Pick it up and press " +
-        "the + / - button to swap it between plus and minus - as often as you like - before playing it. " +
+        "+/- MODIFIERS\n" +
+        "A Modifier marked +/- can be played either way round. Pick it up and press Flip Value " +
+        "to swap it between plus and minus - as often as you like - before playing it. " +
         "A +3 becomes a -3, and back again.\n\n" +
         "DRAW CARD\n" +
-        "You are done for this deal, and you take another card on the next one.\n\n" +
+        "You are done for this turn, and you take another card on the next one.\n\n" +
         "HOLD\n" +
-        "You stop taking cards for the rest of the round. Your score is locked in.\n\n" +
+        "You stop taking cards for the rest of the set. Your score is locked in.\n\n" +
         "GOING OVER\n" +
-        "Going over the target after a deal is only a warning (\"Over target!\") - you can still play a " +
-        "minus card to get back under. If you press Draw Card or Hold while still over the target, " +
-        "you bust and lose the round when the deal resolves.\n\n" +
-        "HOW A ROUND ENDS\n" +
-        "Once both players have pressed Draw Card or Hold, the deal resolves:\n" +
-        "- Anyone over the target busts. If both bust, the round is a tie and is replayed.\n" +
-        "- If both players are holding, the higher score wins the round. Equal scores tie and the round " +
+        "Going over the target is only a warning (\"Over target!\") - you can still play a " +
+        "minus Modifier to get back under. If you press Draw Card or Hold while still over the " +
+        "target, you bust and lose the set when the turn resolves.\n\n" +
+        "HOW A SET ENDS\n" +
+        "Once both players have pressed Draw Card or Hold, the turn resolves:\n" +
+        "- Anyone over the target busts. If both bust, the set is a tie and is replayed.\n" +
+        "- If both players are holding, the higher score wins the set. Equal scores tie and the set " +
         "is replayed.\n" +
-        "- Otherwise the next deal is dealt to everyone who isn't holding.\n\n" +
+        "- Otherwise the next turn is dealt to everyone who isn't holding.\n\n" +
         "Filling all 9 board slots without busting is still a good place to be - hold!\n\n" +
         "THE BOT\n" +
         "It plays the same rules as you and decides at the same time as you do - you never wait for " +
-        "it to take its turn. It gets sharper as you climb: the early opponents play their own hand, " +
+        "it. It gets sharper as you climb: the early opponents play their own Modifiers, " +
         "the last ones play yours.\n\n" +
         "THE CLIMB\n" +
         "Ten matches, each against a tougher opponent at a different target. Winning pays medals; " +
-        "medals buy cards in the market between matches; the cards you own are slotted into a deck " +
-        "of 12, and 4 of those 12 are dealt to you each match. Losing a match ends the run - but " +
-        "nothing you own is ever taken away.\n\n" +
-        "SPECIAL CARDS\n" +
-        "Most rungs of the climb introduce one new card that does something other than add a number - " +
-        "changing a card, taking a score, undoing a play. Each one is explained the first time you " +
-        "meet it, and the market sells it to you straight afterwards. There is nothing to memorise " +
-        "here: you will always have met a card before you can buy it.";
+        "medals buy Modifiers in the market between matches; the Modifiers you own are slotted into " +
+        "a deck of 12, and 4 of those 12 are dealt to you each match. Losing a match ends the run - " +
+        "but nothing you own is ever taken away.\n\n" +
+        "SPECIAL MODIFIERS\n" +
+        "Most rungs of the climb introduce one new Modifier that does something other than add a " +
+        "number - changing a card, taking a score, undoing a play. Each one is explained the first " +
+        "time you meet it, and the market sells it to you straight afterwards. There is nothing to " +
+        "memorise here: you will always have met a Modifier before you can buy it.";
 
     private Control _howToPlayOverlay;
     private Label _howToPlayRules;

@@ -51,7 +51,7 @@ public partial class DeckOverlay : Control
 
         box.AddChild(OverlayUi.MakeLabel("Your Deck", 30));
         box.AddChild(OverlayUi.MakeLabel(
-            "Tap a card to move it in or out of your deck.\nFour of your twelve are dealt to you each match.",
+            "Tap a Modifier to move it in or out of your deck.\nFour of your twelve are dealt to you each match.",
             18, OverlayUi.Muted));
 
         HBoxContainer columns = new HBoxContainer { Alignment = BoxContainer.AlignmentMode.Center };

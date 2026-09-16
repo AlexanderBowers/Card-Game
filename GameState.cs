@@ -13,7 +13,12 @@ public partial class GameState : Node
 	public int TargetScore { get; set; } = 20;
 	public int RoundsWonPlayer1 { get; set; } = 0;
 	public int RoundsWonPlayer2 { get; set; } = 0;
-	public int CurrentRound { get; set; } = 1;
+
+	/// True until someone has WON a set this match. The set number itself is insignificant
+	/// (Alexander, 2026-09-16) - it is never shown and never stored; the only thing the game ever
+	/// needed from it was "is this the first set", and the win counts already answer that. A tied
+	/// set is replayed, so a tie leaves this true, exactly as the old counter did.
+	public bool IsFirstSet => RoundsWonPlayer1 + RoundsWonPlayer2 == 0;
 
 	public bool IsGameOver { get; set; } = false;
 

@@ -211,7 +211,7 @@ public static class CardEffects
         {
             case CardEffect.Copy:
                 if (self.IsHolding) return "You are holding, so you did not draw a card to replace.";
-                if (opponent.IsHolding) return $"{them} is holding, so they have no card this deal to copy.";
+                if (opponent.IsHolding) return $"{them} is holding, so they have no card this turn to copy.";
                 if (self.LastDrawnCard == null || opponent.LastDrawnCard == null)
                     return "Copy needs a freshly drawn card on both sides of the table.";
                 return $"You both drew a {self.LastDrawnCard.Value} - copying it would change nothing.";
@@ -224,15 +224,15 @@ public static class CardEffects
                 return $"{them} is holding on {opponent.CurrentScore}, and Shave only trims a score below the target of {target}.";
 
             case CardEffect.TradeHands:
-                return $"{them} has no cards left to take.";
+                return $"{them} has no Modifiers left to take.";
 
             case CardEffect.Recall:
-                return "You have not spent a card yet this match.";
+                return "You have not spent a Modifier yet this match.";
 
             // Only PlayModifierCard sets LastPlayedModifier and it is never called for an effect
             // card, so "they played an effect card" cannot reach here - there is one real reason.
             case CardEffect.Veto:
-                return $"{them} has not played a card this deal.";
+                return $"{them} has not played a Modifier this turn.";
         }
 
         return $"{Label(card.Effect)} cannot be played right now.";
@@ -262,8 +262,8 @@ public static class CardEffects
             return $"{Label(card.Effect)} - {Description(card.Effect)}";
 
         return card.IsFlip
-            ? "A \"+/-\" card can be played either way round. Pick it up and press + / - to swap it "
-            + "between plus and minus before you play it."
+            ? "A +/- Modifier can be played either way round. Pick it up and press Flip Value to "
+            + "swap it between plus and minus before you play it."
             : string.Empty;
     }
 
@@ -275,9 +275,9 @@ public static class CardEffects
             case CardEffect.Copy: return "Your drawn card becomes a copy of theirs.";
             case CardEffect.TradeTotals: return "Swap the two current scores.";
             case CardEffect.Shave: return "Take 1 off an opponent who is holding\nbelow the target. They cannot answer.";
-            case CardEffect.TradeHands: return "Swap the two remaining hands.";
-            case CardEffect.Recall: return "Take back a card you already spent.\nYou can play it from the next deal.";
-            case CardEffect.Veto: return "Destroy the last hand card they played.\nTheir score reverts and their turn re-opens.";
+            case CardEffect.TradeHands: return "Swap your remaining Modifiers for theirs.";
+            case CardEffect.Recall: return "Take back a Modifier you already spent.\nYou can play it from your next turn.";
+            case CardEffect.Veto: return "Destroy the last Modifier they played.\nTheir score reverts and their turn re-opens.";
             default: return string.Empty;
         }
     }

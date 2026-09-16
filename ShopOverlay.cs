@@ -221,7 +221,7 @@ public partial class ShopOverlay : Control
         box.AddChild(_offerRow);
 
         box.AddChild(OverlayUi.MakeLabel(
-            "Cards you buy are yours to keep - a lost run never takes them away.\nYou choose which twelve go in your deck next.",
+            "Modifiers you buy are yours to keep - a lost run never takes them away.\nYou choose which twelve go in your deck next.",
             16, OverlayUi.Muted));
 
         _continueButton = new Button { Text = "Continue to your Deck" };
