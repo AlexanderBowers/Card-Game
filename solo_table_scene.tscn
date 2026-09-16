@@ -144,7 +144,7 @@ alignment = 1
 [node name="EndTurnButton" type="Button" parent="GameUI/MainLayout/SharedControlPanel/VBoxContainer/TableRow/ButtonColumn/ActionButtons" unique_id=1265867399]
 layout_mode = 2
 size_flags_horizontal = 3
-text = "End Turn"
+text = "Draw Card"
 
 [node name="HoldButton" type="Button" parent="GameUI/MainLayout/SharedControlPanel/VBoxContainer/TableRow/ButtonColumn/ActionButtons" unique_id=543897037]
 layout_mode = 2

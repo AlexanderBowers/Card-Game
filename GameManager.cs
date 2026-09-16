@@ -212,7 +212,12 @@ public partial class GameManager : Node
             _mirrorToggle.Toggled += _ => { ApplyResponsiveLayout(); UpdateUI(); };
         }
 
-        // Connect button signals. The solo scene has one shared End Turn / Hold pair in the middle
+        // The BUTTON says "Draw Card" (Alexander, 2026-09-15: it names what the press does, where
+        // "End Turn" named only what it stops). The concept underneath is still ending your turn
+        // for this deal, so HasEndedTurn / OnEndTurnPressed / _endTurnButton keep their names -
+        // renaming them would rename the rule to match a label.
+        //
+        // Connect button signals. The solo scene has one shared Draw Card / Hold pair in the middle
         // panel (it belongs to Player 1, the human); the 2-player scene gives each player their own
         // pair under their hand instead.
         _startButton.Pressed += OnStartButtonPressed;
@@ -2016,12 +2021,16 @@ public partial class GameManager : Node
 
         if (IsMirrored)
         {
-            // Mirrored: each player reads BOTH scores the right way up, on their own row.
+            // Two lines, each side reading from ITS OWN player's point of view. "P1 13/20 P2 8"
+            // was one dense row of four numbers and two labels that mean nothing to a stranger
+            // (Alexander, 2026-09-15: "isn't elderly friendly"). A mirrored side is only ever read
+            // by the person sitting at it, so "You" and "Them" are unambiguous there - and the
+            // line breaks do the work four spaces were failing to do.
             if (_p1ScoreLabel != null)
-                _p1ScoreLabel.Text = $"P1  {ScoreOf(_player1)}    P2  {_player2.CurrentScore}";
+                _p1ScoreLabel.Text = $"You: {ScoreOf(_player1)}\nThem: {_player2.CurrentScore}";
 
             if (_p2ScoreLabel != null)
-                _p2ScoreLabel.Text = $"P2  {ScoreOf(_player2)}    P1  {_player1.CurrentScore}";
+                _p2ScoreLabel.Text = $"You: {ScoreOf(_player2)}\nThem: {_player1.CurrentScore}";
         }
         else if (_isVsBot)
         {
@@ -2094,7 +2103,7 @@ public partial class GameManager : Node
             if (p2) return "Waiting for bot";
             return "Dealing...";
         }
-        if (p1 && p2) return "Both players: play or end turn";
+        if (p1 && p2) return "Both players: play or draw";
         if (p1) return "Waiting for P1";
         if (p2) return "Waiting for P2";
         return "Dealing...";
@@ -2596,11 +2605,17 @@ public partial class GameManager : Node
             flipped.RotationDegrees = 0f; // upright for its owner; the CORNERS face the other way
         }
 
+        // Corners, EXCEPT on a "+/-" card. That card already carries two numbers - +n over -n,
+        // one per half - and it is already readable from both sides of the table because of it.
+        // Adding corners put four numbers on one card and ran them into the borders
+        // (Alexander, S25 Ultra, 2026-09-15). The halves are the two-way reading there.
         int cornerFont = Mathf.Max(10, Mathf.RoundToInt(size.Y * CornerFontScale));
         foreach (string name in CardCornerNames)
         {
             Label corner = view.GetNodeOrNull<Label>(name);
-            if (corner != null) corner.AddThemeFontSizeOverride("font_size", cornerFont);
+            if (corner == null) continue;
+            corner.Visible = !flipFace;
+            corner.AddThemeFontSizeOverride("font_size", cornerFont);
         }
 
         // A pip is a Panel with a fully rounded StyleBoxFlat, and a corner radius is an integer
@@ -2741,11 +2756,12 @@ public partial class GameManager : Node
     // Reading the table at arm's length (playtest feedback, 2026-09-14)
     // ------------------------------------------------------------------
 
-    /// Two sizes, because the mirrored row carries two scores and one row that is wider than the
-    /// screen is worse than a smaller number on it: a too-wide side inside a CenterContainer
-    /// spills off BOTH screen edges, and EnsureLayoutFits answers it by shrinking the WHOLE UI.
+    /// Two sizes. The mirrored form carries two scores; stacked on two lines it is no longer
+    /// wider than the screen (which was the original reason for shrinking it - a too-wide side
+    /// inside a CenterContainer spills off BOTH edges and EnsureLayoutFits answers by scaling the
+    /// whole UI down), so it only gives up what the extra line costs in height.
     private const int ScoreFontSize = 34;
-    private const int ScoreFontSizeMirrored = 26;
+    private const int ScoreFontSizeMirrored = 30;
     private const int ActionFontSize = 30;
     private const float ActionButtonHeight = 76f;
 
@@ -3617,7 +3633,7 @@ public partial class GameManager : Node
     /// Player 1's staged hand. The +4 is the lesson; the rest are there so the hand looks normal.
     private static readonly int[] TutorialHand = { 4, 3, -2, -1 };
 
-    private const int TutorialSteps = 6;
+    private const int TutorialSteps = 5;
     private const float SpotlightPad = 10f;
 
     /// Set by "Replay the tutorial", which reloads the scene - so it is a static, for the same
@@ -3636,6 +3652,7 @@ public partial class GameManager : Node
     private Label _spotlightLabel;
     private Button _spotlightNext;
     private Button _spotlightSkip;
+    private bool _spotlightSettling;
 
     // ---- the overlay -------------------------------------------------
 
@@ -3780,17 +3797,23 @@ public partial class GameManager : Node
             case 0: return _p1ScoreLabel;
             case 1: return _mainDeckPosition;
             case 2: return _p1HandContainer;
-            case 3: return _p1ConfirmRow;
-            case 4: return _p1ActionRow;
-            case 5: return _p1WinsLabel?.GetParent() as Control;
+            case 3: return _p1ActionRow;
+            case 4: return _p1WinsLabel?.GetParent() as Control;
             default: return null;
         }
     }
 
-    /// Steps 2-4 are DO steps: the player performs the thing rather than reading about it. That is
+    /// Steps 2-3 are DO steps: the player performs the thing rather than reading about it. That is
     /// the difference between a tutorial and a slideshow, and for both ends of the 5-to-85 range
-    /// it is the whole point - "tap the card, then tap Play" is learned by doing it once.
-    private static bool TutorialIsDoStep(int step) => step >= 2 && step <= 4;
+    /// it is the whole point - playing a card is learned by playing one.
+    ///
+    /// Picking a card up and committing it used to be two steps, with the second one highlighting
+    /// the Play button. That was wrong twice over (Alexander, S25 Ultra): the hole landed beside
+    /// the confirm row rather than on it, so the button the step asked for was under the dim and
+    /// could not be pressed - and the lesson did not need two steps anyway. Tapping the same card
+    /// again commits it (the quick path the touch model has always had), so one step teaches both
+    /// halves and never has to find a control that only exists mid-gesture.
+    private static bool TutorialIsDoStep(int step) => step == 2 || step == 3;
 
     private string TutorialTextFor(int step)
     {
@@ -3800,21 +3823,18 @@ public partial class GameManager : Node
                 return $"This is your score. You are at {_player1.CurrentScore}, and you are aiming "
                      + $"for {_gameState.TargetScore} without going over.";
             case 1:
-                return "One deck of 40, shared by both of you - four each of 1 to 10. The number on "
-                     + "it is how many are left, so it can be counted.";
+                return "Four of each card numbered 1 to 10. The number on the deck is how many "
+                     + "are left.";
             case 2:
-                return "These cards are yours for the whole match. Tap one to pick it up.";
+                return "Tap a Modifier to see its effect. Tap it again to Play.";
             case 3:
-                return "Nothing is spent yet. The line under your cards shows the score it would "
-                     + "make - green is safe, red goes over. Tap Play.";
-            case 4:
                 // Reads the live score, so it is honest on a staged first match and on a replay.
                 return (_player1.CurrentScore >= _gameState.TargetScore - 2)
                     ? "You are on target. Hold stops you taking cards and locks your score in for "
                     + "the rest of the round."
-                    : "End Turn takes another card next deal. Hold stops you there and locks your "
+                    : "Draw Card takes another card next deal. Hold stops you there and locks your "
                     + "score in. Choose one.";
-            case 5:
+            case 4:
                 return $"Win {GameState.RoundsToWinMatch} rounds to take the match. These are yours "
                      + "so far. That is everything - good luck.";
             default:
@@ -3827,9 +3847,8 @@ public partial class GameManager : Node
     {
         switch (step)
         {
-            case 2: return _p1SelectedCard != null;
-            case 3: return _player1.ModifierHand.Count < _tutorialHandSize;
-            case 4: return !_player1.CanAct;
+            case 2: return _player1.ModifierHand.Count < _tutorialHandSize;
+            case 3: return !_player1.CanAct;
             default: return false;
         }
     }
@@ -3883,11 +3902,17 @@ public partial class GameManager : Node
             return;
         }
 
-        if (_tutorialIndex == 3) _tutorialHandSize = _player1.ModifierHand.Count;
         RefreshSpotlight();
     }
 
     private void RefreshSpotlight()
+    {
+        PlaceCurrentSpotlight();
+        SettleSpotlight();
+    }
+
+    /// Where the hole goes right now, for whichever of the two owners has the overlay.
+    private void PlaceCurrentSpotlight()
     {
         if (_spotlightOverlay == null || !_spotlightOverlay.Visible) return;
 
@@ -3904,6 +3929,38 @@ public partial class GameManager : Node
         _spotlightLabel.Text = TutorialTextFor(_tutorialIndex);
         _spotlightNext.Visible = !doStep;   // a DO step is finished by doing it, not by a button
         PlaceSpotlight(TutorialTarget(_tutorialIndex), blockHole: !doStep);
+    }
+
+    /// ...and then again once the layout has actually settled.
+    ///
+    /// THE BUG this exists for (Alexander, S25 Ultra, 2026-09-15): rotating portrait to landscape
+    /// left the hole over the score off to one side. A single deferred pass measures the layout
+    /// mid-move - the sides are re-ordered, the base resolution is rewritten, and EnsureLayoutFits
+    /// may still be scaling - so GetGlobalTransform returns where the control WAS. This is the
+    /// same two-frame lesson EnsureLayoutFits already learned, and for the same reason: a
+    /// container's geometry is only right on the pass after the one that changed it.
+    ///
+    /// Placed immediately as well, so the hole never blinks; the settle pass only corrects it.
+    /// Latched, because RefreshSpotlight is deferred from every UpdateUI and a pile of overlapping
+    /// waits would all place the same rect.
+    private async void SettleSpotlight()
+    {
+        if (_spotlightSettling || _spotlightOverlay == null || !_spotlightOverlay.Visible) return;
+        _spotlightSettling = true;
+
+        try
+        {
+            for (int i = 0; i < 2; i++)
+            {
+                await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+                if (!IsInsideTree()) return;
+            }
+            PlaceCurrentSpotlight();
+        }
+        finally
+        {
+            _spotlightSettling = false;
+        }
     }
 
     /// Runs from UpdateUI, which is called after every action that could complete a step - so a
@@ -4080,14 +4137,14 @@ public partial class GameManager : Node
         "Both players are dealt a card at the same time. You both decide at the same time too - " +
         "nobody waits for anyone.\n\n" +
         "YOUR HAND\n" +
-        "Tap a card to pick it up, then Play. It adds its value to your score. Four cards, and they " +
-        "have to last the whole match.\n\n" +
-        "END TURN or HOLD\n" +
-        "End Turn: you are done for this deal, and you get another card next deal.\n" +
+        "Tap a card to pick it up, then tap it again to play it. It adds its value to your score. " +
+        "Four cards, and they have to last the whole match.\n\n" +
+        "DRAW CARD or HOLD\n" +
+        "Draw Card: you are done for this deal, and you take another card on the next one.\n" +
         "Hold: you stop taking cards, and your score is locked for the rest of the round.\n\n" +
         "GOING OVER\n" +
-        "Over the target is only a warning until you End Turn or Hold - a minus card can still save " +
-        "you. End the turn while over, and you bust.\n\n" +
+        "Over the target is only a warning until you press Draw Card or Hold - a minus card can " +
+        "still save you. Draw while over, and you bust.\n\n" +
         "That is the whole game. Everything else is a card that explains itself when you meet it.";
 
     private static readonly string HowToPlayFull =
@@ -4101,7 +4158,7 @@ public partial class GameManager : Node
         "A ROUND\n" +
         "A round is a series of deals. Each deal, every player who isn't holding is dealt one card " +
         "at the same time. Both players then decide - at the same time, without waiting for each " +
-        "other - whether to play a hand card, and then press End Turn or Hold.\n" +
+        "other - whether to play a hand card, and then press Draw Card or Hold.\n" +
         "When the target is 20 or more, the FIRST deal of a round gives everyone two cards. Two " +
         "cards can never total more than 20, so that opening can never bust you.\n\n" +
         "YOUR HAND\n" +
@@ -4117,16 +4174,16 @@ public partial class GameManager : Node
         "A card marked with a small yellow +/- can be played either way round. Pick it up and press " +
         "the + / - button to swap it between plus and minus - as often as you like - before playing it. " +
         "A +3 becomes a -3, and back again.\n\n" +
-        "END TURN\n" +
-        "You're done for this deal and will be dealt another card next deal.\n\n" +
+        "DRAW CARD\n" +
+        "You are done for this deal, and you take another card on the next one.\n\n" +
         "HOLD\n" +
         "You stop taking cards for the rest of the round. Your score is locked in.\n\n" +
         "GOING OVER\n" +
         "Going over the target after a deal is only a warning (\"Over target!\") - you can still play a " +
-        "minus card to get back under. If you end your turn or hold while still over the target, you " +
-        "bust and lose the round when the deal resolves.\n\n" +
+        "minus card to get back under. If you press Draw Card or Hold while still over the target, " +
+        "you bust and lose the round when the deal resolves.\n\n" +
         "HOW A ROUND ENDS\n" +
-        "Once both players have pressed End Turn or Hold, the deal resolves:\n" +
+        "Once both players have pressed Draw Card or Hold, the deal resolves:\n" +
         "- Anyone over the target busts. If both bust, the round is a tie and is replayed.\n" +
         "- If both players are holding, the higher score wins the round. Equal scores tie and the round " +
         "is replayed.\n" +
