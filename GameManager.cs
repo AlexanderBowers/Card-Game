@@ -13,8 +13,8 @@ public partial class GameManager : Node
     [Export] private Label _p1StatusLabel;
     [Export] private Label _p1WinsLabel;
     [Export] private Control _p1BoardContainer;
-    [Export] private Control _p1HandContainer;
-    [Export] private Button _p1EndTurnButton; // 2-player scene: P1's own End Turn / Hold row under their hand
+    [Export] private Control _p1ModifierContainer;
+    [Export] private Button _p1DrawCardButton; // 2-player scene: P1's own Draw Card / Hold row under their hand
     [Export] private Button _p1HoldButton;
 
     [ExportGroup("Player 2 UI (AI)")]
@@ -22,17 +22,17 @@ public partial class GameManager : Node
     [Export] private Label _p2StatusLabel;
     [Export] private Label _p2WinsLabel;
     [Export] private Control _p2BoardContainer;
-    [Export] private Control _p2HandContainer;
+    [Export] private Control _p2ModifierContainer;
     [Export] private Control _p2Rotator;
-    [Export] private Button _p2EndTurnButton; // 2-player scene: inside P2Rotator, so it flips with P2's side
+    [Export] private Button _p2DrawCardButton; // 2-player scene: inside P2Rotator, so it flips with P2's side
     [Export] private Button _p2HoldButton;
 
     [ExportGroup("Shared UI")]
-    [Export] private Label _roundInfoLabel;
+    [Export] private Label _setInfoLabel;
     [Export] private OptionButton _gameModeButton;
     [Export] private CheckButton _mirrorToggle; // 2-player scene only: rotate P2's side 180 degrees
     [Export] private Button _startButton;
-    [Export] private Button _endTurnButton; // solo scene: one shared pair in the middle panel (Player 1, the human)
+    [Export] private Button _drawCardButton; // solo scene: one shared pair in the middle panel (Player 1, the human)
     [Export] private Button _holdButton;
     [Export] private Control _mainDeckPosition;
 
@@ -44,9 +44,9 @@ public partial class GameManager : Node
     private PackedScene _cardViewScene = GD.Load<PackedScene>("res://CardView.tscn");
     private bool _isGameStarted = false;
     private bool _isVsBot = false;
-    private bool _aiTurnInProgress = false; // the bot is "thinking" for this deal (the human is NOT locked meanwhile)
-    private bool _roundOverPending = false; // the round-end explanation is up; nothing moves until it's acknowledged
-    private bool _firstDealOfRound = false; // the next deal is this round's opening one (see DealCards)
+    private bool _aiTurnInProgress = false; // the bot is "thinking" for this turn (the human is NOT locked meanwhile)
+    private bool _setOverPending = false; // the set-end explanation is up; nothing moves until it's acknowledged
+    private bool _firstTurnOfSet = false; // the next turn is this set's opening one (see DealCards)
 
     /// At or above this target the opening deal is two cards, because two cards cannot exceed 20.
     private const int OpeningDoubleDealTarget = 20;
@@ -54,10 +54,10 @@ public partial class GameManager : Node
     /// How long the second opening card waits behind the first, so the pair reads as two cards.
     private const float OpeningDealStagger = 0.18f;
 
-    // One opponent-facing card per side per deal. Two in one deal cannot be read, however well
+    // One opponent-facing card per side per turn. Two in one turn cannot be read, however well
     // they animate - see claude/stage-ladder-spec.md.
-    private bool _p1PlayedEffectThisDeal = false;
-    private bool _p2PlayedEffectThisDeal = false;
+    private bool _p1PlayedEffectThisTurn = false;
+    private bool _p2PlayedEffectThisTurn = false;
 
     /// Set when the bot's turn is re-opened WHILE that turn is still running (the player answers
     /// a card during one of its animation pauses). Calling ProcessAiTurn there would be swallowed
@@ -66,11 +66,11 @@ public partial class GameManager : Node
     /// depends on which pause the player happened to interrupt.
     private bool _p2ReopenedMidTurn = false;
 
-    /// A card just brought back by Recall cannot be played until the NEXT deal. This is the whole
+    /// A card just brought back by Recall cannot be played until the NEXT turn. This is the whole
     /// of Recall's design: without it the card is "an extra modifier exactly when I need one",
     /// which is a rescue, and stage 8 is meant to be the rung that stops being about rescues.
     ///
-    /// It needs its own store because _pXPlayedEffectThisDeal does NOT cover it - that flag gates
+    /// It needs its own store because _pXPlayedEffectThisTurn does NOT cover it - that flag gates
     /// a second EFFECT card, and a recalled +4 is a plain modifier.
     private Card _p1RecallLock;
     private Card _p2RecallLock;
@@ -80,17 +80,17 @@ public partial class GameManager : Node
     //
     // Each match deals every player a fresh random hand: non-zero values in -4..+4, and a 1-in-10
     // chance for any of them to be a "+/-" (flip) card the player can swap between plus and minus
-    // before committing it. Cards are spent for the whole match, not the round.
+    // before committing it. Cards are spent for the whole match, not the set.
     // ------------------------------------------------------------------
-    private const int ModifierHandSize = 4;
+    private const int ModifierCount = 4;
     private const int MaxModifierMagnitude = 4;
-    private const double FlipCardChance = 0.10;
+    private const double FlipValueChance = 0.10;
 
     // ------------------------------------------------------------------
     // Tap to pick up, tap again to play
     //
-    // Nothing is spent by a single tap. Tapping a hand card picks it up (it lifts, the others dim,
-    // and the player's status line spells out the sum it would make); the End Turn / Hold row is
+    // Nothing is spent by a single tap. Tapping a Modifier picks it up (it lifts, the others dim,
+    // and the player's status line spells out the sum it would make); the Draw Card / Hold row is
     // then replaced by big Play / +- / Put back buttons, and tapping the same card again plays it.
     // Chosen over long-press or drag-and-drop: both need sustained precision, which is exactly what
     // small children and older hands struggle with.
@@ -105,8 +105,8 @@ public partial class GameManager : Node
     private HBoxContainer _p2ConfirmRow;
     private Button _p1PlayButton;
     private Button _p2PlayButton;
-    private Button _p1FlipButton;
-    private Button _p2FlipButton;
+    private Button _p1FlipValueButton;
+    private Button _p2FlipValueButton;
     private Control _p1ActionRow;
     private Control _p1SideLayout;
     private Control _p2SideLayout;
@@ -121,14 +121,14 @@ public partial class GameManager : Node
     // base (shrinking the whole UI uniformly) when a screen is too short for the full layout.
     // ------------------------------------------------------------------
     private const int BoardSlots = 9;                       // 3x3 board
-    private const int WinsToTakeMatch = GameState.RoundsToWinMatch;  // one chip slot per win needed
+    private const int WinsToTakeMatch = GameState.SetsToWinMatch;  // one chip slot per win needed
     private static readonly Vector2 BaseCardSize = new Vector2(84, 114); // Kenney cards are 140x190
-    private const float HandCardScale = 0.8f;
+    private const float ModifierCardScale = 0.8f;
     private const float MinCardScale = 0.6f;
     private float _cardScale = 1f;
     private BoxContainer _mainLayout;
 
-    // The middle panel's two added lines: the target, big, above the round line; and a banner
+    // The middle panel's two added lines: the target, big, above the set line; and a banner
     // under it that says what an effect card just did. Both are built in code (BuildTableBanners)
     // so the two .tscn scenes stay as they are.
     private Label _targetLabel;
@@ -136,7 +136,7 @@ public partial class GameManager : Node
     private uint _effectBannerToken;   // so a stale timer never wipes a newer message
 
     private Vector2 CardSize => BaseCardSize * _cardScale;
-    private Vector2 HandCardSize => BaseCardSize * _cardScale * HandCardScale;
+    private Vector2 ModifierCardSize => BaseCardSize * _cardScale * ModifierCardScale;
 
     // ------------------------------------------------------------------
     // Art (Kenney Boardgame Pack, CC0 - see assets/kenney/LICENSE.txt)
@@ -151,7 +151,7 @@ public partial class GameManager : Node
     // The Kenney sheet has three hues and red/green/blue are already minus/main/plus, so there is
     // no fourth back to give an effect card: it takes a plain green one and wears EffectTint, or
     // a Shave landing in the opponent's grid would read as a card they just drew. A later pass
-    // draws the real effect face in code, the way BuildFlipFace draws the blue-over-red one.
+    // draws the real effect face in code, the way BuildFlipValueFace draws the blue-over-red one.
     private static readonly Rect2 RegionEffect = new Rect2(140, 0, 140, 190);     // cardBack_green1
     private static readonly Color EffectTint = new Color(1.15f, 0.85f, 1.35f);    // violet wash
     private static readonly Rect2 RegionChipWon = new Rect2(0, 194, 68, 68);    // chipGreen_border
@@ -179,7 +179,7 @@ public partial class GameManager : Node
         _gameState = new GameState();
         _player1 = new Player("Player 1");
         _player2 = new Player("Player 2");
-        DealMatchHands();
+        DealMatchModifiers();
 
         _cardSheet = GD.Load<Texture2D>("res://assets/kenney/cards.png");
         _chipSheet = GD.Load<Texture2D>("res://assets/kenney/chips.png");
@@ -220,26 +220,25 @@ public partial class GameManager : Node
             _mirrorToggle.Toggled += _ => { ApplyResponsiveLayout(); UpdateUI(); };
         }
 
-        // The BUTTON says "Draw Card" (Alexander, 2026-09-15: it names what the press does, where
-        // "End Turn" named only what it stops). The concept underneath is still ending your turn
-        // for this deal, so HasEndedTurn / OnEndTurnPressed / _endTurnButton keep their names -
-        // renaming them would rename the rule to match a label.
+        // The button is "Draw Card" (Alexander, 2026-09-15), and the code uses the same words the
+        // player reads (2026-09-16): Match > Set > Turn, Modifiers, Draw Card, Flip Value. Pressing
+        // Draw Card ends your part of this turn, which is why the state is still HasEndedTurn.
         //
         // Connect button signals. The solo scene has one shared Draw Card / Hold pair in the middle
         // panel (it belongs to Player 1, the human); the 2-player scene gives each player their own
         // pair under their hand instead.
         _startButton.Pressed += OnStartButtonPressed;
-        if (_endTurnButton != null) _endTurnButton.Pressed += () => OnEndTurnPressed(_player1);
+        if (_drawCardButton != null) _drawCardButton.Pressed += () => OnDrawCardPressed(_player1);
         if (_holdButton != null) _holdButton.Pressed += () => OnHoldPressed(_player1);
-        if (_p1EndTurnButton != null) _p1EndTurnButton.Pressed += () => OnEndTurnPressed(_player1);
+        if (_p1DrawCardButton != null) _p1DrawCardButton.Pressed += () => OnDrawCardPressed(_player1);
         if (_p1HoldButton != null) _p1HoldButton.Pressed += () => OnHoldPressed(_player1);
-        if (_p2EndTurnButton != null) _p2EndTurnButton.Pressed += () => OnEndTurnPressed(_player2);
+        if (_p2DrawCardButton != null) _p2DrawCardButton.Pressed += () => OnDrawCardPressed(_player2);
         if (_p2HoldButton != null) _p2HoldButton.Pressed += () => OnHoldPressed(_player2);
         if (_restartButton != null) _restartButton.Pressed += OnRestartPressed;
         if (_exitButton != null) _exitButton.Pressed += OnExitPressed;
 
         // Set initial waiting message (UpdateUI below disables every action button until Start).
-        _roundInfoLabel.Text = "Press Start Game to Begin";
+        _setInfoLabel.Text = "Press Start Game to Begin";
 
         // Show the empty 3x3 boards and the win chips before the game starts.
         FillBoardWithSlots(_p1BoardContainer);
@@ -249,7 +248,7 @@ public partial class GameManager : Node
 
         BuildDeckCounter();
         BuildSpotlight();
-        BuildRoundEndOverlay();
+        BuildSetEndOverlay();
         BuildHowToPlay();
         CompactControlPanel(); // must precede BuildConfirmRows - see the method
         BuildConfirmRows();
@@ -299,7 +298,7 @@ public partial class GameManager : Node
     // orientation. If the screen can't show that much at the 720px base, the base is enlarged so
     // the entire UI scales down uniformly instead of cropping. (Phones in portrait are ~720x1560,
     // desktop landscape is 1280x720 - both fit as-is; a short portrait desktop window doesn't.)
-    // (Each side is stats + board + hand + its own End Turn / Hold row in the 2-player scene; the
+    // (Each side is stats + board + hand + its own Draw Card / Hold row in the 2-player scene; the
     // middle panel also carries the How to Play button.)
     private const float BaseSide = 720f;
     // Portrait dropped by roughly the height of a stats block and an action row PER SIDE when
@@ -320,7 +319,7 @@ public partial class GameManager : Node
     // Those two constants are a hand-maintained tally of everything in the portrait/landscape
     // column, and they have now been wrong three times: they were bumped for the confirm row, for
     // the How to Play button, and they were STILL short - local 2-player in portrait cropped both
-    // players' End Turn / Hold rows off the top and bottom of the phone (Alexander, 2026-09-13).
+    // players' Draw Card / Hold rows off the top and bottom of the phone (Alexander, 2026-09-13).
     // That is the mechanism working correctly on a wrong number, and it will go wrong again the
     // next time anyone adds a row, silently, on a device nobody is testing on.
     //
@@ -386,7 +385,7 @@ public partial class GameManager : Node
 
         // ...and each side re-flows within itself: a column in landscape, score and buttons beside
         // the board in portrait.
-        ApplySideLayout(_p1SideLayout, _p1ActionRow ?? _endTurnButton?.GetParent() as Control,
+        ApplySideLayout(_p1SideLayout, _p1ActionRow ?? _drawCardButton?.GetParent() as Control,
                         _p1ConfirmRow, portrait);
         ApplySideLayout(_p2SideLayout, _p2ActionRow, _p2ConfirmRow, portrait);
 
@@ -401,7 +400,7 @@ public partial class GameManager : Node
         ResizeBoard(_p2BoardContainer);
         if (_mainDeckPosition != null) _mainDeckPosition.CustomMinimumSize = CardSize;
         _deckCountLabel?.AddThemeFontSizeOverride("font_size", Mathf.RoundToInt(CardSize.Y * 0.30f));
-        RefreshHandUI();
+        RefreshModifiersUI();
         CallDeferred(MethodName.UpdateRotatorSize);
         CallDeferred(MethodName.RefreshSpotlight); // a rotation moves whatever is being highlighted
         EnsureLayoutFits();
@@ -437,7 +436,7 @@ public partial class GameManager : Node
         // under SideRow. owned:false - SideRow and LeftColumn are built here and have no owner.
         Control stats = layout.FindChild("Stats", true, false) as Control;
         Control board = layout.FindChild("BoardSlotsContainer", true, false) as Control;
-        Control hand = layout.FindChild("HandContainer", true, false) as Control;
+        Control hand = layout.FindChild("ModifierContainer", true, false) as Control;
         if (stats == null || board == null || hand == null) return;
 
         HBoxContainer sideRow = layout.GetNodeOrNull<HBoxContainer>("SideRow");
@@ -623,7 +622,7 @@ public partial class GameManager : Node
     private void RestartScene(bool sameMatch)
     {
         // Reloading the scene rebuilds GameManager, GameState and both Players from scratch,
-        // so this fully resets the match (round wins, scores, hands).
+        // so this fully resets the match (set wins, scores, hands).
         if (sameMatch && _isGameStarted)
         {
             // The same notes the start menu leaves when it sends the player between scenes; _Ready
@@ -686,9 +685,9 @@ public partial class GameManager : Node
         bool tutorial = ShouldRunTutorial();
         _tutorialStaged = tutorial && ShouldStageTutorial();
 
-        DealMatchHands(); // the hand has to last all three rounds of the match
+        DealMatchModifiers(); // the hand has to last all three sets of the match
 
-        StartNewRound(); // UpdateUI enables the End Turn / Hold buttons
+        StartNewSet(); // UpdateUI enables the Draw Card / Hold buttons
 
         if (tutorial) StartTutorial();
     }
@@ -720,47 +719,47 @@ public partial class GameManager : Node
     }
 
     /// A fresh modifier hand for both players. Cards are spent for the whole match, so this runs
-    /// once per match - not per round.
+    /// once per match - not per set.
     ///
     /// In a run, Player 1's hand is drawn at random from the 12-card deck they built on the deck
     /// screen: the deck is chosen, the hand is not. Everywhere else (local 2-player, and the bot)
     /// the hand is dealt at random.
-    private void DealMatchHands()
+    private void DealMatchModifiers()
     {
         // The staged hand for the tutorial. The +4 is the lesson - it takes the staged opening of
         // 16 to exactly 20 - and the other three are there so the hand looks like a normal one.
         if (_tutorialStaged)
         {
-            _player1.ModifierHand.Clear();
-            foreach (int value in TutorialHand)
-                _player1.ModifierHand.Add(new Card(value, CardType.Modifier));
+            _player1.Modifiers.Clear();
+            foreach (int value in TutorialModifiers)
+                _player1.Modifiers.Add(new Card(value, CardType.Modifier));
 
             _player1.ResetForNewMatch();
             _player2.ResetForNewMatch();
-            DealAiHand();
+            DealAiModifiers();
             ClearSelections();
             return;
         }
 
-        List<Card> runHand = _inRun ? RunData.Instance?.DrawMatchHand() : null;
-        if (runHand != null && runHand.Count > 0)
+        List<Card> runModifiers = _inRun ? RunData.Instance?.DrawMatchModifiers() : null;
+        if (runModifiers != null && runModifiers.Count > 0)
         {
-            _player1.ModifierHand.Clear();
-            _player1.ModifierHand.AddRange(runHand);
+            _player1.Modifiers.Clear();
+            _player1.Modifiers.AddRange(runModifiers);
         }
         else
         {
-            _player1.DealRandomModifierHand(_random, ModifierHandSize, FlipCardChance, MaxModifierMagnitude);
+            _player1.DealRandomModifiers(_random, ModifierCount, FlipValueChance, MaxModifierMagnitude);
         }
 
         // The spent pile is per-MATCH, which is what makes Recall a card about a hand that has to
-        // last every round rather than a card about this round. This is the only place it clears.
+        // last every set rather than a card about this set. This is the only place it clears.
         _player1.ResetForNewMatch();
         _player2.ResetForNewMatch();
 
-        DealAiHand();
+        DealAiModifiers();
         ClearSelections();
-        QueueCoachMarksForHand();
+        QueueCoachMarksForModifiers();
     }
 
     /// The AI's hand for this match, built to the rung's recipe rather than rolled flat: stage 1
@@ -768,12 +767,12 @@ public partial class GameManager : Node
     /// one, and stages 4-8 spend one of the four slots on that stage's effect card.
     ///
     /// Local 2-player and a runless solo scene keep the old flat roll.
-    private void DealAiHand()
+    private void DealAiModifiers()
     {
         RunData run = _inRun ? RunData.Instance : null;
         if (run == null)
         {
-            _player2.DealRandomModifierHand(_random, ModifierHandSize, FlipCardChance, MaxModifierMagnitude);
+            _player2.DealRandomModifiers(_random, ModifierCount, FlipValueChance, MaxModifierMagnitude);
             return;
         }
 
@@ -782,17 +781,17 @@ public partial class GameManager : Node
 
         // Plain cards first: no flip chance here, because whether this stage has a "+/-" card is
         // the stage's decision, not a dice roll.
-        for (int i = 0; i < ModifierHandSize; i++)
+        for (int i = 0; i < ModifierCount; i++)
         {
             hand.Add(Player.CreateRandomModifier(_random, 0.0, MaxModifierMagnitude));
         }
 
-        int flipIndex = -1;
-        if (step.AiHasFlipCards)
+        int flipValueIndex = -1;
+        if (step.AiHasFlipValueCards)
         {
-            flipIndex = _random.Next(hand.Count);
-            Card card = hand[flipIndex];
-            hand[flipIndex] = new Card(Math.Abs(card.Value), CardType.Modifier, "", isFlip: true);
+            flipValueIndex = _random.Next(hand.Count);
+            Card card = hand[flipValueIndex];
+            hand[flipValueIndex] = new Card(Math.Abs(card.Value), CardType.Modifier, "", canFlipValue: true);
         }
 
         // The stage's effect card takes one of the four slots.
@@ -807,7 +806,7 @@ public partial class GameManager : Node
         // at all until the randomizer rolls their ruleset).
         //
         // Still ONE card, dealt once for the whole match and spent when it is played. Hands are
-        // not topped up between rounds: the drama of a stage card is that there is one of it.
+        // not topped up between sets: the drama of a stage card is that there is one of it.
         CardEffect aiEffect = step.AiEffect;
         if (!CardEffects.IsWired(aiEffect) && run.MatchNumber >= 4)
         {
@@ -828,18 +827,18 @@ public partial class GameManager : Node
         if (CardEffects.IsWired(aiEffect))
         {
             int effectIndex = _random.Next(hand.Count);
-            if (effectIndex == flipIndex) effectIndex = (effectIndex + 1) % hand.Count;
+            if (effectIndex == flipValueIndex) effectIndex = (effectIndex + 1) % hand.Count;
             hand[effectIndex] = CardEffects.Create(aiEffect, _random);
         }
 
-        _player2.ModifierHand = hand;
+        _player2.Modifiers = hand;
         _player2.EnsureBothSigns(_random);
     }
 
-    private void StartNewRound()
+    private void StartNewSet()
     {
-        _player1.ResetForNewRound();
-        _player2.ResetForNewRound();
+        _player1.ResetForNewSet();
+        _player2.ResetForNewSet();
         ClearSelections();
         ClearEffectBanner();
 
@@ -847,9 +846,9 @@ public partial class GameManager : Node
         FillBoardWithSlots(_p1BoardContainer);
         FillBoardWithSlots(_p2BoardContainer);
 
-        // A fresh forty every round, and the next deal is this round's opening one.
+        // A fresh forty every set, and the next turn is this set's opening one.
         ShuffleMainDeck();
-        _firstDealOfRound = true;
+        _firstTurnOfSet = true;
 
         DealCards();
     }
@@ -871,7 +870,7 @@ public partial class GameManager : Node
     // worthless, because half the information would never reach the table - and watching what they
     // draw is most of what makes counting worth doing.
     //
-    // SHUFFLED EVERY ROUND, not every match: Pazaak's rule, and it keeps each round a clean
+    // SHUFFLED EVERY SET, not every match: Pazaak's rule, and it keeps each set a clean
     // counting problem rather than a match-long bookkeeping chore.
     // ------------------------------------------------------------------
 
@@ -896,9 +895,9 @@ public partial class GameManager : Node
             _mainDeck[j] = swap;
         }
 
-        // The staged opening for the tutorial's first round. Each value is REMOVED from the
+        // The staged opening for the tutorial's first set. Each value is REMOVED from the
         // shuffled remainder before being appended, so the deck still holds exactly four of each
-        // and the rest of the round is as random as any other.
+        // and the rest of the set is as random as any other.
         if (_tutorialStaged && _gameState.IsFirstSet)
         {
             foreach (int value in TutorialOpening) _mainDeck.Remove(value);
@@ -909,7 +908,7 @@ public partial class GameManager : Node
     /// The top card. The deck cannot actually run out at any target this game uses. Both players
     /// draw from the SAME forty, so the adversarial worst case - the deck sorted smallest-first,
     /// both players drawing until they bust - is 19 cards of 40 at a target of 25, and 200k
-    /// simulated rounds across every ladder target never went past 17.
+    /// simulated sets across every ladder target never went past 17.
     ///
     /// The reshuffle is here anyway, because that arithmetic is a property of TODAY's targets and
     /// a future rule change should not be able to turn it into a crash.
@@ -949,30 +948,30 @@ public partial class GameManager : Node
     }
 
     // ------------------------------------------------------------------
-    // Deals
+    // Turns
     //
-    // There is no turn order. A round is a series of deals: every player who isn't holding draws
-    // a card at the same time, then both play modifiers and press End Turn / Hold blind. Once
-    // neither player can act any more the deal is resolved (ResolveDeal) - busts, both holding,
-    // or simply the next deal.
+    // There is no turn order. A set is a series of turns: every player who isn't holding draws
+    // a card at the same time, then both play modifiers and press Draw Card / Hold blind. Once
+    // neither player can act any more the turn is resolved (ResolveTurn) - busts, both holding,
+    // or simply the next turn.
     // ------------------------------------------------------------------
     private void DealCards()
     {
         _player1.HasEndedTurn = false;
         _player2.HasEndedTurn = false;
 
-        // Both are about this deal only: who has drawn what, and who has already reached across
+        // Both are about this turn only: who has drawn what, and who has already reached across
         // the table once.
         _player1.LastDrawnCard = null;
         _player2.LastDrawnCard = null;
         _player1.LastPlayedModifier = null;
         _player2.LastPlayedModifier = null;
-        _p1PlayedEffectThisDeal = false;
-        _p2PlayedEffectThisDeal = false;
+        _p1PlayedEffectThisTurn = false;
+        _p2PlayedEffectThisTurn = false;
         _p2ReopenedMidTurn = false;
 
-        // A card recalled during the last deal becomes playable now. This is the ONLY place the
-        // lock is lifted, so a recalled card is always dead for exactly one deal.
+        // A card recalled during the last turn becomes playable now. This is the ONLY place the
+        // lock is lifted, so a recalled card is always dead for exactly one turn.
         _p1RecallLock = null;
         _p2RecallLock = null;
 
@@ -984,8 +983,8 @@ public partial class GameManager : Node
         // could, so those rungs keep the single opening card. That is not a wart; it is free
         // variety, and it lands on the two rungs that already feel different because the target
         // dropped.
-        bool opening = _firstDealOfRound;
-        _firstDealOfRound = false;
+        bool opening = _firstTurnOfSet;
+        _firstTurnOfSet = false;
         int cards = (opening && _gameState.TargetScore >= OpeningDoubleDealTarget) ? 2 : 1;
 
         for (int i = 0; i < cards; i++)
@@ -1024,14 +1023,14 @@ public partial class GameManager : Node
         InstantiateCardView(drawnMainCard, boardContainer, delay);
 
         // Going over the target here is NOT a bust yet - the player may still play a minus card
-        // before ending the turn. Busts are only decided in ResolveDeal.
+        // before ending the turn. Busts are only decided in ResolveTurn.
     }
 
-    /// Called whenever someone finishes their part of the deal (End Turn, Hold, or the bot).
-    /// Does nothing until BOTH players are done; then either ends the round or deals again.
-    private void ResolveDeal()
+    /// Called whenever someone finishes their part of the turn (Draw Card, Hold, or the bot).
+    /// Does nothing until BOTH players are done; then either ends the set or deals again.
+    private void ResolveTurn()
     {
-        if (!_isGameStarted || _gameState.IsGameOver || _roundOverPending) return;
+        if (!_isGameStarted || _gameState.IsGameOver || _setOverPending) return;
 
         if (_player1.CanAct || _player2.CanAct)
         {
@@ -1045,7 +1044,7 @@ public partial class GameManager : Node
 
         if (anyBust || bothHolding)
         {
-            EndRound();
+            EndSet();
             return;
         }
 
@@ -1060,7 +1059,7 @@ public partial class GameManager : Node
     // ------------------------------------------------------------------
     private enum AiSkill
     {
-        /// Bronze, Silver (stages 1-4). One card per deal, blind to your hand. The opponent that
+        /// Bronze, Silver (stages 1-4). One card per turn, blind to your hand. The opponent that
         /// teaches the game: it never surprises you while you are still learning what a +/- does.
         Basic,
 
@@ -1073,15 +1072,15 @@ public partial class GameManager : Node
         Reads,
     }
 
-    /// At most this many ordinary cards in one deal, once the bot chains. The cap is the point:
-    /// an unbounded loop empties the hand in a single deal and reads as a machine having a fit.
+    /// At most this many ordinary cards in one turn, once the bot chains. The cap is the point:
+    /// an unbounded loop empties the hand in a single turn and reads as a machine having a fit.
     private const int MaxAiChainedCards = 3;
 
-    /// Trade Hands is a bet on the rounds still to come, so the bot only makes it once its OWN
+    /// Trade Hands is a bet on the sets still to come, so the bot only makes it once its OWN
     /// hand is spent - it must be left holding at most this many cards after the trade card goes.
     /// Without this floor it fires on the first deal of the match, when both hands are full and
     /// spending a card to gain one is a swap for its own sake.
-    private const int MaxHandToTradeAway = 1;
+    private const int MaxModifiersToTradeAway = 1;
 
     private AiSkill CurrentAiSkill()
     {
@@ -1110,10 +1109,10 @@ public partial class GameManager : Node
 
         //1. Wait a moment to let the player see the AI's drawn card
         await ToSignal(GetTree().CreateTimer(1.0f), SceneTreeTimer.SignalName.Timeout);
-        if (!IsInsideTree()) return; // scene was restarted/exited mid-deal
+        if (!IsInsideTree()) return; // scene was restarted/exited mid-turn
 
-        //2. First, whether to reach across the table at all. At most one such card per deal, and
-        //   only when it decides the round - see TryAiPlayEffectCard.
+        //2. First, whether to reach across the table at all. At most one such card per turn, and
+        //   only when it decides the set - see TryAiPlayEffectCard.
         if (TryAiPlayEffectCard())
         {
             await ToSignal(GetTree().CreateTimer(1.5f), SceneTreeTimer.SignalName.Timeout);
@@ -1148,12 +1147,12 @@ public partial class GameManager : Node
 
         int target = _gameState.TargetScore;
 
-        //4. Still over the target now = the bot ends its turn and busts when the deal resolves.
+        //4. Still over the target now = the bot ends its turn and busts when the turn resolves.
         if (_player2.CurrentScore > target)
         {
             GD.Print($"AI ends its turn over the target at {_player2.CurrentScore}");
             _player2.HasEndedTurn = true;
-            ResolveDeal();
+            ResolveTurn();
             return;
         }
 
@@ -1169,19 +1168,19 @@ public partial class GameManager : Node
         }
         else if (skill == AiSkill.Reads)
         {
-            // Level 3 weighs the MATCH, not just the round: behind, there is nothing left to
+            // Level 3 weighs the MATCH, not just the set: behind, there is nothing left to
             // protect and it pushes; level on the DECIDER, a bust loses everything and it plays
             // safe.
             //
             // "The decider" was written as `mine == yours && mine > 0`, which was only ever
             // correct because the match was best of three - 1-1 was the only level score that
             // could end it. At best of five that test fires at 1-1 and at 2-2, and 1-1 is an
-            // ordinary mid-match round where playing safe just loses ground. The rule it was
+            // ordinary mid-match set where playing safe just loses ground. The rule it was
             // always trying to state is: level, with either side one win from the match.
-            int mine = _gameState.RoundsWonPlayer2;
-            int yours = _gameState.RoundsWonPlayer1;
+            int mine = _gameState.SetsWonPlayer2;
+            int yours = _gameState.SetsWonPlayer1;
             if (mine < yours) holdThreshold += 1;
-            else if (mine == yours && mine == GameState.RoundsToWinMatch - 1) holdThreshold -= 1;
+            else if (mine == yours && mine == GameState.SetsToWinMatch - 1) holdThreshold -= 1;
 
             // ...and it READS PLAYER 1'S HAND, for the one decision it otherwise gets wrong: is my
             // score actually safe? Against a player sitting on 15 with a +4 in hand, holding on 18
@@ -1208,31 +1207,31 @@ public partial class GameManager : Node
             _player2.HasEndedTurn = true;
         }
 
-        ResolveDeal();
+        ResolveTurn();
     }
 
-    /// Whether the bot reaches across the table this deal, and with what.
+    /// Whether the bot reaches across the table this turn, and with what.
     ///
     /// The rule behind every branch: an effect card is only spent when it DECIDES something. A
     /// Copy spent to move two points, or a Shave on a score the bot is already beating, is the
     /// difference between a boss that feels hard and one that feels cheap.
     private bool TryAiPlayEffectCard()
     {
-        if (_p2PlayedEffectThisDeal) return false;
+        if (_p2PlayedEffectThisTurn) return false;
 
         int target = _gameState.TargetScore;
         Player me = _player2;
         Player you = _player1;
 
         // Trade Totals - I take their score, they take mine. The biggest reach in the game, so it
-        // is asked first: when this and a Copy would both rescue the same deal, taking a whole
+        // is asked first: when this and a Copy would both rescue the same turn, taking a whole
         // legal total off them beats trimming my own draw.
         //
-        // It is never a free round. CanPlay refuses a holding opponent, so the player it lands on
+        // It is never a free set. CanPlay refuses a holding opponent, so the player it lands on
         // can always still act - and the answering rule re-opens their turn, handing them my wreck
         // and a chance to climb out of it. What the card buys is the total, and the total has to be
         // worth it on its own.
-        foreach (Card card in me.ModifierHand)
+        foreach (Card card in me.Modifiers)
         {
             if (card.Effect != CardEffect.TradeTotals || !CanPlayEffect(me, card)) continue;
 
@@ -1243,7 +1242,7 @@ public partial class GameManager : Node
             if (me.CurrentScore > target)
             {
                 // Busted, and their legal total ends the problem outright - unless my own hand was
-                // going to get me under anyway, in which case keep this for a deal where nothing
+                // going to get me under anyway, in which case keep this for a turn where nothing
                 // else will. Asked against my own skill, since from Gold up I can chain my way back.
                 if (CanGetUnder(me, me.CurrentScore, target, mayChain: CurrentAiSkill() != AiSkill.Basic)) continue;
                 return PlayEffectCard(me, card);
@@ -1261,7 +1260,7 @@ public partial class GameManager : Node
 
         // Copy - my drawn card becomes theirs. Entirely my own business: it never touches their
         // card, their score or their turn, so the only question is whether it changes MY result.
-        foreach (Card card in me.ModifierHand)
+        foreach (Card card in me.Modifiers)
         {
             if (card.Effect != CardEffect.Copy || !CanPlayEffect(me, card)) continue;
 
@@ -1275,7 +1274,7 @@ public partial class GameManager : Node
             if (me.CurrentScore > target)
             {
                 // Busted, and this card takes the bust away. Spend it - unless an ordinary card
-                // would already have done the job, in which case keep the Copy for a deal where
+                // would already have done the job, in which case keep the Copy for a turn where
                 // nothing else will. Asked against my OWN skill, since from Gold up I can chain
                 // two cards to climb back under.
                 if (CanGetUnder(me, me.CurrentScore, target, mayChain: CurrentAiSkill() != AiSkill.Basic)) continue;
@@ -1302,7 +1301,7 @@ public partial class GameManager : Node
         // Shave - their score is locked below the target, so it can never move again and there is
         // nothing to wait for. It only ever matters where one point changes the result, which is
         // exactly when I am level with them or behind: ahead of them it is a wasted card.
-        foreach (Card card in me.ModifierHand)
+        foreach (Card card in me.Modifiers)
         {
             if (card.Effect != CardEffect.Shave || !CanPlayEffect(me, card)) continue;
             if (me.CurrentScore > target) continue;               // fix my own bust first
@@ -1323,8 +1322,8 @@ public partial class GameManager : Node
         //
         // Two things make it decisive, and nothing else does. It can push them OVER the target, or
         // it can take a total that is beating me and drop it below mine. Short of those, they draw
-        // the points straight back next deal and I have spent the game's dearest attack on a dent.
-        foreach (Card card in me.ModifierHand)
+        // the points straight back next turn and I have spent the game's dearest attack on a dent.
+        foreach (Card card in me.Modifiers)
         {
             if (card.Effect != CardEffect.Veto || !CanPlayEffect(me, card)) continue;
             if (me.CurrentScore > target) continue; // fix my own bust first - Veto does nothing for it
@@ -1334,7 +1333,7 @@ public partial class GameManager : Node
             // to save them (already losing). Both are reasons to leave them exactly where they are.
             if (you.CurrentScore > target) continue;
 
-            // CanPlayEffect has already guaranteed this is a plain modifier played this deal.
+            // CanPlayEffect has already guaranteed this is a plain modifier played this turn.
             Card theirs = you.LastPlayedModifier;
             int after = you.CurrentScore - theirs.Value;
 
@@ -1345,16 +1344,16 @@ public partial class GameManager : Node
             bool takesTheLead = you.CurrentScore > me.CurrentScore && after < me.CurrentScore;
             if (!bustsThem && !takesTheLead) continue;
 
-            // Priority 1, as everywhere: if a plain card already takes the round off a score they
-            // have locked in, take the round and keep this. Doubly so here - Veto un-holds them,
-            // so spending it on a hold I was already going to beat hands the round back.
+            // Priority 1, as everywhere: if a plain card already takes the set off a score they
+            // have locked in, take the set and keep this. Doubly so here - Veto un-holds them,
+            // so spending it on a hold I was already going to beat hands the set back.
             if (you.IsHolding && CanBeatWithOrdinary(me, you.CurrentScore, target)) continue;
 
             return PlayEffectCard(me, card);
         }
 
         // Trade Hands - I take everything they are still holding, they take what I have left. Late,
-        // because it decides nothing about THIS deal: it is a bet on the rounds to come, while
+        // because it decides nothing about THIS turn: it is a bet on the sets to come, while
         // every card above it is a bet on the one being played.
         //
         // The signal is my own hand being spent, not theirs being good. How many cards someone
@@ -1362,44 +1361,44 @@ public partial class GameManager : Node
         // is hidden information, and pass 3 licensed reading that at Obsidian only. So the Ruby bot
         // that first carries this card trades on the honest signal - "I have nothing left and they
         // do" - and the Obsidian bot additionally refuses a trade that would not gain it anything.
-        foreach (Card card in me.ModifierHand)
+        foreach (Card card in me.Modifiers)
         {
             if (card.Effect != CardEffect.TradeHands || !CanPlayEffect(me, card)) continue;
-            if (me.CurrentScore > target) continue; // fix my own bust before playing for next round
+            if (me.CurrentScore > target) continue; // fix my own bust before playing for next set
 
-            // Priority 1 in the spec's decision order: if a plain card already takes the round off
-            // a score they have locked in, take the round and keep this.
+            // Priority 1 in the spec's decision order: if a plain card already takes the set off
+            // a score they have locked in, take the set and keep this.
             if (you.IsHolding && CanBeatWithOrdinary(me, you.CurrentScore, target)) continue;
 
             // This card is what empties my hand, so count what is left AFTER it goes.
-            int myRemaining = me.ModifierHand.Count - 1;
-            if (myRemaining > MaxHandToTradeAway) continue;      // my hand is not spent yet
-            if (you.ModifierHand.Count <= myRemaining) continue; // and theirs has to be bigger
+            int myRemaining = me.Modifiers.Count - 1;
+            if (myRemaining > MaxModifiersToTradeAway) continue;      // my hand is not spent yet
+            if (you.Modifiers.Count <= myRemaining) continue; // and theirs has to be bigger
 
             if (CurrentAiSkill() == AiSkill.Reads
-                && HandStrength(you) <= HandStrength(me, ignore: card)) continue;
+                && ModifierStrength(you) <= ModifierStrength(me, ignore: card)) continue;
 
             return PlayEffectCard(me, card);
         }
 
         // Recall - I take one of my own spent cards back. Asked LAST, below even Trade Hands: the
-        // card it returns cannot be played until the next deal, so it decides nothing about this
+        // card it returns cannot be played until the next turn, so it decides nothing about this
         // one, and Trade Hands at least has a window that closes (their hand is fat NOW). Recall's
         // window never closes, so it is always the thing to do when there is nothing better.
-        foreach (Card card in me.ModifierHand)
+        foreach (Card card in me.Modifiers)
         {
             if (card.Effect != CardEffect.Recall || !CanPlayEffect(me, card)) continue;
-            if (me.CurrentScore > target) continue; // fix this deal before playing for the next
+            if (me.CurrentScore > target) continue; // fix this turn before playing for the next
 
             // The floor, and the same one Trade Hands uses. Without it the bot burns Recall in the
-            // first deal of a match, when its hand is full and the card it gets back is worth less
+            // first turn of a match, when its hand is full and the card it gets back is worth less
             // than the one it spends. The moment this card is FOR is "my hand is spent".
-            if (me.ModifierHand.Count - 1 > MaxHandToTradeAway) continue;
+            if (me.Modifiers.Count - 1 > MaxModifiersToTradeAway) continue;
 
-            // A card for next round is worth nothing when there may not be one. Either side one
-            // win from the match means this round can end it.
-            if (_gameState.RoundsWonPlayer1 >= GameState.RoundsToWinMatch - 1
-                || _gameState.RoundsWonPlayer2 >= GameState.RoundsToWinMatch - 1) continue;
+            // A card for next set is worth nothing when there may not be one. Either side one
+            // win from the match means this set can end it.
+            if (_gameState.SetsWonPlayer1 >= GameState.SetsToWinMatch - 1
+                || _gameState.SetsWonPlayer2 >= GameState.SetsToWinMatch - 1) continue;
 
             Card wanted = PickRecallTarget(me, ignore: card);
             if (wanted == null) continue;
@@ -1416,14 +1415,14 @@ public partial class GameManager : Node
     /// That second clause is Player.EnsureBothSigns' reasoning applied to a hand of one, and it is
     /// the difference between recalling a +4 it cannot use against 23 and recalling the -3 that
     /// saves it. Hands last the whole match and are never topped up, so "playable right now" is
-    /// the wrong measure - a card that is dead this round is the best card in the hand next round.
+    /// the wrong measure - a card that is dead this set is the best card in the hand next set.
     private Card PickRecallTarget(Player player, Card ignore = null)
     {
         bool hasWayDown = false;
-        foreach (Card held in player.ModifierHand)
+        foreach (Card held in player.Modifiers)
         {
             if (held == ignore || held.Effect != CardEffect.None) continue;
-            if (held.IsFlip || held.Value < 0) { hasWayDown = true; break; }
+            if (held.CanFlipValue || held.Value < 0) { hasWayDown = true; break; }
         }
 
         Card best = null;
@@ -1434,12 +1433,12 @@ public partial class GameManager : Node
             if (!CardEffects.IsPlainModifier(spent)) continue;
 
             // A "+/-" card counts for more than its number, because it can be played either way up.
-            int score = Math.Abs(spent.Value) + (spent.IsFlip ? 1 : 0);
+            int score = Math.Abs(spent.Value) + (spent.CanFlipValue ? 1 : 0);
 
             // ...and when the hand has no way down at all, ANY card that can go down outranks any
             // size of plus. Scored rather than branched so the answer does not depend on the order
             // the pile happens to be in.
-            if (!hasWayDown && (spent.IsFlip || spent.Value < 0)) score += 100;
+            if (!hasWayDown && (spent.CanFlipValue || spent.Value < 0)) score += 100;
 
             if (score > bestScore) { best = spent; bestScore = score; }
         }
@@ -1449,17 +1448,17 @@ public partial class GameManager : Node
 
     /// What a hand is worth, for the one decision that needs to compare two of them.
     ///
-    /// Deliberately NOT "cards that could be played legally this round": hands last the whole
+    /// Deliberately NOT "cards that could be played legally this set": hands last the whole
     /// match and are never topped up, so a +5 that is dead against 19 is the best card in the hand
-    /// next round. Magnitude is the measure that survives the round. A "+/-" card is worth more
+    /// next set. Magnitude is the measure that survives the set. A "+/-" card is worth more
     /// than its number because it can be played either way up, and an effect card is worth taking
     /// whatever it happens to be.
     ///
     /// `ignore` leaves out the card being spent to make the trade.
-    private static int HandStrength(Player player, Card ignore = null)
+    private static int ModifierStrength(Player player, Card ignore = null)
     {
         int strength = 0;
-        foreach (Card card in player.ModifierHand)
+        foreach (Card card in player.Modifiers)
         {
             if (card == ignore) continue;
             if (card.Effect != CardEffect.None)
@@ -1467,19 +1466,19 @@ public partial class GameManager : Node
                 strength += EffectCardWorth;
                 continue;
             }
-            strength += Math.Abs(card.Value) + (card.IsFlip ? FlipCardBonus : 0);
+            strength += Math.Abs(card.Value) + (card.CanFlipValue ? FlipValueBonus : 0);
         }
         return strength;
     }
 
-    private const int FlipCardBonus = 2;
+    private const int FlipValueBonus = 2;
     private const int EffectCardWorth = 5;
 
     /// Could this player still get to or under the target with the ordinary cards in their hand?
     /// Counts a "+/-" card at its minus face, since that is the orientation that saves a bust.
     ///
-    /// mayChain says whether they get to play more than one: a person can chain hand cards for as
-    /// long as they like before ending the turn, while the bot plays at most one per deal - so the
+    /// mayChain says whether they get to play more than one: a person can chain Modifiers for as
+    /// long as they like before ending the turn, while the bot plays at most one per turn - so the
     /// same question has two different answers depending on who is being asked about. (From Gold
     /// up the bot chains too, and asks this about itself with mayChain: true.)
     ///
@@ -1490,12 +1489,12 @@ public partial class GameManager : Node
         if (score <= target) return true;
 
         int everything = 0;
-        foreach (Card card in player.ModifierHand)
+        foreach (Card card in player.Modifiers)
         {
             if (card.Effect != CardEffect.None) continue;
             if (card == ignore) continue;
 
-            int best = card.IsFlip ? -Math.Abs(card.Value) : card.Value;
+            int best = card.CanFlipValue ? -Math.Abs(card.Value) : card.Value;
             if (!mayChain && score + best <= target) return true;
             if (best < 0) everything += best;
         }
@@ -1504,15 +1503,15 @@ public partial class GameManager : Node
     }
 
     /// Is there an ordinary card that would put the bot past a score the player has locked in,
-    /// without busting? If so it does not need an effect card to win this round.
+    /// without busting? If so it does not need an effect card to win this set.
     private static bool CanBeatWithOrdinary(Player me, int scoreToBeat, int target)
     {
-        foreach (Card card in me.ModifierHand)
+        foreach (Card card in me.Modifiers)
         {
             if (card.Effect != CardEffect.None) continue;
 
             int magnitude = Math.Abs(card.Value);
-            int[] orientations = card.IsFlip ? new[] { magnitude, -magnitude } : new[] { card.Value };
+            int[] orientations = card.CanFlipValue ? new[] { magnitude, -magnitude } : new[] { card.Value };
             foreach (int value in orientations)
             {
                 int result = me.CurrentScore + value;
@@ -1525,10 +1524,10 @@ public partial class GameManager : Node
     /// The bot looks at every card in its hand - and, for a "+/-" card, at BOTH orientations -
     /// and takes the play that leaves it as high as possible without going over the target.
     ///
-    /// `mayChain` says whether another card may follow this one in the same deal (Gold and up). It
+    /// `mayChain` says whether another card may follow this one in the same turn (Gold and up). It
     /// changes exactly one thing, and it is the thing Alexander caught at the table: a bot on 26
     /// against a target of 20, holding a -3 and a -4, plays NEITHER, because neither card alone
-    /// gets it under. Allowed to chain it plays the -4, then the -3, and takes the round.
+    /// gets it under. Allowed to chain it plays the -4, then the -3, and takes the set.
     private bool TryAiPlayModifierCard(bool mayChain = false)
     {
         int target = _gameState.TargetScore;
@@ -1553,15 +1552,15 @@ public partial class GameManager : Node
         int salvageValue = 0;
         int salvageResult = int.MaxValue;
 
-        foreach (Card card in _player2.ModifierHand)
+        foreach (Card card in _player2.Modifiers)
         {
             // Effect cards are chosen by their own logic (pass 2), never scored as a gain to the
             // bot's own total: Copy takes its number from the table, and a Shave carries Value 1
             // while subtracting.
             if (card.Effect != CardEffect.None) continue;
-            if (IsRecallLocked(_player2, card)) continue; // came back this deal, live from the next
+            if (IsRecallLocked(_player2, card)) continue; // came back this turn, live from the next
 
-            int[] orientations = card.IsFlip ? new[] { card.Value, -card.Value } : new[] { card.Value };
+            int[] orientations = card.CanFlipValue ? new[] { card.Value, -card.Value } : new[] { card.Value };
             foreach (int value in orientations)
             {
                 int result = score + value;
@@ -1604,7 +1603,7 @@ public partial class GameManager : Node
 
         if (bestCard == null) return false;
 
-        if (bestCard.Value != bestValue) bestCard.Flip(); // play the +/- card the other way round
+        if (bestCard.Value != bestValue) bestCard.FlipValue(); // play the +/- card the other way round
 
         GD.Print($"AI Bot plays modifier {bestCard.CardName}. New Score: {bestResult} (Target: {target})");
         _player2.PlayModifierCard(bestCard, _gameState);
@@ -1622,7 +1621,7 @@ public partial class GameManager : Node
     // from their hand buttons once the market sells them one; neither gets its own rules.
     // ------------------------------------------------------------------
 
-    /// True when this card came back through a Recall during THIS deal and so cannot be played
+    /// True when this card came back through a Recall during THIS turn and so cannot be played
     /// yet. Applies to both sides; the bot is bound by it exactly as the player is.
     private bool IsRecallLocked(Player owner, Card card) =>
         card != null && card == (owner == _player1 ? _p1RecallLock : _p2RecallLock);
@@ -1633,19 +1632,19 @@ public partial class GameManager : Node
         card != null && card.Effect == CardEffect.None && !IsRecallLocked(owner, card);
 
     /// Can this player reach across the table with this card right now? Legality is the card's
-    /// own business (CardEffects.CanPlay); the once-per-deal limit is the deal's.
+    /// own business (CardEffects.CanPlay); the once-per-turn limit is the turn's.
     private bool CanPlayEffect(Player owner, Card card)
     {
         if (card == null || card.Effect == CardEffect.None) return false;
         if (!CardEffects.Implemented(card.Effect)) return false;
-        if (owner == _player1 ? _p1PlayedEffectThisDeal : _p2PlayedEffectThisDeal) return false;
+        if (owner == _player1 ? _p1PlayedEffectThisTurn : _p2PlayedEffectThisTurn) return false;
 
         Player target = (owner == _player1) ? _player2 : _player1;
         return CardEffects.CanPlay(card, owner, target, _gameState.TargetScore);
     }
 
     /// WHY this card cannot be played right now, as a sentence, or null when it can be. The
-    /// once-per-deal limit belongs to the DEAL, so it is answered here; every other rule is the
+    /// once-per-turn limit belongs to the TURN, so it is answered here; every other rule is the
     /// card's own and is answered by CardEffects.
     ///
     /// The same sentence is what the status line shows and what explains the greyed-out Play
@@ -1654,7 +1653,7 @@ public partial class GameManager : Node
     {
         if (card == null || card.Effect == CardEffect.None) return null;
 
-        if (owner == _player1 ? _p1PlayedEffectThisDeal : _p2PlayedEffectThisDeal)
+        if (owner == _player1 ? _p1PlayedEffectThisTurn : _p2PlayedEffectThisTurn)
             return "one card across the table per turn, and you have played yours.";
 
         Player target = (owner == _player1) ? _player2 : _player1;
@@ -1668,7 +1667,7 @@ public partial class GameManager : Node
     private bool PlayEffectCard(Player owner, Card card, Card chosen = null)
     {
         if (!CanPlayEffect(owner, card)) return false;
-        if (!owner.ModifierHand.Remove(card)) return false;
+        if (!owner.Modifiers.Remove(card)) return false;
 
         Player target = (owner == _player1) ? _player2 : _player1;
 
@@ -1682,14 +1681,14 @@ public partial class GameManager : Node
 
         if (!result.Applied)
         {
-            owner.ModifierHand.Add(card); // put it back rather than lose it to a rule we misread
+            owner.Modifiers.Add(card); // put it back rather than lose it to a rule we misread
             return false;
         }
 
-        if (owner == _player1) _p1PlayedEffectThisDeal = true;
-        else _p2PlayedEffectThisDeal = true;
+        if (owner == _player1) _p1PlayedEffectThisTurn = true;
+        else _p2PlayedEffectThisTurn = true;
 
-        // Recall's card is back in hand but dead until the next deal. Set AFTER Resolve, because
+        // Recall's card is back in hand but dead until the next turn. Set AFTER Resolve, because
         // Resolve is what moved it out of the spent pile.
         if (card.Effect == CardEffect.Recall)
         {
@@ -1697,12 +1696,12 @@ public partial class GameManager : Node
             else _p2RecallLock = chosen;
         }
 
-        // THE ANSWERING RULE. A card played at you re-opens your turn for this deal, so you always
+        // THE ANSWERING RULE. A card played at you re-opens your turn for this turn, so you always
         // get a say - unless you are holding, which is the locked state Shave exists to punish.
         //
         // ReleasesHold is the one exception to that exception (Veto, pass 7): it un-locks a score
         // that was already committed, so the target is re-opened even from a hold. Neither flag
-        // ever deals a card - a re-opened player plays a hand card, holds, or ends the turn.
+        // ever deals a card - a re-opened player plays a Modifier, holds, or ends the turn.
         if (result.ReleasesHold) target.IsHolding = false;
         bool reopened = result.ReopensTarget && !target.IsHolding;
         if (reopened) target.HasEndedTurn = false;
@@ -1739,7 +1738,7 @@ public partial class GameManager : Node
         if (owner == _player2) QueueCoachMark(card, fromOpponent: true);
         UpdateUI();
 
-        // A re-opened BOT has to be sent round again: ResolveDeal refuses to move while either
+        // A re-opened BOT has to be sent round again: ResolveTurn refuses to move while either
         // side can act, and nothing else would ever call ProcessAiTurn back.
         if (reopened && _isVsBot && target == _player2)
         {
@@ -1752,11 +1751,11 @@ public partial class GameManager : Node
         return true;
     }
 
-    /// True when a person is allowed to press End Turn / Hold / a hand card right now.
+    /// True when a person is allowed to press Draw Card / Hold / a Modifier right now.
     /// (The bot thinking does NOT lock the human - both sides act at the same time.)
     private bool HumanCanAct()
     {
-        if (!_isGameStarted || _gameState.IsGameOver || _roundOverPending) return false;
+        if (!_isGameStarted || _gameState.IsGameOver || _setOverPending) return false;
         if (_recallOverlay != null && _recallOverlay.Visible) return false;
         return true;
     }
@@ -1771,11 +1770,11 @@ public partial class GameManager : Node
 
     // Each button knows which player it belongs to (the solo scene's shared pair is Player 1's),
     // so Player 2's row can only ever act for Player 2.
-    private void OnEndTurnPressed(Player player) => FinishTurn(player, hold: false);
+    private void OnDrawCardPressed(Player player) => FinishTurn(player, hold: false);
     private void OnHoldPressed(Player player) => FinishTurn(player, hold: true);
 
-    /// A player is done with this deal: End Turn keeps them in for the next deal, Hold takes them
-    /// out for the rest of the round. Nothing is decided until the other player is done too.
+    /// A player is done with this turn: Draw Card keeps them in for the next turn, Hold takes them
+    /// out for the rest of the set. Nothing is decided until the other player is done too.
     private void FinishTurn(Player player, bool hold)
     {
         if (!HumanCanActFor(player)) return;
@@ -1793,14 +1792,14 @@ public partial class GameManager : Node
             GD.Print($"{player.PlayerName} ended the turn at {player.CurrentScore}");
         }
 
-        ResolveDeal();
+        ResolveTurn();
     }
 
-    /// The round is over: at least one player finished the deal over the target (a bust), or
+    /// The set is over: at least one player finished the turn over the target (a bust), or
     /// both players are holding. Who busted is derived from the scores. Records the result, then
-    /// shows an explanation that has to be acknowledged - the next round (or a restart, after the
+    /// shows an explanation that has to be acknowledged - the next set (or a restart, after the
     /// match) starts from that button.
-    private void EndRound()
+    private void EndSet()
     {
         int target = _gameState.TargetScore;
         int p1 = _player1.CurrentScore;
@@ -1808,14 +1807,14 @@ public partial class GameManager : Node
         bool p1Bust = p1 > target;
         bool p2Bust = p2 > target;
 
-        int roundWinner;
-        if (p1Bust && p2Bust) roundWinner = 0;
-        else if (p1Bust) roundWinner = 2;
-        else if (p2Bust) roundWinner = 1;
-        else if (p1 == p2) roundWinner = 0;
-        else roundWinner = (p1 > p2) ? 1 : 2; // both under the target: the higher score is closer
+        int setWinner;
+        if (p1Bust && p2Bust) setWinner = 0;
+        else if (p1Bust) setWinner = 2;
+        else if (p2Bust) setWinner = 1;
+        else if (p1 == p2) setWinner = 0;
+        else setWinner = (p1 > p2) ? 1 : 2; // both under the target: the higher score is closer
 
-        // Why the round ended.
+        // Why the set ended.
         bool anyBust = p1Bust || p2Bust;
         string why;
         if (p1Bust && p2Bust)
@@ -1830,7 +1829,7 @@ public partial class GameManager : Node
         // What that means.
         string title;
         string buttonText;
-        if (roundWinner == 0)
+        if (setWinner == 0)
         {
             title = "The set is a tie";
             why += "\nSame score, so the set is replayed.";
@@ -1838,8 +1837,8 @@ public partial class GameManager : Node
         }
         else
         {
-            Player winner = (roundWinner == 1) ? _player1 : _player2;
-            _gameState.RecordRoundWinner(roundWinner);
+            Player winner = (setWinner == 1) ? _player1 : _player2;
+            _gameState.RecordSetWinner(setWinner);
             if (!anyBust) why += $"\n{winner.PlayerName} is closest to {target}.";
             title = $"{winner.PlayerName} wins the set!";
             buttonText = "Next Set";
@@ -1849,11 +1848,11 @@ public partial class GameManager : Node
         if (_gameState.CheckMatchWinner(out int matchWinner))
         {
             Player champion = (matchWinner == 1) ? _player1 : _player2;
-            int champWins = (matchWinner == 1) ? _gameState.RoundsWonPlayer1 : _gameState.RoundsWonPlayer2;
-            int otherWins = (matchWinner == 1) ? _gameState.RoundsWonPlayer2 : _gameState.RoundsWonPlayer1;
+            int champWins = (matchWinner == 1) ? _gameState.SetsWonPlayer1 : _gameState.SetsWonPlayer2;
+            int otherWins = (matchWinner == 1) ? _gameState.SetsWonPlayer2 : _gameState.SetsWonPlayer1;
             title = $"{champion.PlayerName} wins the match!";
             why += $"\n{champion.PlayerName} took the match {champWins} sets to {otherWins}.";
-            why += ReportRunResult(matchWinner == 1, _gameState.RoundsWonPlayer1);
+            why += ReportRunResult(matchWinner == 1, _gameState.SetsWonPlayer1);
             // A won match on a live run goes to the market and the deck before the next rung;
             // a loss (or the end of the ladder) just offers a fresh run. ReportRunResult above has
             // already banked the result, so RunActive/RunComplete describe what happens next.
@@ -1878,29 +1877,29 @@ public partial class GameManager : Node
         {
             next = () =>
             {
-                _roundOverPending = false;
-                StartNewRound();
+                _setOverPending = false;
+                StartNewSet();
             };
         }
 
         string whyOneLine = why.Replace('\n', ' ');
         GD.Print($"Set over: {title} ({whyOneLine})");
 
-        _roundOverPending = true;
-        UpdateUI(); // locks every button and hand card; sides show Bust! / Holding
-        if (_roundInfoLabel != null) _roundInfoLabel.Text = title;
-        ShowRoundEnd(title, why, buttonText, next);
+        _setOverPending = true;
+        UpdateUI(); // locks every button and Modifier; sides show Bust! / Holding
+        if (_setInfoLabel != null) _setInfoLabel.Text = title;
+        ShowSetEnd(title, why, buttonText, next);
     }
 
     /// Banks the match result against the run and says what it was worth. The market and the deck
     /// open next (OpenIntermission), which is where those medals get spent.
-    private string ReportRunResult(bool playerWon, int playerRoundsWon)
+    private string ReportRunResult(bool playerWon, int playerSetsWon)
     {
         RunData run = _inRun ? RunData.Instance : null;
         if (run == null) return string.Empty;
 
         int before = run.Medals;
-        run.CompleteMatch(playerRoundsWon, playerWon);
+        run.CompleteMatch(playerSetsWon, playerWon);
 
         if (!playerWon)
         {
@@ -1933,13 +1932,13 @@ public partial class GameManager : Node
     // The middle panel's two added lines
     // ------------------------------------------------------------------
 
-    /// The target, and the banner that narrates effect cards. Added around the existing round
+    /// The target, and the banner that narrates effect cards. Added around the existing set
     /// line in code rather than in the two scene files, so both scenes get them from one place.
     private void BuildTableBanners()
     {
-        Control column = _roundInfoLabel?.GetParent() as Control;
+        Control column = _setInfoLabel?.GetParent() as Control;
         if (column == null) return;
-        int at = _roundInfoLabel.GetIndex();
+        int at = _setInfoLabel.GetIndex();
 
         // The target is the whole difficulty curve on this ladder - it moves from 20 to 23 to 18
         // and back up - so it is the one number that cannot be a fragment of a status string.
@@ -1958,7 +1957,7 @@ public partial class GameManager : Node
 
     /// A refusal is a sentence now, so the status line has to be able to hold one. The height for
     /// two lines is reserved up front - a label that grows when a card is picked up would shove
-    /// the board down the screen mid-deal.
+    /// the board down the screen mid-turn.
     private void ConfigureStatusLabel(Label label)
     {
         if (label == null) return;
@@ -2029,7 +2028,7 @@ public partial class GameManager : Node
         if (!OS.IsDebugBuild()) return;
         if (_gameModeButton != null) return;
 
-        Control column = _roundInfoLabel?.GetParent() as Control;
+        Control column = _setInfoLabel?.GetParent() as Control;
         if (column == null) return;
 
         HBoxContainer row = new HBoxContainer { Alignment = BoxContainer.AlignmentMode.Center };
@@ -2102,7 +2101,7 @@ public partial class GameManager : Node
         _shopOverlay.Open(CardSize, () => _deckOverlay.Open(deckCardSize, StartNextMatch));
     }
 
-    /// Reloading the scene is what resets the board, the scores and the round wins (the same path
+    /// Reloading the scene is what resets the board, the scores and the set wins (the same path
     /// Restart takes); RunData is an autoload, so the run itself survives it.
     private void StartNextMatch()
     {
@@ -2165,48 +2164,48 @@ public partial class GameManager : Node
         ApplyStatusColor(_p1StatusLabel, _player1);
         ApplyStatusColor(_p2StatusLabel, _player2);
 
-        // Round wins are shown as chips next to the label (see UpdateWinChips).
+        // Set wins are shown as chips next to the label (see UpdateWinChips).
         if (_p1WinsLabel != null) _p1WinsLabel.Text = "Wins:";
         if (_p2WinsLabel != null) _p2WinsLabel.Text = "Wins:";
         UpdateWinChips();
 
-        // While the round-end explanation is up, EndRound owns this label.
-        if (_isGameStarted && _roundInfoLabel != null && !_gameState.IsGameOver && !_roundOverPending)
+        // While the set-end explanation is up, EndSet owns this label.
+        if (_isGameStarted && _setInfoLabel != null && !_gameState.IsGameOver && !_setOverPending)
         {
-            _roundInfoLabel.Text = $"{RunHeader()}{DealStatusText()}";
+            _setInfoLabel.Text = $"{RunHeader()}{TurnStatusText()}";
         }
 
         // Both sides act at once: each player's row stays live until THAT player has ended the
-        // deal or is holding. Everything is locked while a round-end explanation is waiting to be
+        // turn or is holding. Everything is locked while a set-end explanation is waiting to be
         // acknowledged. The solo scene's shared pair is Player 1's.
         bool p1Can = HumanCanActFor(_player1);
         bool p2Can = HumanCanActFor(_player2);
-        SetEnabled(_endTurnButton, p1Can);
+        SetEnabled(_drawCardButton, p1Can);
         SetEnabled(_holdButton, p1Can);
-        SetEnabled(_p1EndTurnButton, p1Can);
+        SetEnabled(_p1DrawCardButton, p1Can);
         SetEnabled(_p1HoldButton, p1Can);
-        SetEnabled(_p2EndTurnButton, p2Can);
+        SetEnabled(_p2DrawCardButton, p2Can);
         SetEnabled(_p2HoldButton, p2Can);
 
-        // While a card is picked up, that player's End Turn / Hold row is swapped for the
+        // While a card is picked up, that player's Draw Card / Hold row is swapped for the
         // Play / +- / Put back row (same slot in the layout, so nothing moves).
-        UpdateConfirmRow(_player1, _p1ConfirmRow, _p1PlayButton, _p1FlipButton, _p1ActionRow);
-        UpdateConfirmRow(_player2, _p2ConfirmRow, _p2PlayButton, _p2FlipButton, _p2ActionRow);
+        UpdateConfirmRow(_player1, _p1ConfirmRow, _p1PlayButton, _p1FlipValueButton, _p1ActionRow);
+        UpdateConfirmRow(_player2, _p2ConfirmRow, _p2PlayButton, _p2FlipValueButton, _p2ActionRow);
 
-        RefreshHandUI();
+        RefreshModifiersUI();
         CheckTutorialProgress();
         DrainCoachMarks();
         CallDeferred(MethodName.UpdateRotatorSize);
 
         // The layout is only as big as what is IN it, and what is in it changes here - the hands
-        // are dealt, and the confirm row (four buttons) swaps in for End Turn / Hold (two). A
+        // are dealt, and the confirm row (four buttons) swaps in for Draw Card / Hold (two). A
         // check that only ran on resize measured the table before any of that existed. The latch
         // inside makes this cheap: at most one measurement is ever in flight.
         EnsureLayoutFits();
     }
 
     /// What the middle panel says about the current deal.
-    private string DealStatusText()
+    private string TurnStatusText()
     {
         bool p1 = _player1.CanAct;
         bool p2 = _player2.CanAct;
@@ -2227,8 +2226,8 @@ public partial class GameManager : Node
     {
         bool over = player.CurrentScore > _gameState.TargetScore;
 
-        if (_roundOverPending && over) return "Bust!";
-        if (_roundOverPending) return player.IsHolding ? "Holding" : "Done";
+        if (_setOverPending && over) return "Bust!";
+        if (_setOverPending) return player.IsHolding ? "Holding" : "Done";
 
         if (player.IsHolding) return "Holding";
         if (player.HasEndedTurn) return "Done - waiting";
@@ -2276,13 +2275,13 @@ public partial class GameManager : Node
             case CardEffect.TradeTotals:
                 return $"Trade Totals: {player.CurrentScore} and {other.CurrentScore} change places";
             case CardEffect.TradeHands:
-                return $"Trade Hands: your {player.ModifierHand.Count - 1} Modifiers for their {other.ModifierHand.Count}";
+                return $"Trade Hands: your {player.Modifiers.Count - 1} Modifiers for their {other.Modifiers.Count}";
             case CardEffect.Recall:
                 return "Take a Modifier back - you can play it from your next turn";
             case CardEffect.Veto:
             {
                 // EffectRefusal returned null above, so CanPlay said yes, so LastPlayedModifier is
-                // a plain modifier they played this deal. Named with its sign, because vetoing a
+                // a plain modifier they played this turn. Named with its sign, because vetoing a
                 // minus card sends their score UP and the preview has to show that honestly.
                 Card theirs = other.LastPlayedModifier;
                 string theirSign = theirs.Value < 0 ? "-" : "+";
@@ -2319,9 +2318,9 @@ public partial class GameManager : Node
     /// Drops any picked-up card that has since been played, or whose owner can no longer act.
     private void ValidateSelections()
     {
-        if (_p1SelectedCard != null && (!_player1.ModifierHand.Contains(_p1SelectedCard) || !HumanCanActFor(_player1)))
+        if (_p1SelectedCard != null && (!_player1.Modifiers.Contains(_p1SelectedCard) || !HumanCanActFor(_player1)))
             _p1SelectedCard = null;
-        if (_p2SelectedCard != null && (!_player2.ModifierHand.Contains(_p2SelectedCard) || !HumanCanActFor(_player2)))
+        if (_p2SelectedCard != null && (!_player2.Modifiers.Contains(_p2SelectedCard) || !HumanCanActFor(_player2)))
             _p2SelectedCard = null;
     }
 
@@ -2354,24 +2353,24 @@ public partial class GameManager : Node
             : new Color(0.55f, 0.95f, 0.60f));
     }
 
-    /// Builds each player's Play / +- / Put back row, directly under the End Turn / Hold row it
+    /// Builds each player's Play / +- / Put back row, directly under the Draw Card / Hold row it
     /// stands in for. Found from the exported buttons rather than a NodePath, so it works in both
     /// scenes (and inside P2's rotator, so it flips with the rest of P2's side).
     private void BuildConfirmRows()
     {
-        _p1ConfirmRow = BuildConfirmRow(_player1, _p1EndTurnButton ?? _endTurnButton, out _p1PlayButton, out _p1FlipButton, out _p1ActionRow);
-        _p2ConfirmRow = BuildConfirmRow(_player2, _p2EndTurnButton, out _p2PlayButton, out _p2FlipButton, out _p2ActionRow);
+        _p1ConfirmRow = BuildConfirmRow(_player1, _p1DrawCardButton ?? _drawCardButton, out _p1PlayButton, out _p1FlipValueButton, out _p1ActionRow);
+        _p2ConfirmRow = BuildConfirmRow(_player2, _p2DrawCardButton, out _p2PlayButton, out _p2FlipValueButton, out _p2ActionRow);
     }
 
     private HBoxContainer BuildConfirmRow(Player player, Button anchorButton, out Button playButton,
-                                          out Button flipButton, out Control actionRow)
+                                          out Button flipValueButton, out Control actionRow)
     {
         playButton = null;
-        flipButton = null;
+        flipValueButton = null;
         actionRow = null;
         if (anchorButton == null) return null; // that side has no buttons in this scene (the bot's)
 
-        actionRow = anchorButton.GetParent() as Control; // the End Turn / Hold row
+        actionRow = anchorButton.GetParent() as Control; // the Draw Card / Hold row
         Node host = actionRow?.GetParent();              // the column that row lives in
         if (actionRow == null || host == null) return null;
 
@@ -2387,9 +2386,9 @@ public partial class GameManager : Node
         row.AddChild(play);
         playButton = play;
 
-        flipButton = MakeConfirmButton("Flip Value", new Color(0.22f, 0.44f, 0.78f));
-        flipButton.Pressed += () => FlipSelectedCard(player);
-        row.AddChild(flipButton);
+        flipValueButton = MakeConfirmButton("Flip Value", new Color(0.22f, 0.44f, 0.78f));
+        flipValueButton.Pressed += () => FlipSelectedValue(player);
+        row.AddChild(flipValueButton);
 
         Button cancel = MakeConfirmButton("Put back", new Color(0.38f, 0.38f, 0.42f));
         cancel.Pressed += () => { SetSelection(player, null); UpdateUI(); };
@@ -2430,14 +2429,14 @@ public partial class GameManager : Node
     }
 
     private void UpdateConfirmRow(Player player, HBoxContainer row, Button playButton,
-                                  Button flipButton, Control actionRow)
+                                  Button flipValueButton, Control actionRow)
     {
         if (row == null) return;
 
         Card picked = SelectedFor(player);
         row.Visible = picked != null;
         if (actionRow != null) actionRow.Visible = picked == null;
-        if (flipButton != null) flipButton.Visible = picked != null && picked.IsFlip;
+        if (flipValueButton != null) flipValueButton.Visible = picked != null && picked.CanFlipValue;
 
         // An effect card that is not legal right now cannot be played at all, so the button says
         // so rather than the card bouncing back with a message. The status line above it is
@@ -2475,7 +2474,7 @@ public partial class GameManager : Node
             return;
         }
 
-        // A card that came back this deal through a Recall is not playable until the next one.
+        // A card that came back this turn through a Recall is not playable until the next one.
         if (IsRecallLocked(player, card))
         {
             SetSelection(player, card); // keep it under their finger so the status line explains
@@ -2493,37 +2492,37 @@ public partial class GameManager : Node
 
     /// Swaps a picked-up "+/-" card between plus and minus. Nothing is spent - the sum in the
     /// status line just changes, so it can be flipped back and forth as often as the player likes.
-    private void FlipSelectedCard(Player player)
+    private void FlipSelectedValue(Player player)
     {
         Card card = SelectedFor(player);
-        if (card == null || !HumanCanActFor(player) || !card.Flip()) return;
+        if (card == null || !HumanCanActFor(player) || !card.FlipValue()) return;
 
         _sfxPlace?.Play();
         UpdateUI();
     }
 
-    private void RefreshHandUI()
+    private void RefreshModifiersUI()
     {
-        if (_p1HandContainer == null || _p2HandContainer == null || _player1 == null) return;
+        if (_p1ModifierContainer == null || _p2ModifierContainer == null || _player1 == null) return;
 
         // Detach immediately, not just QueueFree: queued nodes stay in the tree until the end of
         // the frame and would still count towards the hand's minimum size when the deferred
         // UpdateRotatorSize runs (P2's side then reserved room for 8-12 cards and pushed P1 off-screen).
-        ClearChildren(_p1HandContainer);
-        ClearChildren(_p2HandContainer);
+        ClearChildren(_p1ModifierContainer);
+        ClearChildren(_p2ModifierContainer);
 
         bool p1Can = HumanCanActFor(_player1);
         bool p2Can = HumanCanActFor(_player2);
-        foreach (Card card in _player1.ModifierHand)
+        foreach (Card card in _player1.Modifiers)
         {
-            _p1HandContainer.AddChild(CreateHandCardButton(
+            _p1ModifierContainer.AddChild(CreateModifierButton(
                 card, !p1Can, card == _p1SelectedCard, _p1SelectedCard != null,
                 () => OnModifierCardPressed(_player1, card)));
         }
 
-        foreach (Card card in _player2.ModifierHand)
+        foreach (Card card in _player2.Modifiers)
         {
-            _p2HandContainer.AddChild(CreateHandCardButton(
+            _p2ModifierContainer.AddChild(CreateModifierButton(
                 card, !p2Can, card == _p2SelectedCard, _p2SelectedCard != null,
                 () => OnModifierCardPressed(_player2, card)));
         }
@@ -2532,12 +2531,12 @@ public partial class GameManager : Node
     /// A tappable modifier card: an invisible Button (so the theme's touch-friendly hit area
     /// and focus handling still apply) with the card art drawn on top. A picked-up card is lifted
     /// and the rest of the hand dims, so which card is in play is obvious without reading anything.
-    private Button CreateHandCardButton(Card card, bool disabled, bool selected, bool anySelected, Action onPressed)
+    private Button CreateModifierButton(Card card, bool disabled, bool selected, bool anySelected, Action onPressed)
     {
         Button button = new Button
         {
             Flat = true,
-            CustomMinimumSize = HandCardSize,
+            CustomMinimumSize = ModifierCardSize,
             Disabled = disabled,
             FocusMode = Control.FocusModeEnum.None,
         };
@@ -2546,7 +2545,7 @@ public partial class GameManager : Node
             button.AddThemeStyleboxOverride(state, empty);
         button.Pressed += onPressed;
 
-        TextureRect view = CreateCardView(card, HandCardSize);
+        TextureRect view = CreateCardView(card, ModifierCardSize);
         view.MouseFilter = Control.MouseFilterEnum.Ignore;
 
         if (disabled) view.Modulate = new Color(0.55f, 0.55f, 0.55f);
@@ -2560,7 +2559,7 @@ public partial class GameManager : Node
         {
             // Scale the art, not the Button: the Button is a container child and would have its
             // scale reset on the next layout pass, and growing it would shove the whole hand about.
-            view.PivotOffset = HandCardSize / 2f;
+            view.PivotOffset = ModifierCardSize / 2f;
             view.Scale = new Vector2(1.18f, 1.18f);
 
             StyleBoxFlat outline = new StyleBoxFlat
@@ -2672,10 +2671,10 @@ public partial class GameManager : Node
     // how an ordinary playing card works: the number sits in two OPPOSITE corners, and the middle
     // of a main-deck card carries pips.
     //
-    // The corners also replace what LabelFlipped used to do on a mirrored board - a second,
+    // The corners also replace what LabelMinus used to do on a mirrored board - a second,
     // upside-down copy of the number in the lower half, so the player across the table could read
     // it. Two opposite corners do that permanently, for every card, in both scenes, and they leave
-    // the middle of the card free for the pips. LabelFlipped is now ONLY the minus half of a "+/-"
+    // the middle of the card free for the pips. LabelMinus is now ONLY the minus half of a "+/-"
     // card, which is the one job the corners cannot do.
     // ------------------------------------------------------------------
 
@@ -2686,7 +2685,7 @@ public partial class GameManager : Node
 
     private const float CornerFontScale = 0.20f;
 
-    private static readonly string[] CardLabelNames = { "Label", "LabelFlipped", "CornerTL", "CornerBR" };
+    private static readonly string[] CardLabelNames = { "Label", "LabelMinus", "CornerTL", "CornerBR" };
     private static readonly string[] CardCornerNames = { "CornerTL", "CornerBR" };
 
     private void ApplyCardSize(TextureRect view, Vector2 size)
@@ -2695,27 +2694,27 @@ public partial class GameManager : Node
 
         // A "+/-" card is always drawn two-way - blue +n above, red -n below - because that split
         // IS how you tell it from an ordinary modifier. Nothing else uses the lower label now.
-        bool flipFace = view.HasNode("FlipBottom");
+        bool flipValueFace = view.HasNode("FlipValueBottom");
         bool pipped = view.HasMeta("pips");
 
         // An effect card's face is a mark rather than one number ("->+4", "-1"), so it needs a
         // smaller font than a card showing a single digit or two.
-        float fontScale = view.HasMeta("effectCard") ? 0.22f : (flipFace ? 0.33f : 0.36f);
+        float fontScale = view.HasMeta("effectCard") ? 0.22f : (flipValueFace ? 0.33f : 0.36f);
         int fontSize = Mathf.RoundToInt(size.Y * fontScale);
 
         Label label = view.GetNodeOrNull<Label>("Label");
         if (label != null)
         {
             label.AddThemeFontSizeOverride("font_size", fontSize);
-            label.AnchorBottom = flipFace ? 0.5f : 1f; // top half, or the whole card
+            label.AnchorBottom = flipValueFace ? 0.5f : 1f; // top half, or the whole card
             label.Visible = !pipped;                   // the pips ARE the number when they are on
         }
 
-        Label flipped = view.GetNodeOrNull<Label>("LabelFlipped");
+        Label flipped = view.GetNodeOrNull<Label>("LabelMinus");
         if (flipped != null)
         {
             flipped.AddThemeFontSizeOverride("font_size", fontSize);
-            flipped.Visible = flipFace;
+            flipped.Visible = flipValueFace;
             flipped.RotationDegrees = 0f; // upright for its owner; the CORNERS face the other way
         }
 
@@ -2728,7 +2727,7 @@ public partial class GameManager : Node
         {
             Label corner = view.GetNodeOrNull<Label>(name);
             if (corner == null) continue;
-            corner.Visible = !flipFace;
+            corner.Visible = !flipValueFace;
             corner.AddThemeFontSizeOverride("font_size", cornerFont);
         }
 
@@ -2807,13 +2806,13 @@ public partial class GameManager : Node
     ///
     /// The red half is the same Kenney card art clipped to the bottom of the frame rather than a
     /// flat rectangle, so the border and the rounded corners still line up.
-    private void BuildFlipFace(TextureRect view, Card card, Vector2 size)
+    private void BuildFlipValueFace(TextureRect view, Card card, Vector2 size)
     {
         view.Texture = MakeAtlas(_cardSheet, RegionPlus); // blue, and the top half is what shows
 
         Control bottom = new Control
         {
-            Name = "FlipBottom",
+            Name = "FlipValueBottom",
             ClipContents = true,
             MouseFilter = Control.MouseFilterEnum.Ignore,
         };
@@ -2825,7 +2824,7 @@ public partial class GameManager : Node
 
         TextureRect red = new TextureRect
         {
-            Name = "FlipBottomArt",
+            Name = "FlipValueBottomArt",
             Texture = MakeAtlas(_cardSheet, RegionMinus),
             ExpandMode = view.ExpandMode,
             StretchMode = view.StretchMode,
@@ -2852,7 +2851,7 @@ public partial class GameManager : Node
             top.Modulate = plusChosen ? Colors.White : DimmedHalf;
         }
 
-        Label under = view.GetNodeOrNull<Label>("LabelFlipped");
+        Label under = view.GetNodeOrNull<Label>("LabelMinus");
         if (under != null)
         {
             under.Text = "-" + magnitude;
@@ -2884,7 +2883,7 @@ public partial class GameManager : Node
     private string ScoreOf(Player player) =>
         _isGameStarted ? $"{player.CurrentScore}/{_gameState.TargetScore}" : "-";
 
-    /// The score is the biggest thing on the table and End Turn / Hold are the biggest buttons,
+    /// The score is the biggest thing on the table and Draw Card / Hold are the biggest buttons,
     /// both from the same note: the 55+ players could not read either at arm's length.
     ///
     /// ONLY those two buttons grow. Restart / Exit / How to Play serve presses that happen once a
@@ -2900,13 +2899,13 @@ public partial class GameManager : Node
             if (score?.GetParent() is Control row) row.MoveChild(score, 0);
         }
 
-        foreach (Button button in new[] { _endTurnButton, _holdButton, _p1EndTurnButton,
-                                          _p1HoldButton, _p2EndTurnButton, _p2HoldButton })
+        foreach (Button button in new[] { _drawCardButton, _holdButton, _p1DrawCardButton,
+                                          _p1HoldButton, _p2DrawCardButton, _p2HoldButton })
         {
             StyleActionButton(button);
         }
 
-        // The confirm row stands in for End Turn / Hold in the same slot, so it has to be the same
+        // The confirm row stands in for Draw Card / Hold in the same slot, so it has to be the same
         // height - otherwise the whole side jumps every time a card is picked up or put back.
         foreach (Control row in new Control[] { _p1ConfirmRow, _p2ConfirmRow })
         {
@@ -2931,9 +2930,9 @@ public partial class GameManager : Node
     /// Three things move:
     ///  - How to Play / Restart / Exit / the mirror toggle go behind one "Menu" button. All four
     ///    were permanently on screen to serve presses that happen once a session.
-    ///  - The solo scene's End Turn / Hold leave the middle panel for Player 1's own side, under
+    ///  - The solo scene's Draw Card / Hold leave the middle panel for Player 1's own side, under
     ///    the hand they act on and near the thumb, which is where the 2-player scene already has
-    ///    them. (In the 2-player scene _endTurnButton is null and this does nothing.)
+    ///    them. (In the 2-player scene _drawCardButton is null and this does nothing.)
     ///  - The mode dropdown is hidden: the start menu has owned mode selection since pass 7. The
     ///    NODE stays, because "_gameModeButton != null" is how this class tells the two scenes
     ///    apart - deleting it would break the auto-start routing on both sides.
@@ -2945,7 +2944,7 @@ public partial class GameManager : Node
     {
         if (_gameModeButton != null) _gameModeButton.Visible = false;
 
-        Control actionRow = _endTurnButton?.GetParent() as Control;
+        Control actionRow = _drawCardButton?.GetParent() as Control;
         Control p1Layout = GetNodeOrNull<Control>("GameUI/MainLayout/Player1Side/Layout");
         if (actionRow != null && p1Layout != null && actionRow.GetParent() != p1Layout)
         {
@@ -2991,7 +2990,7 @@ public partial class GameManager : Node
             box.AddChild(moved);
         }
 
-        // Replaying reloads the match, because the walkthrough is staged into the deal - so it
+        // Replaying reloads the match, because the walkthrough is staged into the turn - so it
         // has to be decided before the cards are dealt, not after. The static survives the reload.
         Button replay = new Button { Text = "Replay the tutorial" };
         replay.Pressed += () =>
@@ -3074,7 +3073,7 @@ public partial class GameManager : Node
 
         // The +/- face would rewrite both labels and hide the effect entirely, so only an
         // ordinary card gets it - a hand-edited save carrying both flags cannot lie about itself.
-        if (card.IsFlip && card.Effect == CardEffect.None) BuildFlipFace(view, card, size);
+        if (card.CanFlipValue && card.Effect == CardEffect.None) BuildFlipValueFace(view, card, size);
 
         // Pips, and only on main-deck cards: they pip the 1-10 an ordinary playing card pips, and
         // a modifier is signed - there is no such thing as minus three dots.
@@ -3100,7 +3099,7 @@ public partial class GameManager : Node
     }
 
     /// Redraws the face of a card that is already on a board, after something changed its Value.
-    /// Silent when the card is not on this board - a hand card has no view to redraw, and that is
+    /// Silent when the card is not on this board - a Modifier has no view to redraw, and that is
     /// not an error.
     private void RefreshCardFace(Card card, Control board)
     {
@@ -3127,12 +3126,12 @@ public partial class GameManager : Node
 
     /// Takes a card off a board with an animation that reads as DESTROYED rather than moved: it
     /// reddens, shrinks toward its own middle and fades where it sits, then frees itself. Veto's
-    /// only, and the one place in the game a card leaves a board before the round is over.
+    /// only, and the one place in the game a card leaves a board before the set is over.
     ///
     /// The node is deliberately NOT pulled out of its slot up front. Leaving the slot occupied
     /// while it burns is what stops the incoming Veto card dropping into the hole and landing on
     /// top of the very thing the player is meant to be watching; the slot frees itself when the
-    /// tween finishes, and the board is rebuilt at the round boundary anyway.
+    /// tween finishes, and the board is rebuilt at the set boundary anyway.
     private void BurnCardView(Card card, Control board)
     {
         TextureRect view = FindCardView(card, board);
@@ -3184,7 +3183,7 @@ public partial class GameManager : Node
 
         // Drop the card into the next empty slot; if the board is somehow full, let the grid grow.
         Control slot = FindFreeSlot(parentContainer);
-        cardNode.Modulate = new Color(1, 1, 1, 0); // invisible until the deal animation lands
+        cardNode.Modulate = new Color(1, 1, 1, 0); // invisible until the turn animation lands
         if (slot != null)
         {
             slot.AddChild(cardNode);
@@ -3266,9 +3265,9 @@ public partial class GameManager : Node
     }
 
     // ------------------------------------------------------------------
-    // Round-win chips
+    // Set-win chips
     // ------------------------------------------------------------------
-    /// Adds a row of poker chips right after the "Wins" label (one per round needed to win the match).
+    /// Adds a row of poker chips right after the "Wins" label (one per set needed to win the match).
     private HBoxContainer EnsureWinChips(Label winsLabel)
     {
         if (winsLabel == null || _chipSheet == null) return null;
@@ -3295,8 +3294,8 @@ public partial class GameManager : Node
 
     private void UpdateWinChips()
     {
-        SetChips(_p1WinChips, _gameState.RoundsWonPlayer1);
-        SetChips(_p2WinChips, _gameState.RoundsWonPlayer2);
+        SetChips(_p1WinChips, _gameState.SetsWonPlayer1);
+        SetChips(_p2WinChips, _gameState.SetsWonPlayer2);
     }
 
     private void SetChips(HBoxContainer chips, int wins)
@@ -3356,7 +3355,7 @@ public partial class GameManager : Node
         {
             if (!CardEffects.IsPlainModifier(spent)) continue;
             Card choice = spent; // capture per iteration, not the loop variable
-            row.AddChild(OverlayUi.CardButton(CreateCardView(choice, HandCardSize), HandCardSize,
+            row.AddChild(OverlayUi.CardButton(CreateCardView(choice, ModifierCardSize), ModifierCardSize,
                 () => OnRecallChosen(choice)));
         }
 
@@ -3398,32 +3397,32 @@ public partial class GameManager : Node
     }
 
     // ------------------------------------------------------------------
-    // Round-end overlay
+    // Set-end overlay
     //
     // A full-screen layer over the table (blocks every tap underneath) with a centred panel:
-    // title, why the round ended, and one button. In mirrored 2-player there's also an
+    // title, why the set ended, and one button. In mirrored 2-player there's also an
     // upside-down copy of the text at the top of the panel, nearest Player 2. Built in code so
     // both scenes get it without any NodePath wiring.
     // ------------------------------------------------------------------
-    private Control _roundEndOverlay;
-    private Label _roundEndTitle;
-    private Label _roundEndBody;
-    private Button _roundEndButton;
-    private Control _roundEndFlippedHolder;   // plain Control: containers reset a child's rotation, holders don't
-    private VBoxContainer _roundEndFlippedBox; // the node that is rotated 180 degrees
-    private Label _roundEndFlippedTitle;
-    private Label _roundEndFlippedBody;
-    private HSeparator _roundEndDivider;
-    private Action _roundEndAction;
+    private Control _setEndOverlay;
+    private Label _setEndTitle;
+    private Label _setEndBody;
+    private Button _setEndButton;
+    private Control _setEndFlippedHolder;   // plain Control: containers reset a child's rotation, holders don't
+    private VBoxContainer _setEndFlippedBox; // the node that is rotated 180 degrees
+    private Label _setEndFlippedTitle;
+    private Label _setEndFlippedBody;
+    private HSeparator _setEndDivider;
+    private Action _setEndAction;
 
-    private void BuildRoundEndOverlay()
+    private void BuildSetEndOverlay()
     {
-        _roundEndOverlay = new Control { Visible = false, MouseFilter = Control.MouseFilterEnum.Stop };
-        AddChild(_roundEndOverlay); // on the scene root, after GameUI, so it draws (and gets input) on top
-        _roundEndOverlay.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
+        _setEndOverlay = new Control { Visible = false, MouseFilter = Control.MouseFilterEnum.Stop };
+        AddChild(_setEndOverlay); // on the scene root, after GameUI, so it draws (and gets input) on top
+        _setEndOverlay.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
 
         ColorRect dim = new ColorRect { Color = new Color(0, 0, 0, 0.5f), MouseFilter = Control.MouseFilterEnum.Ignore };
-        _roundEndOverlay.AddChild(dim);
+        _setEndOverlay.AddChild(dim);
         dim.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
 
         PanelContainer panel = new PanelContainer();
@@ -3436,7 +3435,7 @@ public partial class GameManager : Node
         style.SetCornerRadiusAll(12);
         style.SetContentMarginAll(28);
         panel.AddThemeStyleboxOverride("panel", style);
-        _roundEndOverlay.AddChild(panel);
+        _setEndOverlay.AddChild(panel);
         // Anchored to the centre with zero offsets: a Control grows to its minimum size, and with
         // grow "both" it stays centred, so the panel always hugs its content.
         panel.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.Center);
@@ -3448,32 +3447,32 @@ public partial class GameManager : Node
         panel.AddChild(box);
 
         // Player 2's upside-down copy (mirrored 2-player only). Same pattern as P2Holder/P2Rotator.
-        _roundEndFlippedHolder = new Control { Visible = false, MouseFilter = Control.MouseFilterEnum.Ignore };
-        box.AddChild(_roundEndFlippedHolder);
-        _roundEndFlippedBox = new VBoxContainer { Alignment = BoxContainer.AlignmentMode.Center };
-        _roundEndFlippedBox.AddThemeConstantOverride("separation", 6);
-        _roundEndFlippedHolder.AddChild(_roundEndFlippedBox);
-        _roundEndFlippedBox.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
-        _roundEndFlippedBox.Resized += () =>
+        _setEndFlippedHolder = new Control { Visible = false, MouseFilter = Control.MouseFilterEnum.Ignore };
+        box.AddChild(_setEndFlippedHolder);
+        _setEndFlippedBox = new VBoxContainer { Alignment = BoxContainer.AlignmentMode.Center };
+        _setEndFlippedBox.AddThemeConstantOverride("separation", 6);
+        _setEndFlippedHolder.AddChild(_setEndFlippedBox);
+        _setEndFlippedBox.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
+        _setEndFlippedBox.Resized += () =>
         {
-            _roundEndFlippedBox.PivotOffset = _roundEndFlippedBox.Size / 2f;
-            _roundEndFlippedBox.RotationDegrees = 180f;
+            _setEndFlippedBox.PivotOffset = _setEndFlippedBox.Size / 2f;
+            _setEndFlippedBox.RotationDegrees = 180f;
         };
-        _roundEndFlippedTitle = MakeOverlayLabel(30);
-        _roundEndFlippedBody = MakeOverlayLabel(22);
-        _roundEndFlippedBox.AddChild(_roundEndFlippedTitle);
-        _roundEndFlippedBox.AddChild(_roundEndFlippedBody);
-        _roundEndDivider = new HSeparator { Visible = false };
-        box.AddChild(_roundEndDivider);
+        _setEndFlippedTitle = MakeOverlayLabel(30);
+        _setEndFlippedBody = MakeOverlayLabel(22);
+        _setEndFlippedBox.AddChild(_setEndFlippedTitle);
+        _setEndFlippedBox.AddChild(_setEndFlippedBody);
+        _setEndDivider = new HSeparator { Visible = false };
+        box.AddChild(_setEndDivider);
 
-        _roundEndTitle = MakeOverlayLabel(30);
-        _roundEndBody = MakeOverlayLabel(22);
-        box.AddChild(_roundEndTitle);
-        box.AddChild(_roundEndBody);
+        _setEndTitle = MakeOverlayLabel(30);
+        _setEndBody = MakeOverlayLabel(22);
+        box.AddChild(_setEndTitle);
+        box.AddChild(_setEndBody);
 
-        _roundEndButton = new Button { Text = "Next Set" };
-        _roundEndButton.Pressed += OnRoundEndButtonPressed;
-        box.AddChild(_roundEndButton);
+        _setEndButton = new Button { Text = "Next Set" };
+        _setEndButton.Pressed += OnSetEndButtonPressed;
+        box.AddChild(_setEndButton);
     }
 
     private static Label MakeOverlayLabel(int fontSize)
@@ -3483,10 +3482,10 @@ public partial class GameManager : Node
         return label;
     }
 
-    private void ShowRoundEnd(string title, string why, string buttonText, Action onAcknowledged)
+    private void ShowSetEnd(string title, string why, string buttonText, Action onAcknowledged)
     {
-        _roundEndAction = onAcknowledged;
-        if (_roundEndOverlay == null)
+        _setEndAction = onAcknowledged;
+        if (_setEndOverlay == null)
         {
             onAcknowledged?.Invoke(); // overlay failed to build: don't strand the game
             return;
@@ -3494,39 +3493,39 @@ public partial class GameManager : Node
 
         // Make it visible first: minimum sizes are only reliable for nodes visible in the tree,
         // and everything below resolves in the same frame before it is drawn.
-        MoveChild(_roundEndOverlay, GetChildCount() - 1); // above any stray animation card
-        _roundEndOverlay.Visible = true;
+        MoveChild(_setEndOverlay, GetChildCount() - 1); // above any stray animation card
+        _setEndOverlay.Visible = true;
 
-        _roundEndTitle.Text = title;
-        _roundEndBody.Text = why;
-        _roundEndButton.Text = buttonText;
+        _setEndTitle.Text = title;
+        _setEndBody.Text = why;
+        _setEndButton.Text = buttonText;
 
         bool mirrored = IsMirrored;
-        _roundEndFlippedHolder.Visible = mirrored;
-        _roundEndDivider.Visible = mirrored;
+        _setEndFlippedHolder.Visible = mirrored;
+        _setEndDivider.Visible = mirrored;
         if (mirrored)
         {
-            _roundEndFlippedTitle.Text = title;
-            _roundEndFlippedBody.Text = why;
+            _setEndFlippedTitle.Text = title;
+            _setEndFlippedBody.Text = why;
             // The holder reports 0x0 on its own; give it the rotated block's footprint.
-            _roundEndFlippedHolder.CustomMinimumSize = _roundEndFlippedBox.GetCombinedMinimumSize();
+            _setEndFlippedHolder.CustomMinimumSize = _setEndFlippedBox.GetCombinedMinimumSize();
         }
-        CallDeferred(MethodName.UpdateRoundEndFlippedSize); // re-measure once the first layout pass has run
+        CallDeferred(MethodName.UpdateSetEndFlippedSize); // re-measure once the first layout pass has run
     }
 
-    private void UpdateRoundEndFlippedSize()
+    private void UpdateSetEndFlippedSize()
     {
-        if (_roundEndFlippedHolder == null || !_roundEndFlippedHolder.Visible) return;
-        _roundEndFlippedHolder.CustomMinimumSize = _roundEndFlippedBox.GetCombinedMinimumSize();
-        _roundEndFlippedBox.PivotOffset = _roundEndFlippedBox.Size / 2f;
-        _roundEndFlippedBox.RotationDegrees = 180f;
+        if (_setEndFlippedHolder == null || !_setEndFlippedHolder.Visible) return;
+        _setEndFlippedHolder.CustomMinimumSize = _setEndFlippedBox.GetCombinedMinimumSize();
+        _setEndFlippedBox.PivotOffset = _setEndFlippedBox.Size / 2f;
+        _setEndFlippedBox.RotationDegrees = 180f;
     }
 
-    private void OnRoundEndButtonPressed()
+    private void OnSetEndButtonPressed()
     {
-        _roundEndOverlay.Visible = false;
-        Action action = _roundEndAction;
-        _roundEndAction = null;
+        _setEndOverlay.Visible = false;
+        Action action = _setEndAction;
+        _setEndAction = null;
         action?.Invoke();
     }
 
@@ -3747,12 +3746,12 @@ public partial class GameManager : Node
     // and every caption reads live values so none of them can lie.
     // ------------------------------------------------------------------
 
-    /// The opening cards, APPENDED in this order - the deck is drawn from the end, and the deal
+    /// The opening cards, APPENDED in this order - the deck is drawn from the end, and the turn
     /// order is P1, P2, P1, P2. So the last entry is Player 1's first card.
     private static readonly int[] TutorialOpening = { 5, 6, 9, 10 };
 
     /// Player 1's staged hand. The +4 is the lesson; the rest are there so the hand looks normal.
-    private static readonly int[] TutorialHand = { 4, 3, -2, -1 };
+    private static readonly int[] TutorialModifiers = { 4, 3, -2, -1 };
 
     private const int TutorialSteps = 5;
     private const float SpotlightPad = 10f;
@@ -3764,7 +3763,7 @@ public partial class GameManager : Node
     private bool _tutorialActive;
     private bool _tutorialStaged;   // this match's deck and hand are stacked for the lesson
     private int _tutorialIndex;
-    private int _tutorialHandSize;  // to notice a card actually being played
+    private int _tutorialModifierCount;  // to notice a card actually being played
 
     private Control _spotlightOverlay;
     private ColorRect[] _spotlightShades;
@@ -3917,7 +3916,7 @@ public partial class GameManager : Node
         {
             case 0: return _p1ScoreLabel;
             case 1: return _mainDeckPosition;
-            case 2: return _p1HandContainer;
+            case 2: return _p1ModifierContainer;
             case 3: return _p1ActionRow;
             case 4: return _p1WinsLabel?.GetParent() as Control;
             default: return null;
@@ -3956,7 +3955,7 @@ public partial class GameManager : Node
                     : "Draw Card takes another card next turn. Hold stops you there and locks your "
                     + "score in. Choose one.";
             case 4:
-                return $"Win {GameState.RoundsToWinMatch} sets to take the match. These are yours "
+                return $"Win {GameState.SetsToWinMatch} sets to take the match. These are yours "
                      + "so far. That is everything - good luck.";
             default:
                 return string.Empty;
@@ -3968,7 +3967,7 @@ public partial class GameManager : Node
     {
         switch (step)
         {
-            case 2: return _player1.ModifierHand.Count < _tutorialHandSize;
+            case 2: return _player1.Modifiers.Count < _tutorialModifierCount;
             case 3: return !_player1.CanAct;
             default: return false;
         }
@@ -3987,7 +3986,7 @@ public partial class GameManager : Node
         return run != null && !run.TutorialSeen && run.StepIndex == 0;
     }
 
-    /// Only stage the deal where the staged numbers are true. The lesson lands on exactly the
+    /// Only stage the turn where the staged numbers are true. The lesson lands on exactly the
     /// target, which needs a two-card opening (target 20 or more) and a +4 that reaches it from
     /// 16 - so it is stage 1's ruleset or nothing. A replay at any other rung runs the same six
     /// steps on a real deal, and every caption reads live values, so nothing said is ever wrong.
@@ -3997,7 +3996,7 @@ public partial class GameManager : Node
     {
         _tutorialActive = true;
         _tutorialIndex = 0;
-        _tutorialHandSize = _player1.ModifierHand.Count;
+        _tutorialModifierCount = _player1.Modifiers.Count;
 
         // Let the opening deal land first - being taught about a score before the cards that made
         // it have arrived is worse than waiting half a second.
@@ -4110,7 +4109,7 @@ public partial class GameManager : Node
 
         // The bot has been held for the whole walkthrough (ProcessAiTurn refuses to run while the
         // tutorial is up) so the lesson could not desync from a table moving underneath it. Let it
-        // think now, and the deal resolves normally from here.
+        // think now, and the turn resolves normally from here.
         if (_isVsBot && _isGameStarted && !_gameState.IsGameOver) ProcessAiTurn();
 
         // Deferred: FinishTutorial can be reached from inside UpdateUI (a DO step completing on
@@ -4151,7 +4150,7 @@ public partial class GameManager : Node
     /// Where the highlight goes: the middle panel's banner when the card was played AT you (the
     /// banner is the thing that just narrated it), your own hand when it is a card you now hold.
     private Control CoachTarget(CoachMark mark) =>
-        mark.FromOpponent ? (Control)_effectBanner : _p1HandContainer;
+        mark.FromOpponent ? (Control)_effectBanner : _p1ModifierContainer;
 
     private void QueueCoachMark(Card card, bool fromOpponent)
     {
@@ -4161,7 +4160,7 @@ public partial class GameManager : Node
         RunData run = RunData.Instance;
         if (run == null || run.HasMetCard(key)) return;
 
-        // The same card can arrive twice in one deal - once in the hand and once across the table
+        // The same card can arrive twice in one turn - once in the hand and once across the table
         // - and the same explanation twice is worse than none.
         foreach (CoachMark queued in _coachQueue)
             if (CardEffects.MetKey(queued.Card) == key) return;
@@ -4172,14 +4171,14 @@ public partial class GameManager : Node
 
     /// Local 2-player is left alone on purpose: there is a person in the room to explain, which is
     /// the same reason that mode's How to Play is short.
-    private void QueueCoachMarksForHand()
+    private void QueueCoachMarksForModifiers()
     {
         if (!_isVsBot) return;
-        foreach (Card card in _player1.ModifierHand) QueueCoachMark(card, fromOpponent: false);
+        foreach (Card card in _player1.Modifiers) QueueCoachMark(card, fromOpponent: false);
     }
 
     /// Runs from UpdateUI. Shows at most one at a time, and only when nothing else owns the
-    /// screen - a card explained over the top of a round-end panel teaches nobody anything.
+    /// screen - a card explained over the top of a set-end panel teaches nobody anything.
     private void DrainCoachMarks()
     {
         if (_coachShowing.HasValue)
@@ -4189,7 +4188,7 @@ public partial class GameManager : Node
         }
 
         if (_tutorialActive || _coachQueue.Count == 0) return;
-        if (!_isGameStarted || _gameState.IsGameOver || _roundOverPending) return;
+        if (!_isGameStarted || _gameState.IsGameOver || _setOverPending) return;
         if (_howToPlayOverlay != null && _howToPlayOverlay.Visible) return;
         if (_tableMenuOverlay != null && _tableMenuOverlay.Visible) return;
         if (_recallOverlay != null && _recallOverlay.Visible) return;
@@ -4253,7 +4252,7 @@ public partial class GameManager : Node
     private static readonly string HowToPlayShort =
         "GOAL\n" +
         "Get as close to the target without going over. The target is on your score line - " +
-        $"\"You  17/20\". Win {GameState.RoundsToWinMatch} sets to win the match.\n\n" +
+        $"\"You  17/20\". Win {GameState.SetsToWinMatch} sets to win the match.\n\n" +
         "EACH TURN\n" +
         "Both players are dealt a card at the same time. You both decide at the same time too - " +
         "nobody waits for anyone.\n\n" +
@@ -4272,7 +4271,7 @@ public partial class GameManager : Node
         "GOAL\n" +
         "Get as close to the target as you can without going over. The target is on your own score " +
         "line - \"You  17/20\" - and it CHANGES as you climb: 20 at first, then 23, then 18, and on " +
-        $"up. Win {GameState.RoundsToWinMatch} sets to win the match.\n\n" +
+        $"up. Win {GameState.SetsToWinMatch} sets to win the match.\n\n" +
         "MATCH, SET, TURN\n" +
         "A match is played in sets, and a set is played in turns. Win a set by finishing closer to " +
         "the target than your opponent.\n\n" +

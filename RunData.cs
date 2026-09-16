@@ -9,14 +9,14 @@ using System.Collections.Generic;
 /// instance.
 ///
 /// Local 2-player never touches this - that mode stays a self-contained match with the randomized
-/// hands dealt by Player.DealRandomModifierHand.
+/// hands dealt by Player.DealRandomModifiers.
 /// </summary>
 public partial class RunData : Node
 {
     public static RunData Instance { get; private set; }
 
     public const int SideDeckSize = 12;   // the deck holds exactly this many
-    public const int MatchHandSize = 4;   // ...and this many are drawn from it each match
+    public const int MatchModifierCount = 4;   // ...and this many are drawn from it each match
     private const string SavePath = "user://run.json";
 
     // ------------------------------------------------------------------
@@ -26,23 +26,23 @@ public partial class RunData : Node
     public readonly struct ModifierDef
     {
         public readonly int Value;
-        public readonly bool IsFlip;
+        public readonly bool CanFlipValue;
         public readonly CardEffect Effect;
 
-        public ModifierDef(int value, bool isFlip = false, CardEffect effect = CardEffect.None)
+        public ModifierDef(int value, bool canFlipValue = false, CardEffect effect = CardEffect.None)
         {
             Value = value;
-            IsFlip = isFlip;
+            CanFlipValue = canFlipValue;
             Effect = effect;
         }
 
-        public Card ToCard() => new Card(Value, CardType.Modifier, CardName, IsFlip, Effect);
+        public Card ToCard() => new Card(Value, CardType.Modifier, CardName, CanFlipValue, Effect);
 
         private string CardName => Effect == CardEffect.None ? "" : CardEffects.Label(Effect);
 
         public string Label => Effect != CardEffect.None
             ? CardEffects.Label(Effect)
-            : (IsFlip ? "±" : (Value > 0 ? "+" : "-")) + Math.Abs(Value);
+            : (CanFlipValue ? "±" : (Value > 0 ? "+" : "-")) + Math.Abs(Value);
     }
 
     // ------------------------------------------------------------------
@@ -62,20 +62,20 @@ public partial class RunData : Node
 
         /// Stage 1 is the standard game and the AI's hand holds no "+/-" cards; every stage above
         /// it guarantees the AI exactly one.
-        public readonly bool AiHasFlipCards;
+        public readonly bool AiHasFlipValueCards;
 
         /// The one effect card in the AI's four-card hand at this rung, or None. The AI's hand
         /// lasts the whole match, so one effect card is about one dramatic moment per match.
         public readonly CardEffect AiEffect;
 
         public LadderStep(int rank, string opponent, int targetScore, int medalReward,
-                          bool aiHasFlipCards = true, CardEffect aiEffect = CardEffect.None)
+                          bool aiHasFlipValueCards = true, CardEffect aiEffect = CardEffect.None)
         {
             Rank = rank;
             Opponent = opponent;
             TargetScore = targetScore;
             MedalReward = medalReward;
-            AiHasFlipCards = aiHasFlipCards;
+            AiHasFlipValueCards = aiHasFlipValueCards;
             AiEffect = aiEffect;
         }
     }
@@ -278,14 +278,14 @@ public partial class RunData : Node
     }
 
     /// Banks the medals for a won match and moves the player up one rung.
-    public void CompleteMatch(int roundsWon, bool won)
+    public void CompleteMatch(int setsWon, bool won)
     {
         if (!RunActive) return;
 
         if (won)
         {
-            // A medal per round taken, plus the rung's purse - a clean 2-0 is worth keeping.
-            Medals += roundsWon + CurrentStep.MedalReward;
+            // A medal per set taken, plus the rung's purse - a clean 2-0 is worth keeping.
+            Medals += setsWon + CurrentStep.MedalReward;
             StepIndex++;
             if (StepIndex > FurthestStep) FurthestStep = StepIndex;
         }
@@ -411,14 +411,14 @@ public partial class RunData : Node
     // ------------------------------------------------------------------
     // Dealing a match hand
     // ------------------------------------------------------------------
-    /// Draws MatchHandSize cards at random from the player's side deck. This is the whole point of
+    /// Draws MatchModifierCount cards at random from the player's side deck. This is the whole point of
     /// the 12-card deck: the deck is chosen, the hand is not.
-    public List<Card> DrawMatchHand()
+    public List<Card> DrawMatchModifiers()
     {
         List<int> pool = new List<int>(SideDeck);
         List<Card> hand = new List<Card>();
 
-        for (int i = 0; i < MatchHandSize && pool.Count > 0; i++)
+        for (int i = 0; i < MatchModifierCount && pool.Count > 0; i++)
         {
             int pick = _random.Next(pool.Count);
             int inventoryIndex = pool[pick];
@@ -447,7 +447,7 @@ public partial class RunData : Node
             inventory.Add(new Godot.Collections.Dictionary
             {
                 { "value", def.Value },
-                { "flip", def.IsFlip },
+                { "flip", def.CanFlipValue },
                 { "effect", (int)def.Effect },
             });
         }

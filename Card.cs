@@ -24,25 +24,25 @@ public partial class Card : RefCounted
 	/// A "+/-" card: the same magnitude can be played as either a plus or a minus. The player
 	/// chooses the orientation before committing it (see Flip); Value always holds the orientation
 	/// the card is currently showing.
-	public bool IsFlip { get; set; }
+	public bool CanFlipValue { get; set; }
 
 	/// What this card does beyond adding its own value to its owner's score. None for every
 	/// ordinary modifier and every main-deck card; see CardEffects for the rest.
 	public CardEffect Effect { get; set; } = CardEffect.None;
 
-	public Card(int value, CardType type, string cardName = "", bool isFlip = false, CardEffect effect = CardEffect.None)
+	public Card(int value, CardType type, string cardName = "", bool canFlipValue = false, CardEffect effect = CardEffect.None)
 	{
 		Value = value;
 		Type = type;
-		IsFlip = isFlip;
+		CanFlipValue = canFlipValue;
 		Effect = effect;
 		CardName = string.IsNullOrEmpty(cardName) ? DefaultName(value, type) : cardName;
 	}
 
 	/// Swaps a flip card between +n and -n. Returns false (and changes nothing) on any other card.
-	public bool Flip()
+	public bool FlipValue()
 	{
-		if (!IsFlip) return false;
+		if (!CanFlipValue) return false;
 		Value = -Value;
 		CardName = DefaultName(Value, Type);
 		return true;

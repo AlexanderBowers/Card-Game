@@ -2,7 +2,7 @@ using Godot;
 using System;
 
 /// <summary>
-/// The shared look of the full-screen overlays that sit on top of the table (round end, shop,
+/// The shared look of the full-screen overlays that sit on top of the table (set end, shop,
 /// armory). They are built in code rather than as scenes so the solo and 2-player tables both get
 /// them without NodePath wiring, and so the intermission is an overlay over the same table - not a
 /// scene change (Alexander's call, 2026-09-06: one grounded venue look throughout).

@@ -11,7 +11,7 @@ public enum CardEffect
 
     /// RETIRED 2026-09-10. Push added its number to the opponent's score, and it could not be
     /// balanced: two-signed it was a gift as often as a threat, plus-only it was either
-    /// irrelevant or an execution, and allowed at a locked score it simply won the round. Copy
+    /// irrelevant or an execution, and allowed at a locked score it simply won the set. Copy
     /// took its place at stage 4.
     ///
     /// The SLOT stays because these values are written into save files as ints - deleting it
@@ -19,7 +19,7 @@ public enum CardEffect
     /// creates one any more, and RunData.Load migrates any that were saved.
     Push,
 
-    /// RETIRED 2026-09-11. Trade Draw swapped the two cards drawn this deal. Copy (stage 4) is
+    /// RETIRED 2026-09-11. Trade Draw swapped the two cards drawn this turn. Copy (stage 4) is
     /// the same idea without the second half, and two cards that both rewrite the drawn cards is
     /// one idea wearing two faces - so this one goes and Copy keeps the mechanic.
     ///
@@ -34,7 +34,7 @@ public enum CardEffect
     TradeHands,    // stage 7: swap the two remaining hands
     Copy,          // stage 4: YOUR drawn card becomes a copy of theirs - they are untouched
     Recall,        // stage 8: take one card you already spent this match back into your hand
-    Veto,          // stage 9: destroy the last hand card they played; their score reverts
+    Veto,          // stage 9: destroy the last Modifier they played; their score reverts
 }
 
 /// <summary>
@@ -108,7 +108,7 @@ public static class CardEffects
     {
         public readonly bool Applied;
         /// The answering rule: a card that changed the target's score or hand re-opens their turn
-        /// for this deal. GameManager still refuses to re-open a player who is HOLDING - which is
+        /// for this turn. GameManager still refuses to re-open a player who is HOLDING - which is
         /// exactly the state Shave exists to punish.
         public readonly bool ReopensTarget;
         /// Veto only. ReopensTarget clears HasEndedTurn; this additionally clears IsHolding, which
@@ -116,7 +116,7 @@ public static class CardEffects
         /// effect that touches the target re-opens their turn, and exactly one un-locks a score
         /// that was already committed.
         ///
-        /// Neither flag ever deals a card. A re-opened player may play a hand card, hold, or end
+        /// Neither flag ever deals a card. A re-opened player may play a Modifier, hold, or end
         /// the turn - nothing else. Main-deck cards come from DealCards and nowhere else, and an
         /// effect that handed one out would give a free draw with no bust risk taken to earn it.
         public readonly bool ReleasesHold;
@@ -137,7 +137,7 @@ public static class CardEffects
     // Legality
     // ------------------------------------------------------------------
     /// Can `self` play this card at `opponent` right now? Pure - the caller owns the separate
-    /// "one opponent-facing card per deal" limit, which is about the deal, not about the card.
+    /// "one opponent-facing card per turn" limit, which is about the turn, not about the card.
     public static bool CanPlay(Card card, Player self, Player opponent, int target)
     {
         if (card == null || self == null || opponent == null) return false;
@@ -147,7 +147,7 @@ public static class CardEffects
             case CardEffect.None:
                 return true;
 
-            // Both players must have drawn this deal - there has to be a card of mine to rewrite
+            // Both players must have drawn this turn - there has to be a card of mine to rewrite
             // and a card of theirs to rewrite it with. A holding player does not draw
             // (DrawCardFor returns early), so "neither of us is holding" falls out for free.
             //
@@ -170,16 +170,16 @@ public static class CardEffects
             // The card being played is spent first, so an owner left empty-handed is the BEST case
             // (take theirs, give nothing). What has to be true is that there is something to take.
             case CardEffect.TradeHands:
-                return opponent.ModifierHand.Count > 0;
+                return opponent.Modifiers.Count > 0;
 
             // Only my own spent pile matters. Nothing about the target, the scores or who is
             // holding - Recall is the one effect that never reaches across the table at all.
-            // Dead on the first deal of a match and live from the second onward, forever.
+            // Dead on the first turn of a match and live from the second onward, forever.
             case CardEffect.Recall:
                 return self.SpentCards.Exists(IsPlainModifier);
 
-            // They must have played a card THIS DEAL. A player who has been holding for a deal or
-            // two has played nothing, so Veto is dead against them - the card has a one-deal
+            // They must have played a card THIS TURN. A player who has been holding for a turn or
+            // two has played nothing, so Veto is dead against them - the card has a one-turn
             // reaction window and no extra rule is needed to give it one.
             //
             // Note what is deliberately absent: any test on opponent.IsHolding. Veto is legal
@@ -248,7 +248,7 @@ public static class CardEffects
     {
         if (card == null) return null;
         if (card.Effect != CardEffect.None) return card.Effect.ToString();
-        return card.IsFlip ? "flip" : null;
+        return card.CanFlipValue ? "flip" : null;
     }
 
     /// The one line shown the first time a player meets this card. Deliberately the SAME sentence
@@ -261,7 +261,7 @@ public static class CardEffects
         if (card.Effect != CardEffect.None)
             return $"{Label(card.Effect)} - {Description(card.Effect)}";
 
-        return card.IsFlip
+        return card.CanFlipValue
             ? "A +/- Modifier can be played either way round. Pick it up and press Flip Value to "
             + "swap it between plus and minus before you play it."
             : string.Empty;
@@ -344,14 +344,14 @@ public static class CardEffects
 
             case CardEffect.TradeHands:
             {
-                List<Card> mine = new List<Card>(self.ModifierHand);
-                self.ModifierHand.Clear();
-                self.ModifierHand.AddRange(opponent.ModifierHand);
-                opponent.ModifierHand.Clear();
-                opponent.ModifierHand.AddRange(mine);
+                List<Card> mine = new List<Card>(self.Modifiers);
+                self.Modifiers.Clear();
+                self.Modifiers.AddRange(opponent.Modifiers);
+                opponent.Modifiers.Clear();
+                opponent.Modifiers.AddRange(mine);
 
                 return new EffectResult(true, true,
-                    $"{self.PlayerName} plays Trade Hands - takes {self.ModifierHand.Count}, gives {opponent.ModifierHand.Count}");
+                    $"{self.PlayerName} plays Trade Hands - takes {self.Modifiers.Count}, gives {opponent.Modifiers.Count}");
             }
 
             case CardEffect.Recall:
@@ -363,11 +363,11 @@ public static class CardEffects
                 if (!IsPlainModifier(chosen) || !self.SpentCards.Contains(chosen)) return EffectResult.Nothing;
 
                 self.SpentCards.Remove(chosen);
-                self.ModifierHand.Add(chosen);
+                self.Modifiers.Add(chosen);
 
                 // The score does NOT move. The card was already paid for when it was first played
                 // and its points are still on the board; Recall returns the card, not the points.
-                // The caller locks it out of this deal - see GameManager's recalled-card lock.
+                // The caller locks it out of this turn - see GameManager's recalled-card lock.
                 return new EffectResult(true, false,
                     $"{self.PlayerName} plays Recall - takes back a {(chosen.Value > 0 ? "+" : "")}{chosen.Value}");
             }
@@ -384,7 +384,7 @@ public static class CardEffects
 
                 // Destroyed, not returned - and deliberately NOT added to SpentCards either, so a
                 // Recall cannot bring back a card that a Veto burned. Returning it to their hand
-                // would let them replay it the same deal and Veto would net to zero, which is the
+                // would let them replay it the same turn and Veto would net to zero, which is the
                 // whole reason this card is a destruction rather than an undo.
                 bool wasHolding = opponent.IsHolding;
 
@@ -457,7 +457,7 @@ public static class CardEffects
             case CardEffect.TradeHands: return "[<>]";
             case CardEffect.Shave: return "-1";
             case CardEffect.Recall: return "[<-]";   // a card comes back INTO the hand
-            case CardEffect.Veto: return "[X]";      // a hand card, cancelled
+            case CardEffect.Veto: return "[X]";      // a Modifier, cancelled
             default: return string.Empty;
         }
     }
@@ -471,7 +471,7 @@ public static class CardEffects
     /// number was exactly what could not be balanced: the same card was a gift at +2 and an
     /// execution at +5, and no range made it mean one thing. Copy takes its number from the
     /// TABLE - whatever the opponent happened to draw - so the card is always the same card and
-    /// the drama comes from the deal instead of from the roll.
+    /// the drama comes from the turn instead of from the roll.
     public static Card Create(CardEffect effect, Random rng)
     {
         int value = 0;

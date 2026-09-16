@@ -8,7 +8,7 @@
 atlas = ExtResource("2_cards")
 region = Rect2(140, 190, 140, 190)
 
-[node name="SoloTableScene" type="Control" unique_id=391540935 node_paths=PackedStringArray("_p1ScoreLabel", "_p1StatusLabel", "_p1WinsLabel", "_p1BoardContainer", "_p1HandContainer", "_p2ScoreLabel", "_p2StatusLabel", "_p2WinsLabel", "_p2BoardContainer", "_p2HandContainer", "_roundInfoLabel", "_startButton", "_endTurnButton", "_holdButton", "_mainDeckPosition", "_restartButton", "_exitButton")]
+[node name="SoloTableScene" type="Control" unique_id=391540935 node_paths=PackedStringArray("_p1ScoreLabel", "_p1StatusLabel", "_p1WinsLabel", "_p1BoardContainer", "_p1ModifierContainer", "_p2ScoreLabel", "_p2StatusLabel", "_p2WinsLabel", "_p2BoardContainer", "_p2ModifierContainer", "_setInfoLabel", "_startButton", "_drawCardButton", "_holdButton", "_mainDeckPosition", "_restartButton", "_exitButton")]
 layout_mode = 3
 anchors_preset = 15
 anchor_right = 1.0
@@ -20,15 +20,15 @@ _p1ScoreLabel = NodePath("GameUI/MainLayout/Player1Side/Layout/Stats/Row1/ScoreL
 _p1StatusLabel = NodePath("GameUI/MainLayout/Player1Side/Layout/Stats/StatusLabel")
 _p1WinsLabel = NodePath("GameUI/MainLayout/Player1Side/Layout/Stats/Row1/WinsLabel")
 _p1BoardContainer = NodePath("GameUI/MainLayout/Player1Side/Layout/BoardSlotsContainer")
-_p1HandContainer = NodePath("GameUI/MainLayout/Player1Side/Layout/HandContainer")
+_p1ModifierContainer = NodePath("GameUI/MainLayout/Player1Side/Layout/ModifierContainer")
 _p2ScoreLabel = NodePath("GameUI/MainLayout/Player2Side/Layout/Stats/Row1/ScoreLabel")
 _p2StatusLabel = NodePath("GameUI/MainLayout/Player2Side/Layout/Stats/StatusLabel")
 _p2WinsLabel = NodePath("GameUI/MainLayout/Player2Side/Layout/Stats/Row1/WinsLabel")
 _p2BoardContainer = NodePath("GameUI/MainLayout/Player2Side/Layout/BoardSlotsContainer")
-_p2HandContainer = NodePath("GameUI/MainLayout/Player2Side/Layout/HandContainer")
-_roundInfoLabel = NodePath("GameUI/MainLayout/SharedControlPanel/VBoxContainer/RoundInfoLabel")
+_p2ModifierContainer = NodePath("GameUI/MainLayout/Player2Side/Layout/ModifierContainer")
+_setInfoLabel = NodePath("GameUI/MainLayout/SharedControlPanel/VBoxContainer/SetInfoLabel")
 _startButton = NodePath("GameUI/MainLayout/SharedControlPanel/VBoxContainer/StartButton")
-_endTurnButton = NodePath("GameUI/MainLayout/SharedControlPanel/VBoxContainer/TableRow/ButtonColumn/ActionButtons/EndTurnButton")
+_drawCardButton = NodePath("GameUI/MainLayout/SharedControlPanel/VBoxContainer/TableRow/ButtonColumn/ActionButtons/DrawCardButton")
 _holdButton = NodePath("GameUI/MainLayout/SharedControlPanel/VBoxContainer/TableRow/ButtonColumn/ActionButtons/HoldButton")
 _mainDeckPosition = NodePath("GameUI/MainLayout/SharedControlPanel/VBoxContainer/TableRow/MainDeck")
 _restartButton = NodePath("GameUI/MainLayout/SharedControlPanel/VBoxContainer/TableRow/ButtonColumn/SystemButtons/RestartButton")
@@ -97,7 +97,7 @@ theme_override_constants/h_separation = 10
 theme_override_constants/v_separation = 10
 columns = 3
 
-[node name="HandContainer" type="HBoxContainer" parent="GameUI/MainLayout/Player1Side/Layout" unique_id=1843485350]
+[node name="ModifierContainer" type="HBoxContainer" parent="GameUI/MainLayout/Player1Side/Layout" unique_id=1843485350]
 layout_mode = 2
 theme_override_constants/separation = 10
 alignment = 1
@@ -109,7 +109,7 @@ layout_mode = 2
 layout_mode = 2
 theme_override_constants/separation = 12
 
-[node name="RoundInfoLabel" type="Label" parent="GameUI/MainLayout/SharedControlPanel/VBoxContainer" unique_id=699432286]
+[node name="SetInfoLabel" type="Label" parent="GameUI/MainLayout/SharedControlPanel/VBoxContainer" unique_id=699432286]
 layout_mode = 2
 text = "Press Start Game to Begin"
 horizontal_alignment = 1
@@ -141,7 +141,7 @@ layout_mode = 2
 theme_override_constants/separation = 10
 alignment = 1
 
-[node name="EndTurnButton" type="Button" parent="GameUI/MainLayout/SharedControlPanel/VBoxContainer/TableRow/ButtonColumn/ActionButtons" unique_id=1265867399]
+[node name="DrawCardButton" type="Button" parent="GameUI/MainLayout/SharedControlPanel/VBoxContainer/TableRow/ButtonColumn/ActionButtons" unique_id=1265867399]
 layout_mode = 2
 size_flags_horizontal = 3
 text = "Draw Card"
@@ -204,7 +204,7 @@ theme_override_constants/h_separation = 10
 theme_override_constants/v_separation = 10
 columns = 3
 
-[node name="HandContainer" type="HBoxContainer" parent="GameUI/MainLayout/Player2Side/Layout" unique_id=1695151393]
+[node name="ModifierContainer" type="HBoxContainer" parent="GameUI/MainLayout/Player2Side/Layout" unique_id=1695151393]
 layout_mode = 2
 theme_override_constants/separation = 10
 alignment = 1

@@ -40,14 +40,14 @@ public partial class ShopOverlay : Control
     // is worth about twice a fixed card of the same size. A minus card costs the same as the plus
     // of the same magnitude: it is what saves a bust, so it is not the cheap half of the deck.
     //
-    // A won match pays roughly 5 medals early and 12 late (rounds taken + the venue purse), so a
+    // A won match pays roughly 5 medals early and 12 late (sets taken + the venue purse), so a
     // visit buys about one card - two if the player is saving or the stock is small.
     // ------------------------------------------------------------------
     public static int PriceOf(RunData.ModifierDef def)
     {
         // Effect cards are one-shot swings rather than arithmetic, so they sit above the whole
         // modifier table. Trade Totals is the most expensive card in the game on purpose: it takes
-        // a won round off the other player, and it should cost most of a match's winnings.
+        // a won set off the other player, and it should cost most of a match's winnings.
         switch (def.Effect)
         {
             // Copy is a bust-saver and nothing else - it never touches the other player, which
@@ -77,13 +77,13 @@ public partial class ShopOverlay : Control
             case 5: price = 11; break;
             default: price = 14; break;
         }
-        return def.IsFlip ? price * 2 : price;
+        return def.CanFlipValue ? price * 2 : price;
     }
 
     /// The stock for one visit.
     ///
     /// Slot one is always the SIGNATURE CARD of the stage just cleared (Alexander's rule): you
-    /// lose two rounds to a Copy, you clear the stage, and a Copy is waiting on the next screen.
+    /// lose two sets to a Copy, you clear the stage, and a Copy is waiting on the next screen.
     /// The rest rolls from everything unlocked so far - bigger cards and commoner +/- further up
     /// the ladder, and effects at about a quarter of the stock so the arithmetic deck still grows.
     public static List<RunData.ModifierDef> RollOffers(Random rng, RunData run, int count)
@@ -91,7 +91,7 @@ public partial class ShopOverlay : Control
         List<RunData.ModifierDef> offers = new List<RunData.ModifierDef>();
         int stepIndex = run?.StepIndex ?? 0;
         int maxMagnitude = Mathf.Clamp(3 + stepIndex / 3, 3, 6);
-        double flipChance = 0.15 + 0.02 * stepIndex;
+        double flipValueChance = 0.15 + 0.02 * stepIndex;
 
         List<CardEffect> unlocked = run != null ? run.UnlockedEffects() : new List<CardEffect>();
         if (run != null) offers.Add(SignatureOffer(rng, run, unlocked, maxMagnitude));
@@ -106,12 +106,12 @@ public partial class ShopOverlay : Control
             }
             else
             {
-                bool isFlip = rng.NextDouble() < flipChance;
+                bool canFlipValue = rng.NextDouble() < flipValueChance;
                 int magnitude = RollMagnitude(rng, maxMagnitude);
 
                 // A +/- card is stored positive; the player picks its sign at the table.
-                int value = (isFlip || rng.Next(2) == 0) ? magnitude : -magnitude;
-                def = new RunData.ModifierDef(value, isFlip);
+                int value = (canFlipValue || rng.Next(2) == 0) ? magnitude : -magnitude;
+                def = new RunData.ModifierDef(value, canFlipValue);
             }
 
             if (!IsDuplicate(offers, def)) offers.Add(def);
@@ -143,7 +143,7 @@ public partial class ShopOverlay : Control
 
         // Stage 1 is the plain game; stage 2 is the one that introduces "+/-".
         if (stage <= 1) return new RunData.ModifierDef(RollMagnitude(rng, 3) * (rng.Next(2) == 0 ? 1 : -1));
-        if (stage == 2) return new RunData.ModifierDef(RollMagnitude(rng, 3), isFlip: true);
+        if (stage == 2) return new RunData.ModifierDef(RollMagnitude(rng, 3), canFlipValue: true);
 
         // The cleared stage WAS about an effect card, but not one that is built yet - stages 5, 6
         // and 8 name a Trade that pass 3 has still to wire - or it is a randomized rung that names
@@ -164,14 +164,14 @@ public partial class ShopOverlay : Control
     }
 
     private static RunData.ModifierDef ToDef(Card card) =>
-        new RunData.ModifierDef(card.Value, card.IsFlip, card.Effect);
+        new RunData.ModifierDef(card.Value, card.CanFlipValue, card.Effect);
 
     /// Two offers are the same card when they would play identically. Effect cards collide on the
     /// effect alone: two Copies in one market is a thin visit.
     private static bool IsDuplicate(List<RunData.ModifierDef> offers, RunData.ModifierDef def)
     {
         if (def.Effect != CardEffect.None) return offers.Exists(o => o.Effect == def.Effect);
-        return offers.Exists(o => o.Effect == CardEffect.None && o.Value == def.Value && o.IsFlip == def.IsFlip);
+        return offers.Exists(o => o.Effect == CardEffect.None && o.Value == def.Value && o.CanFlipValue == def.CanFlipValue);
     }
 
     private static int RollMagnitude(Random rng, int max)
@@ -249,7 +249,7 @@ public partial class ShopOverlay : Control
         RunData.LadderStep next = run.CurrentStep;
         _subtitle.Text = $"Next: {next.Opponent} - target {next.TargetScore}";
 
-        // Above the round-end overlay and any stray animation card.
+        // Above the set-end overlay and any stray animation card.
         Node parent = GetParent();
         if (parent != null) parent.MoveChild(this, parent.GetChildCount() - 1);
         Visible = true;
