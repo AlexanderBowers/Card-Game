@@ -108,6 +108,8 @@ public partial class GameManager : Node
     private Button _p1FlipButton;
     private Button _p2FlipButton;
     private Control _p1ActionRow;
+    private Control _p1SideLayout;
+    private Control _p2SideLayout;
     private Control _p2ActionRow;
 
     // ------------------------------------------------------------------
@@ -185,6 +187,12 @@ public partial class GameManager : Node
         _sfxPlace = CreateSfx("res://assets/kenney/sfx/cardPlace1.ogg");
 
         _mainLayout = GetNodeOrNull<BoxContainer>("GameUI/MainLayout");
+
+        // Each side's Layout, cached NOW. ApplySideLayout moves the board into a row of its own in
+        // portrait, so "the board's parent" stops being the Layout after the first pass - reading
+        // it later would find the row and then reparent the row into itself.
+        _p1SideLayout = _p1BoardContainer?.GetParent() as Control;
+        _p2SideLayout = _p2BoardContainer?.GetParent() as Control;
 
         // P2Rotator spins around its own centre, so keep the pivot there whatever size it ends up.
         if (_p2Rotator != null) _p2Rotator.Resized += () => _p2Rotator.PivotOffset = _p2Rotator.Size / 2f;
@@ -294,7 +302,12 @@ public partial class GameManager : Node
     // (Each side is stats + board + hand + its own End Turn / Hold row in the 2-player scene; the
     // middle panel also carries the How to Play button.)
     private const float BaseSide = 720f;
-    private static readonly Vector2 NeedPortrait = new Vector2(470, 1520);
+    // Portrait dropped by roughly the height of a stats block and an action row PER SIDE when
+    // ApplySideLayout moved both beside the board, and grew sideways by the width of that column.
+    // Left deliberately on the SMALL side: EnsureLayoutFits was built to correct an underestimate
+    // (its high-water mark exists for exactly that), whereas an overestimate is never corrected -
+    // it just scales the whole UI down further than it needs to go and nothing ever says so.
+    private static readonly Vector2 NeedPortrait = new Vector2(520, 1220);
     private static readonly Vector2 NeedLandscape = new Vector2(1040, 690);
 
     /// The GameUI MarginContainer's margin, per side, as both .tscn files set it. The estimate
@@ -371,6 +384,12 @@ public partial class GameManager : Node
             }
         }
 
+        // ...and each side re-flows within itself: a column in landscape, score and buttons beside
+        // the board in portrait.
+        ApplySideLayout(_p1SideLayout, _p1ActionRow ?? _endTurnButton?.GetParent() as Control,
+                        _p1ConfirmRow, portrait);
+        ApplySideLayout(_p2SideLayout, _p2ActionRow, _p2ConfirmRow, portrait);
+
         // Player 2's side faces the other way when the "Mirror" toggle is on (face-to-face play).
         if (_p2Rotator != null) _p2Rotator.RotationDegrees = IsMirrored ? 180f : 0f;
 
@@ -386,6 +405,104 @@ public partial class GameManager : Node
         CallDeferred(MethodName.UpdateRotatorSize);
         CallDeferred(MethodName.RefreshSpotlight); // a rotation moves whatever is being highlighted
         EnsureLayoutFits();
+    }
+
+    /// Re-flows ONE player's side for the orientation (Alexander's sketch, S25 Ultra, 2026-09-15).
+    ///
+    /// Landscape keeps the original column - stats, board, hand, buttons - because landscape has
+    /// the width to spend and the playtesters said it already felt right.
+    ///
+    /// Portrait puts the score and the buttons BESIDE the board instead of above and below it:
+    ///
+    ///     [ You: 13   Wins O O O ]  [ . . . ]
+    ///     [ Them: 8              ]  [ . . . ]
+    ///     [ Draw Card            ]  [ . . . ]
+    ///     [ Hold                 ]
+    ///     [        the hand, full width     ]
+    ///
+    /// The reason it is worth the reparenting: the board is SQUARE and the phone is tall and
+    /// narrow, so a 3x3 grid leaves a column of dead space beside it while the same screen is
+    /// fighting for vertical room. Moving two blocks into that column buys back roughly the height
+    /// of an action row and a stats block per side - which is what pays for the bigger buttons
+    /// without EnsureLayoutFits shrinking everything to fit them.
+    ///
+    /// The confirm row travels WITH the action row it stands in for. It was inserted as that row's
+    /// sibling (BuildConfirmRow), so leaving it behind would put Play / +- / Put back on the other
+    /// side of the board from the buttons they replace.
+    private void ApplySideLayout(Control layout, Control actionRow, Control confirmRow, bool portrait)
+    {
+        if (layout == null) return;
+
+        // Found by name rather than held, because they move: after one portrait pass they live
+        // under SideRow. owned:false - SideRow and LeftColumn are built here and have no owner.
+        Control stats = layout.FindChild("Stats", true, false) as Control;
+        Control board = layout.FindChild("BoardSlotsContainer", true, false) as Control;
+        Control hand = layout.FindChild("HandContainer", true, false) as Control;
+        if (stats == null || board == null || hand == null) return;
+
+        HBoxContainer sideRow = layout.GetNodeOrNull<HBoxContainer>("SideRow");
+
+        if (!portrait)
+        {
+            PlaceChild(stats, layout, 0);
+            PlaceChild(board, layout, 1);
+            PlaceChild(hand, layout, 2);
+            PlaceChild(actionRow, layout, 3);
+            PlaceChild(confirmRow, layout, 4);
+
+            if (sideRow != null)
+            {
+                // RemoveChild before QueueFree: a queued node stays in the tree until the end of
+                // the frame and still counts toward the layout's minimum size. That is the bug
+                // that squeezed P1 off screen when the hand was rebuilt (ui-scaling-and-art.md).
+                layout.RemoveChild(sideRow);
+                sideRow.QueueFree();
+            }
+            return;
+        }
+
+        if (sideRow == null)
+        {
+            sideRow = new HBoxContainer { Name = "SideRow", Alignment = BoxContainer.AlignmentMode.Center };
+            sideRow.AddThemeConstantOverride("separation", 14);
+            layout.AddChild(sideRow);
+
+            VBoxContainer column = new VBoxContainer
+            {
+                Name = "LeftColumn",
+                Alignment = BoxContainer.AlignmentMode.Center,
+            };
+            column.AddThemeConstantOverride("separation", 10);
+            sideRow.AddChild(column);
+        }
+
+        Control left = sideRow.GetNodeOrNull<Control>("LeftColumn");
+        if (left == null) return;
+
+        PlaceChild(stats, left, 0);
+        PlaceChild(actionRow, left, 1);
+        PlaceChild(confirmRow, left, 2);
+        PlaceChild(board, sideRow, 1);
+
+        layout.MoveChild(sideRow, 0);
+        PlaceChild(hand, layout, 1);
+    }
+
+    /// Move a node to an exact slot under a parent, reparenting only when it is somewhere else.
+    /// Called every layout pass, so the guard is what stops it thrashing the tree.
+    ///
+    /// Named PlaceChild rather than Reparent on purpose: Node already has a Reparent, and a
+    /// same-named static here would quietly overload the engine's own method.
+    private static void PlaceChild(Control node, Control parent, int index)
+    {
+        if (node == null || parent == null) return;
+
+        if (node.GetParent() != parent)
+        {
+            node.GetParent()?.RemoveChild(node);
+            parent.AddChild(node);
+        }
+        parent.MoveChild(node, Mathf.Clamp(index, 0, parent.GetChildCount() - 1));
     }
 
     /// Asks the layout what it ACTUALLY needs, and shrinks the whole UI until it fits. This is the
@@ -2779,6 +2896,13 @@ public partial class GameManager : Node
     /// the entire UI down - which is the trap this pass had to be built around, not sprung.
     private void StyleTableForReadability()
     {
+        // The score leads its row. It was third, behind "Wins:" and the chips - which put the
+        // largest and most-read thing on the table after the least-read (Alexander's sketch).
+        foreach (Label score in new[] { _p1ScoreLabel, _p2ScoreLabel })
+        {
+            if (score?.GetParent() is Control row) row.MoveChild(score, 0);
+        }
+
         foreach (Button button in new[] { _endTurnButton, _holdButton, _p1EndTurnButton,
                                           _p1HoldButton, _p2EndTurnButton, _p2HoldButton })
         {
