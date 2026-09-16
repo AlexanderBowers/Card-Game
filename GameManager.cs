@@ -345,13 +345,25 @@ public partial class GameManager : Node
     private bool _fitCheckPending;
     private Vector2 _fitWindow = Vector2.Zero;
     private Vector2 _fitLastNeeded = Vector2.Zero;
-    private const int MaxFitAttempts = 4;
+    private const int MaxFitAttempts = 6;
+
+    // Portrait GROWS the UI into spare room as well as shrinking it to fit (Alexander, 2026-09-16:
+    // "text is too small for how much space is now available"). The Need* tally is sized for the
+    // 2-player table, so the solo table - one side, not two - was drawn at 2-player scale on a
+    // phone with half the screen empty. Landscape is left alone: playtesters said it feels right.
+    private bool _fitPortrait;
+    private float _fitBaseK = 1f; // k before _fitScale is applied, so the grow can respect the cap
+    /// How far the UI may be enlarged past the 720px base (1 / this is the smallest _fitScale).
+    private const float MaxPortraitZoom = 1.8f;
+    /// Spare room below this fraction is not worth a re-layout.
+    private const float GrowThreshold = 0.95f;
 
     private void ApplyResponsiveLayout()
     {
         Window root = GetTree().Root;
         Vector2 win = root.Size;
         bool portrait = win.Y > win.X;
+        _fitPortrait = portrait;
 
         // A genuine resize or rotation: start the correction over, so the UI can grow back into a
         // window that has room for it. Re-running ourselves from EnsureLayoutFits changes
@@ -369,6 +381,8 @@ public partial class GameManager : Node
         Vector2 baseViewport = win / Mathf.Max(baseScale, 0.001f);
         Vector2 need = portrait ? NeedPortrait : NeedLandscape;
         float k = Mathf.Max(1f, Mathf.Max(need.X / baseViewport.X, need.Y / baseViewport.Y)) * _fitScale;
+        _fitBaseK = k / Mathf.Max(_fitScale, 0.001f);
+        k = Mathf.Max(k, 1f / MaxPortraitZoom);
         Vector2I contentSize = (Vector2I)(new Vector2(BaseSide, BaseSide) * k).Round();
         if (root.ContentScaleSize != contentSize) root.ContentScaleSize = contentSize; // re-fires SizeChanged once
 
@@ -402,7 +416,10 @@ public partial class GameManager : Node
 
         // The base-size adjustment above guarantees the viewport is at least `need`, so this only
         // trims the cards in the rare case the estimate is a little short.
-        _cardScale = Mathf.Clamp(Mathf.Min(vp.Y / need.Y, vp.X / need.X), MinCardScale, 1f);
+        // Measured against the viewport BEFORE the fit correction: when the fit enlarges the UI the
+        // viewport shrinks below `need`, and trimming the cards for that would undo the enlargement.
+        Vector2 vpUnfit = vp / Mathf.Max(_fitScale, 0.001f);
+        _cardScale = Mathf.Clamp(Mathf.Min(vpUnfit.Y / need.Y, vpUnfit.X / need.X), MinCardScale, 1f);
 
         ResizeBoard(_p1BoardContainer);
         ResizeBoard(_p2BoardContainer);
@@ -449,6 +466,12 @@ public partial class GameManager : Node
 
         HBoxContainer sideRow = layout.GetNodeOrNull<HBoxContainer>("SideRow");
 
+        // Pieces that change shape rather than just place (Alexander's sketch, 2026-09-16).
+        ApplyWinsRow(stats, layout == _p1SideLayout ? _p1WinChips : _p2WinChips, portrait);
+        if (actionRow is BoxContainer actionBox) actionBox.Vertical = portrait;
+        if (confirmRow is BoxContainer confirmBox) confirmBox.Vertical = portrait;
+        hand.SizeFlagsHorizontal = portrait ? Control.SizeFlags.ShrinkEnd : Control.SizeFlags.ShrinkCenter;
+
         if (!portrait)
         {
             PlaceChild(stats, layout, 0);
@@ -477,22 +500,80 @@ public partial class GameManager : Node
             VBoxContainer column = new VBoxContainer
             {
                 Name = "LeftColumn",
-                Alignment = BoxContainer.AlignmentMode.Center,
+                Alignment = BoxContainer.AlignmentMode.Begin,
+                SizeFlagsVertical = Control.SizeFlags.Fill,
             };
-            column.AddThemeConstantOverride("separation", 10);
+            column.AddThemeConstantOverride("separation", 12);
             sideRow.AddChild(column);
+
+            // Pushes the buttons to the bottom of the column, level with the board's last row, and
+            // leaves Wins + score at the top level with its first (the sketch).
+            column.AddChild(new Control
+            {
+                Name = "ColumnSpacer",
+                SizeFlagsVertical = Control.SizeFlags.ExpandFill,
+                MouseFilter = Control.MouseFilterEnum.Ignore,
+            });
         }
 
         Control left = sideRow.GetNodeOrNull<Control>("LeftColumn");
+        Control spacer = left?.GetNodeOrNull<Control>("ColumnSpacer");
         if (left == null) return;
 
         PlaceChild(stats, left, 0);
-        PlaceChild(actionRow, left, 1);
-        PlaceChild(confirmRow, left, 2);
+        PlaceChild(spacer, left, 1);
+        PlaceChild(actionRow, left, 2);
+        PlaceChild(confirmRow, left, 3);
         PlaceChild(board, sideRow, 1);
 
         layout.MoveChild(sideRow, 0);
         PlaceChild(hand, layout, 1);
+    }
+
+    /// Portrait gives "Wins" and its chips their own line above the score; landscape keeps them on
+    /// the score's row, after it (Alexander's sketch, 2026-09-16):
+    ///
+    ///     Wins: O O O          [ . . . ]
+    ///     You: 14/20           [ . . . ]
+    ///     Them: 18             [ . . . ]
+    ///     [ Draw Card ]
+    ///     [   Hold    ]
+    ///                     [ hand, under the board ]
+    private void ApplyWinsRow(Control stats, HBoxContainer chips, bool portrait)
+    {
+        Label wins = stats.FindChild("WinsLabel", true, false) as Label;
+        Control scoreRow = stats.GetNodeOrNull<Control>("Row1");
+        if (wins == null || scoreRow == null) return;
+
+        HBoxContainer winsRow = stats.GetNodeOrNull<HBoxContainer>("WinsRow");
+        stats.AddThemeConstantOverride("separation", portrait ? 14 : 0);
+        if (stats is BoxContainer statsBox)
+            statsBox.Alignment = portrait ? BoxContainer.AlignmentMode.Begin : BoxContainer.AlignmentMode.Center;
+        if (scoreRow is BoxContainer scoreBox)
+            scoreBox.Alignment = portrait ? BoxContainer.AlignmentMode.Begin : BoxContainer.AlignmentMode.Center;
+
+        if (portrait)
+        {
+            if (winsRow == null)
+            {
+                winsRow = new HBoxContainer { Name = "WinsRow" };
+                winsRow.AddThemeConstantOverride("separation", 8);
+                stats.AddChild(winsRow);
+            }
+            PlaceChild(winsRow, stats, 0);
+            PlaceChild(wins, winsRow, 0);
+            PlaceChild(chips, winsRow, 1);
+            return;
+        }
+
+        // Landscape: back onto the score row, after the score (StyleTableForReadability put it first).
+        PlaceChild(wins, scoreRow, scoreRow.GetChildCount());
+        PlaceChild(chips, scoreRow, scoreRow.GetChildCount());
+        if (winsRow != null)
+        {
+            stats.RemoveChild(winsRow); // before QueueFree - see the SideRow note above
+            winsRow.QueueFree();
+        }
     }
 
     /// Move a node to an exact slot under a parent, reparenting only when it is somewhere else.
@@ -526,6 +607,7 @@ public partial class GameManager : Node
         // smaller than it needs to be.
         if (_fitCheckPending || _mainLayout == null) return;
         _fitCheckPending = true;
+        bool relayout = false;
 
         try
         {
@@ -561,24 +643,45 @@ public partial class GameManager : Node
             }
 
             float overflow = Mathf.Max(needed.X / vp.X, needed.Y / vp.Y);
-            if (overflow <= 1.002f) return;          // it fits, within a rounding hair
-            if (_fitAttempts >= MaxFitAttempts) return; // ...and this one really is a loop
+            if (_fitAttempts >= MaxFitAttempts) return; // a loop that will not settle
 
-            // The 1% of slack is what makes this converge in ONE step rather than creeping up on
-            // the answer a fraction at a time and spending all four attempts getting there.
-            _fitAttempts++;
-            _fitScale *= overflow * 1.01f;
-            GD.Print($"Layout did not fit ({needed.X:0}x{needed.Y:0} into {vp.X:0}x{vp.Y:0}) - "
-                   + $"scaling the UI down by {_fitScale:0.000}");
+            if (overflow <= 1.002f)
+            {
+                // It fits. In portrait, also use the room that is left over - unless the UI is
+                // already as large as it is allowed to get. The target is 98% so the next pass
+                // lands inside the dead band (0.95..1.002) and stops rather than bouncing off the
+                // shrink branch below.
+                // Measured against the HIGH-WATER mark, not this frame: the hand gets narrower
+                // every time a card is played, and growing into that would zoom the table mid-match.
+                float room = Mathf.Max(_fitLastNeeded.X / vp.X, _fitLastNeeded.Y / vp.Y);
+                float minFit = (1f / MaxPortraitZoom) / Mathf.Max(_fitBaseK, 0.001f);
+                if (!_fitPortrait || room >= GrowThreshold || _fitScale <= minFit + 0.001f) return;
+
+                _fitAttempts++;
+                _fitScale = Mathf.Max(minFit, _fitScale * room / 0.98f);
+                GD.Print($"Layout has room ({needed.X:0}x{needed.Y:0} in {vp.X:0}x{vp.Y:0}) - "
+                       + $"enlarging the UI, scale {_fitScale:0.000}");
+                relayout = true; // no return: a return here would skip the re-layout after the finally
+            }
+            else
+            {
+                // The 1% of slack is what makes this converge in ONE step rather than creeping up
+                // on the answer a fraction at a time and spending all the attempts getting there.
+                _fitAttempts++;
+                _fitScale *= overflow * 1.01f;
+                relayout = true;
+                GD.Print($"Layout did not fit ({needed.X:0}x{needed.Y:0} into {vp.X:0}x{vp.Y:0}) - "
+                       + $"scaling the UI down by {_fitScale:0.000}");
+            }
         }
         finally
         {
             _fitCheckPending = false;
         }
 
-        // Only reached when the measurement above found an overflow - every other path returns.
-        // Outside the finally so the latch is already clear and the new pass may measure again.
-        ApplyResponsiveLayout();
+        // Only when the measurement above changed the scale (too big, or room to grow). Outside the
+        // finally so the latch is already clear and the new pass may measure again.
+        if (relayout) ApplyResponsiveLayout();
     }
 
     private bool IsMirrored => _mirrorToggle != null && _mirrorToggle.ButtonPressed;
@@ -652,10 +755,12 @@ public partial class GameManager : Node
         GetTree().ReloadCurrentScene();
     }
 
+    /// The table's Exit leaves the MATCH, not the app (Alexander, 2026-09-16: "Exit doesn't allow
+    /// you to go back to start menu"). Quitting the app lives on the start menu now.
     private void OnExitPressed()
     {
-        GD.Print("Exiting game...");
-        GetTree().Quit();
+        HideTableMenu();
+        RestartToMenu();
     }
 
     public override void _Notification(int what)
@@ -707,6 +812,7 @@ public partial class GameManager : Node
         _inRun = false;
         if (!_isVsBot)
         {
+            _gameState.TargetScore = _local2PlayerTarget; // the setup page's choice
             ApplyRankTheme(); // the clear colour is global: put the plain felt back for 2-player
             return;
         }
@@ -759,6 +865,7 @@ public partial class GameManager : Node
         else
         {
             _player1.DealRandomModifiers(_random, ModifierCount, FlipValueChance, MaxModifierMagnitude);
+            if (!_isVsBot && _local2PlayerSpecials) AddLocalSpecial(_player1);
         }
 
         // The spent pile is per-MATCH, which is what makes Recall a card about a hand that has to
@@ -772,6 +879,19 @@ public partial class GameManager : Node
         foreach (Card card in _player1.Modifiers) NoteModifierMet(card);
     }
 
+    /// Local 2-player with specials on: one of the four cards becomes a random finished special
+    /// Modifier - the ladder's own recipe (three plain cards plus one effect), so a hand is never
+    /// all tricks and no arithmetic. Each player rolls their own, so the two may differ.
+    private void AddLocalSpecial(Player player)
+    {
+        List<CardEffect> wired = CardEffects.WiredEffects();
+        if (wired.Count == 0 || player.Modifiers.Count == 0) return;
+
+        CardEffect effect = wired[_random.Next(wired.Count)];
+        player.Modifiers[_random.Next(player.Modifiers.Count)] = CardEffects.Create(effect, _random);
+        player.EnsureBothSigns(_random); // the replaced card may have been the only plus or minus
+    }
+
     /// The AI's hand for this match, built to the rung's recipe rather than rolled flat: stage 1
     /// is the standard game with no "+/-" cards at all, every stage above it guarantees exactly
     /// one, and stages 4-8 spend one of the four slots on that stage's effect card.
@@ -783,6 +903,7 @@ public partial class GameManager : Node
         if (run == null)
         {
             _player2.DealRandomModifiers(_random, ModifierCount, FlipValueChance, MaxModifierMagnitude);
+            if (!_isVsBot && _local2PlayerSpecials) AddLocalSpecial(_player2);
             return;
         }
 
@@ -1073,7 +1194,7 @@ public partial class GameManager : Node
 
         if (anyBust || bothHolding)
         {
-            if (OfferEndlessRescue()) return;
+            if (OfferRescue()) return;
             EndSet();
             return;
         }
@@ -1082,27 +1203,54 @@ public partial class GameManager : Node
     }
 
     // ------------------------------------------------------------------
-    // "Try again?" - the free half of the endless rescue (playtest-feedback-family.md §5.3)
+    // The rescue offer (claude/monetization-spec.md §3)
     //
-    // The first time you bust in an endless run, the set waits and offers one random minus
-    // Modifier. Take it and your turn re-opens with the card in hand; it might save you and it
-    // might not, which is the gamble. The ad-for-a-choice half is deliberately not built: that is
-    // a store-listing decision, not a code one.
+    // Solo run, ladder stage 4+ or endless. A turn that ends with the player bust - and the bot
+    // not, since both over is a tie that is replayed anyway - rolls 15%. On a hit the set waits:
+    //
+    //   free player   Watch an ad -> a one-off card that puts them on exactly target - 1.
+    //                 No thanks   -> a copy of a random card from their 12-card deck (may not help).
+    //                 Closing the ad early counts as No thanks; no ad to show offers No thanks only.
+    //   No Ads owner  One "Rescue" button -> the exact card. Same 15%, no ad.
+    //   (Steam / desktop release builds have no ads, so they get the No Ads owner's version.)
+    //
+    // Whatever card is given goes into the hand and the turn re-opens: the player still has to
+    // play it, and the bust is judged again when the turn ends. At most one rescue per match -
+    // the flag is spent the moment the offer appears, whichever way the player answers.
     // ------------------------------------------------------------------
     private Control _rescueOverlay;
-    private const int RescueMaxMagnitude = 6;
+    private VBoxContainer _rescueBox;
 
-    private bool RescueShowing => _rescueOverlay != null && _rescueOverlay.Visible;
+    /// True from the moment an offer appears until its card is handed over (the ad included), so
+    /// nothing on the table can be pressed underneath it.
+    private bool _rescuePending;
 
-    /// True if the prompt is now up and the set must wait for it.
-    private bool OfferEndlessRescue()
+    private static readonly Color RescueTint = new Color(0.7f, 1.3f, 1.05f); // mint: "not a card you own"
+
+    /// Debug row: roll 100% instead of 15%, so the offer can be tested without busting for an hour.
+    private static bool _debugAlwaysRescue;
+
+    private bool RescueShowing => _rescuePending;
+
+    /// True if the offer is now up and the set must wait for it.
+    private bool OfferRescue()
     {
         RunData run = _inRun ? RunData.Instance : null;
-        if (run == null || !run.Endless || run.EndlessRescueUsed || !_isVsBot) return false;
+        if (run == null || !_isVsBot || _tutorialActive || !run.RescueEligible) return false;
 
         int target = _gameState.TargetScore;
         // Only a bust that LOSES the set. Both over is a tie and is replayed anyway.
         if (_player1.CurrentScore <= target || _player2.CurrentScore > target) return false;
+
+        double chance = _debugAlwaysRescue ? 1.0 : RunData.RescueChance;
+        if (_random.NextDouble() >= chance)
+        {
+            GD.Print($"Rescue roll missed ({chance:P0}).");
+            return false;
+        }
+
+        run.UseMatchRescue(); // spent now: an offer is the match's one rescue, whatever the answer
+        _rescuePending = true;
 
         if (_rescueOverlay == null)
         {
@@ -1110,20 +1258,34 @@ public partial class GameManager : Node
             AddChild(_rescueOverlay);
             _rescueOverlay.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
             OverlayUi.AddDim(_rescueOverlay);
-            VBoxContainer box = OverlayUi.AddPanel(_rescueOverlay);
+            _rescueBox = OverlayUi.AddPanel(_rescueOverlay);
+        }
+        OverlayUi.ClearChildren(_rescueBox);
 
-            box.AddChild(OverlayUi.MakeLabel("Bust!  Try again?", 30, OverlayUi.MedalGold));
-            box.AddChild(OverlayUi.MakeLabel(
-                "Once per endless run: take a random minus Modifier and your turn re-opens.\n"
-                + "It might be enough. It might not.", 16, OverlayUi.Muted));
+        int landing = target - 1;
+        bool guaranteed = !AdService.AdsActive; // bought No Ads, or a platform with no ads
 
-            Button take = new Button { Text = "Take a random card", CustomMinimumSize = new Vector2(280, 48) };
-            take.Pressed += TakeEndlessRescue;
-            box.AddChild(take);
+        if (guaranteed)
+        {
+            _rescueBox.AddChild(OverlayUi.MakeLabel("Bust!  Rescue!", 30, OverlayUi.MedalGold));
+            _rescueBox.AddChild(OverlayUi.MakeLabel(
+                $"Take a card that puts you on {landing}.\nPlay it before you end your turn.",
+                16, OverlayUi.Muted));
+            AddRescueButton("Rescue", 48, GiveExactRescue);
+        }
+        else
+        {
+            bool adReady = AdService.RewardedReady;
+            _rescueBox.AddChild(OverlayUi.MakeLabel("Bust!  Try again?", 30, OverlayUi.MedalGold));
+            _rescueBox.AddChild(OverlayUi.MakeLabel(
+                adReady
+                    ? $"Watch a short ad for a card that puts you on {landing}.\n"
+                      + "Or take a random card from your deck - it might not help."
+                    : "Take a random card from your deck.\nIt might be enough. It might not.",
+                16, OverlayUi.Muted));
 
-            Button decline = new Button { Text = "Accept the bust", CustomMinimumSize = new Vector2(280, 40) };
-            decline.Pressed += DeclineEndlessRescue;
-            box.AddChild(decline);
+            if (adReady) AddRescueButton($"Watch ad - land on {landing}", 48, WatchRescueAd);
+            AddRescueButton("No thanks - random card", adReady ? 40 : 48, GiveRandomRescue);
         }
 
         MoveChild(_rescueOverlay, GetChildCount() - 1);
@@ -1132,27 +1294,56 @@ public partial class GameManager : Node
         return true;
     }
 
-    private void TakeEndlessRescue()
+    private void AddRescueButton(string text, int height, Action onPressed)
     {
-        _rescueOverlay.Visible = false;
-        RunData.Instance?.UseEndlessRescue();
+        Button button = new Button { Text = text, CustomMinimumSize = new Vector2(300, height) };
+        button.Pressed += onPressed;
+        _rescueBox.AddChild(button);
+    }
 
-        Card rescue = new Card(-_random.Next(1, RescueMaxMagnitude + 1), CardType.Modifier);
-        _player1.Modifiers.Add(rescue);
-        NoteModifierMet(rescue);
+    private void WatchRescueAd()
+    {
+        _rescueOverlay.Visible = false; // the ad covers the table; the lock stays on
+        AdService.ShowRewarded(this, result =>
+        {
+            GD.Print($"Rescue ad: {result}");
+            if (result == AdService.RewardResult.Completed) GiveExactRescue();
+            else GiveRandomRescue(); // closed early, or nothing to show: that is "No thanks"
+        });
+    }
+
+    /// The card that lands the player on target - 1. Its value can be as low as -11 (a bust
+    /// overshoots by up to 10), which is below any card the game sells - hence its own card rather
+    /// than a lookup into the ordinary modifiers.
+    private void GiveExactRescue()
+    {
+        int value = (_gameState.TargetScore - 1) - _player1.CurrentScore;
+        Card rescue = new Card(value, CardType.Modifier) { IsRescue = true };
+        GiveRescueCard(rescue, $"Rescue: play your {rescue.DisplayText} to land on {_gameState.TargetScore - 1}.");
+    }
+
+    private void GiveRandomRescue()
+    {
+        Card copy = RunData.Instance?.DrawRescueCopy()
+                    ?? new Card(-_random.Next(1, 7), CardType.Modifier); // an empty deck; a live run never has one
+        copy.IsRescue = true;
+        GiveRescueCard(copy, $"Rescue: you take a {copy.DisplayText}. It might be enough.");
+    }
+
+    private void GiveRescueCard(Card card, string banner)
+    {
+        if (_rescueOverlay != null) _rescueOverlay.Visible = false;
+        _rescuePending = false;
+
+        // Into the hand - as a 5th card if the hand is full; it never replaces one the player chose.
+        // Deliberately NOT NoteModifierMet: a rescue card is not part of the collection.
+        _player1.Modifiers.Add(card);
 
         // Re-open the turn exactly as an effect card does: no new draw, just a chance to play.
         _player1.IsHolding = false;
         _player1.HasEndedTurn = false;
-        ShowEffectBanner($"Rescue: you take a {rescue.DisplayText}.");
+        ShowEffectBanner(banner);
         UpdateUI();
-    }
-
-    private void DeclineEndlessRescue()
-    {
-        _rescueOverlay.Visible = false;
-        RunData.Instance?.UseEndlessRescue(); // declined is spent: it is a moment, not a menu
-        EndSet();
     }
 
     // ------------------------------------------------------------------
@@ -1477,7 +1668,8 @@ public partial class GameManager : Node
             // This card is what empties my hand, so count what is left AFTER it goes.
             int myRemaining = me.Modifiers.Count - 1;
             if (myRemaining > MaxModifiersToTradeAway) continue;      // my hand is not spent yet
-            if (you.Modifiers.Count <= myRemaining) continue; // and theirs has to be bigger
+            // A rescue card never changes hands, so it is not part of what the trade would take.
+            if (you.Modifiers.FindAll(c => !c.IsRescue).Count <= myRemaining) continue; // and theirs has to be bigger
 
             if (CurrentAiSkill() == AiSkill.Reads
                 && ModifierStrength(you) <= ModifierStrength(me, ignore: card)) continue;
@@ -1905,8 +2097,16 @@ public partial class GameManager : Node
     /// both players are holding. Who busted is derived from the scores. Records the result, then
     /// shows an explanation that has to be acknowledged - the next set (or a restart, after the
     /// match) starts from that button.
+    /// Finished local co-op matches this session. In memory only: relaunching resets it, so
+    /// nobody sees an ad just for opening the game (monetization-spec.md §2).
+    private static int _coopMatchesFinished;
+    private const int CoopMatchesPerAd = 2;
+
     private void EndSet()
     {
+        // A rescue card lasts the set it was given in, played or not (monetization-spec.md §3.4).
+        _player1.DiscardRescueCards();
+
         int target = _gameState.TargetScore;
         int p1 = _player1.CurrentScore;
         int p2 = _player2.CurrentScore;
@@ -1977,6 +2177,18 @@ public partial class GameManager : Node
                 // and the record are, and where the next climb becomes a choice.
                 buttonText = "Play Again";
                 next = RestartToMenu;
+
+                // Local co-op: a short ad the players can close, after every 2nd finished match
+                // (monetization-spec.md §2). On the match-end screen, before anything else starts.
+                if (!_isVsBot)
+                {
+                    _coopMatchesFinished++;
+                    if (_coopMatchesFinished % CoopMatchesPerAd == 0)
+                    {
+                        Action afterAd = next;
+                        next = () => AdService.ShowInterstitial(this, afterAd);
+                    }
+                }
             }
         }
         else
@@ -2191,6 +2403,29 @@ public partial class GameManager : Node
             RestartToMenu(); // there is no match left to go back to
         };
         row.AddChild(wipe);
+
+        // Monetization switches (monetization-spec.md), on a second row so the first stays narrow.
+        HBoxContainer adRow = new HBoxContainer { Alignment = BoxContainer.AlignmentMode.Center };
+        adRow.AddThemeConstantOverride("separation", 6);
+        column.AddChild(adRow);
+
+        Button rescue = new Button();
+        void RescueText() => rescue.Text = _debugAlwaysRescue ? "Rescue 100%" : "Rescue 15%";
+        RescueText();
+        rescue.Pressed += () => { _debugAlwaysRescue = !_debugAlwaysRescue; RescueText(); };
+        adRow.AddChild(rescue);
+
+        Button fill = new Button();
+        void FillText() => fill.Text = AdService.DebugSimulateNoFill ? "Ads: no fill" : "Ads: fill";
+        FillText();
+        fill.Pressed += () => { AdService.DebugSimulateNoFill = !AdService.DebugSimulateNoFill; FillText(); };
+        adRow.AddChild(fill);
+
+        Button noAds = new Button();
+        void NoAdsText() => noAds.Text = PurchaseService.OwnsNoAds ? "No Ads: owned" : "No Ads: not owned";
+        NoAdsText();
+        noAds.Pressed += () => { PurchaseService.DebugSetOwned(!PurchaseService.OwnsNoAds); NoAdsText(); };
+        adRow.AddChild(noAds);
     }
 
     /// Drops the run one rung either way and walks straight into that match, so a stage can be
@@ -3121,6 +3356,7 @@ public partial class GameManager : Node
             _mirrorToggle.GetParent()?.RemoveChild(_mirrorToggle);
             box.AddChild(_mirrorToggle);
         }
+        if (_exitButton != null) _exitButton.Text = "Main Menu";
         foreach (Button moved in new[] { _restartButton, _exitButton })
         {
             if (moved == null) continue;
@@ -3205,6 +3441,9 @@ public partial class GameManager : Node
         // Standard cards carry the rank's tint, so the deck you are playing with visibly changes
         // as you climb. SelfModulate, not Modulate: the number on top stays white.
         if (card.Type == CardType.Main) view.SelfModulate = _rankCardTint;
+
+        // A rescue card is not one the player owns, and may carry a value no bought card can.
+        if (card.IsRescue && card.Effect == CardEffect.None) view.SelfModulate = RescueTint;
 
         // An effect card is a Modifier, so this never fights the rank tint above.
         if (card.Effect != CardEffect.None)
@@ -3849,16 +4088,19 @@ public partial class GameManager : Node
                 });
         }
 
-        AddMenuButton("Local 2-Player", null, MenuStartLocal2Player);
+        AddMenuButton("Local 2-Player", null, FillLocal2PlayerSetup);
 
         _startMenuBox.AddChild(MenuSpacer());
         AddMenuButton("How to Play", null, ShowHowToPlay);
         if (run != null)
             AddMenuButton($"Collection   {run.CollectionFound}/{RunData.CollectionKeys.Length}", null, OpenCollection);
 
-        // A mobile app does not quit itself; the OS does that, and a Quit button there is a button
-        // that breaks the platform's own back gesture.
-        if (!OS.HasFeature("mobile")) AddMenuButton("Quit", null, () => GetTree().Quit());
+        AddStoreRow();
+
+        // Quit everywhere but iOS (Alexander, 2026-09-16: "start menu should have quit game").
+        // Android allows an app to close itself; Apple's review guidelines reject a quit button,
+        // and iOS apps are left to the home gesture.
+        if (!OS.HasFeature("ios")) AddMenuButton("Quit Game", null, () => GetTree().Quit());
 
         // The proof that a lost run did not erase anything - which is the promise the run makes,
         // and the one place the player can be shown it before deciding to climb again.
@@ -3869,6 +4111,42 @@ public partial class GameManager : Node
                 $"{run.Medals} medals   -   {run.Inventory.Count} cards owned   -   best: match {run.FurthestStep + 1}",
                 13, OverlayUi.Muted));
         }
+    }
+
+    /// Remove Ads and Restore Purchases (monetization-spec.md §4), side by side so they cost the
+    /// menu one row. Only where there is a store to talk to: no ads on this platform means nothing
+    /// to remove, and the stub store only exists in debug builds.
+    private void AddStoreRow()
+    {
+        if (!PurchaseService.StoreAvailable) return;
+
+        HBoxContainer row = new HBoxContainer { Alignment = BoxContainer.AlignmentMode.Center };
+        row.AddThemeConstantOverride("separation", 8);
+        row.CustomMinimumSize = new Vector2(MenuButtonWidth, 0);
+        _startMenuBox.AddChild(row);
+
+        Button StoreButton(string text, Action onPressed)
+        {
+            Button button = new Button { Text = text, CustomMinimumSize = new Vector2(0, 40) };
+            button.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
+            button.AddThemeFontSizeOverride("font_size", 15);
+            button.Pressed += onPressed;
+            row.AddChild(button);
+            return button;
+        }
+
+        if (PurchaseService.OwnsNoAds)
+        {
+            row.AddChild(OverlayUi.MakeLabel("No Ads - thank you!", 15, OverlayUi.Muted));
+        }
+        else
+        {
+            StoreButton($"Remove Ads  {PurchaseService.NoAdsPriceLabel}",
+                        () => PurchaseService.BuyNoAds(_ => FillStartMenu()));
+        }
+
+        if (PurchaseService.ShowRestoreButton)
+            StoreButton("Restore Purchases", () => PurchaseService.RestorePurchases(_ => FillStartMenu()));
     }
 
     /// One row of the menu: a wide button, and optionally a line under it saying what it does. The
@@ -3911,6 +4189,83 @@ public partial class GameManager : Node
 
         HideStartMenu();
         OnStartButtonPressed();
+    }
+
+    // ------------------------------------------------------------------
+    // Local 2-player setup (roadmap, from the mobile playtest group's ask for effect cards in
+    // local 2-player). Two choices before the deal: the target, and whether the special Modifiers
+    // are in the hands. Static for the same reason _pendingLocal2Player is - they have to survive
+    // the scene change and Restart's reload - and, like it, never saved to disk: the menu
+    // remembers the last choice for this launch only.
+    // ------------------------------------------------------------------
+    private static readonly int[] Local2PlayerTargets = { 18, 20, 23 };
+    private static int _local2PlayerTarget = 20;
+    private static bool _local2PlayerSpecials;
+
+    /// The start menu's second page. Reuses the menu panel rather than opening another overlay,
+    /// so Back is a refill and there is no second panel to stack or dismiss.
+    private void FillLocal2PlayerSetup()
+    {
+        OverlayUi.ClearChildren(_startMenuBox);
+        _startMenuBox.AddChild(OverlayUi.MakeLabel("Local 2-Player", 34));
+        _startMenuBox.AddChild(MenuSpacer());
+
+        _startMenuBox.AddChild(OverlayUi.MakeLabel("Target", 20));
+        HBoxContainer targets = AddChoiceRow();
+        foreach (int target in Local2PlayerTargets)
+        {
+            int value = target;
+            AddChoice(targets, value.ToString(), _local2PlayerTarget == value,
+                      () => _local2PlayerTarget = value);
+        }
+
+        _startMenuBox.AddChild(MenuSpacer());
+        _startMenuBox.AddChild(OverlayUi.MakeLabel("Special Modifiers", 20));
+        HBoxContainer specials = AddChoiceRow();
+        AddChoice(specials, "Off", !_local2PlayerSpecials, () => _local2PlayerSpecials = false);
+        AddChoice(specials, "On", _local2PlayerSpecials, () => _local2PlayerSpecials = true);
+
+        Label note = OverlayUi.MakeLabel(
+            "On: each hand has one special Modifier - Copy, Trade Totals, Shave, Trade Hands, Recall or Veto.",
+            12, OverlayUi.Muted);
+        note.AutowrapMode = TextServer.AutowrapMode.WordSmart;
+        note.HorizontalAlignment = HorizontalAlignment.Center;
+        note.CustomMinimumSize = new Vector2(MenuButtonWidth, 0);
+        _startMenuBox.AddChild(note);
+
+        _startMenuBox.AddChild(MenuSpacer());
+        AddMenuButton("Deal", null, MenuStartLocal2Player);
+        AddMenuButton("Back", null, FillStartMenu);
+    }
+
+    private HBoxContainer AddChoiceRow()
+    {
+        HBoxContainer row = new HBoxContainer { Alignment = BoxContainer.AlignmentMode.Center };
+        row.AddThemeConstantOverride("separation", 10);
+        _startMenuBox.AddChild(row);
+        return row;
+    }
+
+    /// One option of a pick-one row. Toggle buttons sharing the row's ButtonGroup, so the pressed
+    /// look IS the current choice and there is nothing else to keep in sync. The group is found
+    /// from the row's first button rather than stored, so the row needs no bookkeeping of its own.
+    private static void AddChoice(HBoxContainer row, string text, bool selected, Action onChosen)
+    {
+        ButtonGroup group = (row.GetChildCount() > 0 && row.GetChild(0) is Button first)
+            ? first.ButtonGroup
+            : new ButtonGroup();
+
+        Button button = new Button
+        {
+            Text = text,
+            ToggleMode = true,
+            ButtonGroup = group,
+            ButtonPressed = selected,
+            CustomMinimumSize = new Vector2(96, 44),
+        };
+        button.AddThemeFontSizeOverride("font_size", 18);
+        button.Toggled += pressed => { if (pressed) onChosen(); };
+        row.AddChild(button);
     }
 
     /// ...and the mirrored face-to-face table lives in the other scene.

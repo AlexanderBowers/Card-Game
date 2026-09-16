@@ -94,7 +94,8 @@ public partial class Player : RefCounted
         Modifiers.Remove(card);
         ActiveCardsOnBoard.Add(card);
         LastPlayedModifier = card;
-        if (CardEffects.IsPlainModifier(card)) SpentCards.Add(card);
+        // A rescue card is a one-off: Recall must never bring it back.
+        if (CardEffects.IsPlainModifier(card) && !card.IsRescue) SpentCards.Add(card);
 
         CurrentScore += card.Value;
         return true;
@@ -109,6 +110,9 @@ public partial class Player : RefCounted
         ActiveCardsOnBoard.Clear();
         // SpentCards is NOT cleared here - see the field. It belongs to the match, not the set.
     }
+
+    /// Rescue cards last one set (monetization-spec.md §3.4). Returns how many were dropped.
+    public int DiscardRescueCards() => Modifiers.RemoveAll(card => card.IsRescue);
 
     /// Called when a fresh match hand is dealt. The only place SpentCards is emptied.
     public void ResetForNewMatch()

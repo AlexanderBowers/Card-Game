@@ -169,8 +169,9 @@ public static class CardEffects
 
             // The card being played is spent first, so an owner left empty-handed is the BEST case
             // (take theirs, give nothing). What has to be true is that there is something to take.
+            // A rescue card never changes hands, so it is not "something to take".
             case CardEffect.TradeHands:
-                return opponent.Modifiers.Count > 0;
+                return opponent.Modifiers.Exists(card => !card.IsRescue);
 
             // Only my own spent pile matters. Nothing about the target, the scores or who is
             // holding - Recall is the one effect that never reaches across the table at all.
@@ -344,10 +345,13 @@ public static class CardEffects
 
             case CardEffect.TradeHands:
             {
-                List<Card> mine = new List<Card>(self.Modifiers);
-                self.Modifiers.Clear();
-                self.Modifiers.AddRange(opponent.Modifiers);
-                opponent.Modifiers.Clear();
+                // Rescue cards stay with their owner (monetization-spec.md §3.4): they are a
+                // one-off for this set, not part of the hand the card is trading.
+                List<Card> mine = self.Modifiers.FindAll(card => !card.IsRescue);
+                List<Card> theirs = opponent.Modifiers.FindAll(card => !card.IsRescue);
+                self.Modifiers.RemoveAll(card => !card.IsRescue);
+                opponent.Modifiers.RemoveAll(card => !card.IsRescue);
+                self.Modifiers.AddRange(theirs);
                 opponent.Modifiers.AddRange(mine);
 
                 return new EffectResult(true, true,

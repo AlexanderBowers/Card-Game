@@ -30,6 +30,11 @@ public partial class Card : RefCounted
 	/// ordinary modifier and every main-deck card; see CardEffects for the rest.
 	public CardEffect Effect { get; set; } = CardEffect.None;
 
+	/// A one-off card handed out by the bust rescue (monetization-spec.md §3.4). It lives for the
+	/// rest of the set only: never saved, never spent into the Recall pile, never traded away, never
+	/// logged in the collection. Its value can be beyond the normal -6, so it has its own tint.
+	public bool IsRescue { get; set; }
+
 	public Card(int value, CardType type, string cardName = "", bool canFlipValue = false, CardEffect effect = CardEffect.None)
 	{
 		Value = value;

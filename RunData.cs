@@ -343,13 +343,25 @@ public partial class RunData : Node
 
     public bool EndlessUnlocked => FurthestStep >= Ladder.Length;
 
-    /// "Try again?" is offered on the FIRST bust of an endless run, not of each match - otherwise
-    /// it appears every match and stops being a moment (playtest-feedback-family.md §5.3).
-    public bool EndlessRescueUsed { get; private set; }
+    // ------------------------------------------------------------------
+    // The rescue offer (claude/monetization-spec.md §3)
+    //
+    // Ladder stages 4-10 and endless: a bust that would lose the set rolls RescueChance, at most
+    // one rescue per MATCH. The flag is saved so quitting mid-match cannot hand out a fresh one,
+    // and it is only cleared when a match is banked (CompleteMatch) or a new run begins.
+    // ------------------------------------------------------------------
+    public const int RescueFirstStage = 4;
+    public const double RescueChance = 0.15;
 
-    public void UseEndlessRescue()
+    public bool MatchRescueUsed { get; private set; }
+
+    /// Whether the match being played can offer a rescue at all (the roll comes after).
+    public bool RescueEligible =>
+        RunActive && !MatchRescueUsed && (Endless || StepIndex >= RescueFirstStage - 1);
+
+    public void UseMatchRescue()
     {
-        EndlessRescueUsed = true;
+        MatchRescueUsed = true;
         Save();
     }
 
@@ -466,7 +478,7 @@ public partial class RunData : Node
         StepIndex = 0;
         Endless = false;
         EndlessStreak = 0;
-        EndlessRescueUsed = false;
+        MatchRescueUsed = false;
         ClearRuleset();
 
         if (Inventory.Count == 0) Inventory.AddRange(StarterCollection);
@@ -510,6 +522,8 @@ public partial class RunData : Node
     public void CompleteMatch(int setsWon, bool won)
     {
         if (!RunActive) return;
+
+        MatchRescueUsed = false; // the next match gets its own rescue
 
         if (won && Endless)
         {
@@ -605,6 +619,7 @@ public partial class RunData : Node
     {
         if (!RunActive) StartNewRun();
         Endless = false;
+        MatchRescueUsed = false;
         // "Stage >" on the finale unlocks endless mode, so it can be tested without a full climb.
         if (stepIndex >= Ladder.Length) FurthestStep = Ladder.Length;
         StepIndex = Mathf.Clamp(stepIndex, 0, Ladder.Length - 1);
@@ -624,6 +639,7 @@ public partial class RunData : Node
         Endless = false;
         EndlessStreak = 0;
         EndlessBest = 0;
+        MatchRescueUsed = false;
         ClearRuleset();
         TutorialSeen = false; // a wiped save IS a first launch, tutorial included
         CardsMet.Clear();
@@ -687,6 +703,16 @@ public partial class RunData : Node
         return hand;
     }
 
+    /// The "No thanks" rescue card (monetization-spec.md §3.2): a COPY of one card from the
+    /// 12-card deck, picked at random. The deck and the inventory are untouched. Null only when
+    /// the deck is empty, which a live run never is.
+    public Card DrawRescueCopy()
+    {
+        List<int> pool = SideDeck.FindAll(index => index >= 0 && index < Inventory.Count);
+        if (pool.Count == 0) return null;
+        return Inventory[pool[_random.Next(pool.Count)]].ToCard();
+    }
+
     // ------------------------------------------------------------------
     // Save / load
     //
@@ -717,7 +743,7 @@ public partial class RunData : Node
 
         Godot.Collections.Dictionary data = new Godot.Collections.Dictionary
         {
-            { "version", 6 },
+            { "version", 7 },
             { "active", RunActive },
             { "medals", Medals },
             { "step", StepIndex },
@@ -728,7 +754,7 @@ public partial class RunData : Node
             { "endless", Endless },
             { "endlessStreak", EndlessStreak },
             { "endlessBest", EndlessBest },
-            { "endlessRescueUsed", EndlessRescueUsed },
+            { "matchRescueUsed", MatchRescueUsed },
             { "rolledStep", RolledStep },
             { "rolledTarget", RolledTarget },
             { "rolledEffects", rolledEffects },
@@ -765,7 +791,9 @@ public partial class RunData : Node
         Endless = data.TryGetValue("endless", out Variant endless) && endless.AsBool();
         EndlessStreak = data.TryGetValue("endlessStreak", out Variant streak) ? streak.AsInt32() : 0;
         EndlessBest = data.TryGetValue("endlessBest", out Variant best) ? best.AsInt32() : 0;
-        EndlessRescueUsed = data.TryGetValue("endlessRescueUsed", out Variant rescued) && rescued.AsBool();
+        // Version 7. A version 6 save carried "endlessRescueUsed" (once per endless RUN), which
+        // no longer means anything; it is ignored, and a missing key loads as a fresh match.
+        MatchRescueUsed = data.TryGetValue("matchRescueUsed", out Variant rescued) && rescued.AsBool();
         if (Endless) StepIndex = Ladder.Length - 1;
 
         // A version 4 save has no key and loads as an empty set, so an existing player is
