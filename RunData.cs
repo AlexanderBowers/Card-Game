@@ -323,7 +323,44 @@ public partial class RunData : Node
         (CurrentStep.Randomised && RolledStep == StepIndex) ? RolledTarget : CurrentStep.TargetScore;
     public Rank CurrentRank => Ranks[Mathf.Clamp(CurrentStep.Rank, 0, Ranks.Length - 1)];
     public int MatchNumber => Mathf.Clamp(StepIndex, 0, Ladder.Length - 1) + 1;
-    public bool RunComplete => StepIndex >= Ladder.Length;
+    public bool RunComplete => !Endless && StepIndex >= Ladder.Length;
+
+    public string CurrentOpponent => Endless ? $"Endless Challenger {EndlessStreak + 1}" : CurrentStep.Opponent;
+
+    // ------------------------------------------------------------------
+    // Endless mode (playtest-feedback-family.md §5.1)
+    //
+    // The finale with no rung above it: the run parks on the last step, every won match re-rolls
+    // the rules, and the score is how many matches in a row. Unlocked by clearing the ladder once.
+    // Same run machinery throughout - market, deck, medals, saves - so a loss costs exactly what a
+    // ladder loss costs: the streak, never the cards.
+    // ------------------------------------------------------------------
+    public bool Endless { get; private set; }
+    public int EndlessStreak { get; private set; }
+
+    /// Profile level: the record survives every run, like FurthestStep.
+    public int EndlessBest { get; private set; }
+
+    public bool EndlessUnlocked => FurthestStep >= Ladder.Length;
+
+    /// The target range widens as the streak grows - one step further from 20 on each side every
+    /// two wins - so a long streak is harder arithmetic, never bigger multipliers. Capped where
+    /// a 9-slot board and a shared 40-card deck still comfortably reach it.
+    public static (int min, int max) EndlessTargetRange(int streak)
+    {
+        int widen = streak / 2;
+        return (Math.Max(15, 18 - widen), Math.Min(30, 25 + widen));
+    }
+
+    public void StartEndless()
+    {
+        StartNewRun();          // the collection check, the deck repair, the cleared roll
+        Endless = true;
+        EndlessStreak = 0;
+        StepIndex = Ladder.Length - 1;
+        EnsureRuleset();
+        Save();
+    }
 
     /// The target of the rung below this one - what the player has been playing to until now.
     public int PreviousTarget => StepIndex > 0 ? StepAt(StepIndex - 1).TargetScore : CurrentTarget;
@@ -384,7 +421,16 @@ public partial class RunData : Node
     {
         if (!CurrentStep.Randomised || RolledStep == StepIndex) return;
 
-        Ruleset rolled = RollRuleset(_random);
+        Ruleset rolled;
+        if (Endless)
+        {
+            (int min, int max) = EndlessTargetRange(EndlessStreak);
+            rolled = RollRuleset(_random, min, max);
+        }
+        else
+        {
+            rolled = RollRuleset(_random);
+        }
         RolledStep = StepIndex;
         RolledTarget = rolled.Target;
         RolledEffects.Clear();
@@ -408,6 +454,8 @@ public partial class RunData : Node
     {
         RunActive = true;
         StepIndex = 0;
+        Endless = false;
+        EndlessStreak = 0;
         ClearRuleset();
 
         if (Inventory.Count == 0) Inventory.AddRange(StarterCollection);
@@ -443,6 +491,7 @@ public partial class RunData : Node
     public void EndRun()
     {
         RunActive = false;
+        Endless = false;
         Save();
     }
 
@@ -451,7 +500,15 @@ public partial class RunData : Node
     {
         if (!RunActive) return;
 
-        if (won)
+        if (won && Endless)
+        {
+            Medals += setsWon + CurrentStep.MedalReward;
+            EndlessStreak++;
+            if (EndlessStreak > EndlessBest) EndlessBest = EndlessStreak;
+            ClearRuleset();
+            EnsureRuleset();    // the next match's rules, rolled now so the market can name them
+        }
+        else if (won)
         {
             // A medal per set taken, plus the rung's purse - a clean 2-0 is worth keeping.
             Medals += setsWon + CurrentStep.MedalReward;
@@ -536,6 +593,9 @@ public partial class RunData : Node
     public void DebugJumpToStep(int stepIndex)
     {
         if (!RunActive) StartNewRun();
+        Endless = false;
+        // "Stage >" on the finale unlocks endless mode, so it can be tested without a full climb.
+        if (stepIndex >= Ladder.Length) FurthestStep = Ladder.Length;
         StepIndex = Mathf.Clamp(stepIndex, 0, Ladder.Length - 1);
         if (StepIndex > FurthestStep) FurthestStep = StepIndex;
         ClearRuleset();
@@ -550,6 +610,9 @@ public partial class RunData : Node
         Medals = 0;
         StepIndex = 0;
         FurthestStep = 0;
+        Endless = false;
+        EndlessStreak = 0;
+        EndlessBest = 0;
         ClearRuleset();
         TutorialSeen = false; // a wiped save IS a first launch, tutorial included
         CardsMet.Clear();
@@ -651,6 +714,9 @@ public partial class RunData : Node
             { "tutorialSeen", TutorialSeen },
             { "cardsMet", cardsMet },
             { "collectorBack", CollectorBack },
+            { "endless", Endless },
+            { "endlessStreak", EndlessStreak },
+            { "endlessBest", EndlessBest },
             { "rolledStep", RolledStep },
             { "rolledTarget", RolledTarget },
             { "rolledEffects", rolledEffects },
@@ -684,6 +750,10 @@ public partial class RunData : Node
         StepIndex = data.TryGetValue("step", out Variant step) ? step.AsInt32() : 0;
         FurthestStep = data.TryGetValue("furthest", out Variant furthest) ? furthest.AsInt32() : StepIndex;
         TutorialSeen = data.TryGetValue("tutorialSeen", out Variant taught) && taught.AsBool();
+        Endless = data.TryGetValue("endless", out Variant endless) && endless.AsBool();
+        EndlessStreak = data.TryGetValue("endlessStreak", out Variant streak) ? streak.AsInt32() : 0;
+        EndlessBest = data.TryGetValue("endlessBest", out Variant best) ? best.AsInt32() : 0;
+        if (Endless) StepIndex = Ladder.Length - 1;
 
         // A version 4 save has no key and loads as an empty set, so an existing player is
         // introduced to each card once more. That is the right way round: the alternative is

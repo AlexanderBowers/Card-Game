@@ -723,7 +723,7 @@ public partial class GameManager : Node
 
         _inRun = true;
         _gameState.TargetScore = run.CurrentTarget;
-        _player2.PlayerName = run.CurrentStep.Opponent;
+        _player2.PlayerName = run.CurrentOpponent;
         ApplyRankTheme();
     }
 
@@ -1935,17 +1935,26 @@ public partial class GameManager : Node
         {
             // The cards are the progress, and they survive - say so plainly, on the screen where
             // losing is most likely to make someone put the game down.
+            if (run.EndlessStreak > 0 || run.Endless)
+                return $"\n\nYour endless streak ends at {run.EndlessStreak} (best {run.EndlessBest}). " +
+                       $"Every card you own ({run.Inventory.Count}) and your {run.Medals} medals are still yours.";
             return $"\n\nThe run ends here. Every card you have unlocked ({run.Inventory.Count}) is " +
                    $"still yours, along with {run.Medals} medals.\nPlay Again starts a fresh climb " +
                    $"from stage 1 with your deck intact.";
         }
 
         int earned = run.Medals - before;
-        if (run.RunComplete) return $"\n\nYou earned {earned} medals - and you have cleared the whole ladder.";
+        if (run.RunComplete)
+            return $"\n\nYou earned {earned} medals - and you have cleared the whole ladder." +
+                   "\nEndless mode is open on the start menu.";
 
-        RunData.LadderStep next = run.CurrentStep;
+        if (run.Endless)
+            return $"\n\nStreak {run.EndlessStreak} (best {run.EndlessBest}). You earned {earned} medals." +
+                   $"\nNext: target {run.CurrentTarget}." + FinaleRulesLine(run, "\n") +
+                   "\nThe market is open first.";
+
         return $"\n\nYou earned {earned} medals ({run.Medals} banked)." +
-               $"\nNext, stage {run.MatchNumber}: {next.Opponent}, target {run.CurrentTarget}." +
+               $"\nNext, stage {run.MatchNumber}: {run.CurrentOpponent}, target {run.CurrentTarget}." +
                FinaleRulesLine(run, "\n") +
                "\nThe market is open first.";
     }
@@ -1956,6 +1965,7 @@ public partial class GameManager : Node
     {
         RunData run = _inRun ? RunData.Instance : null;
         if (run == null) return string.Empty;
+        if (run.Endless) return $"Endless - streak {run.EndlessStreak} - ";
         return $"Stage {run.MatchNumber}/{RunData.LadderLength} - {run.CurrentRank.Name} - ";
     }
 
@@ -2018,7 +2028,8 @@ public partial class GameManager : Node
         // the target happens to have moved.
         if (run != null && run.CurrentRolledEffects != null)
         {
-            _targetLabel.Text = $"FINAL  -  TARGET {_gameState.TargetScore}{FinaleRulesLine(run, "\n")}";
+            string heading = run.Endless ? "ENDLESS" : "FINAL";
+            _targetLabel.Text = $"{heading}  -  TARGET {_gameState.TargetScore}{FinaleRulesLine(run, "\n")}";
             _targetLabel.AddThemeColorOverride("font_color", OverlayUi.MedalGold);
             return;
         }
@@ -2115,7 +2126,7 @@ public partial class GameManager : Node
 
         run.DebugJumpToStep(run.StepIndex + delta);
         run.AutoStartNextMatch = true;
-        GD.Print($"DEBUG: jumped to stage {run.MatchNumber} ({run.CurrentStep.Opponent}, target {run.CurrentTarget})");
+        GD.Print($"DEBUG: jumped to stage {run.MatchNumber} ({run.CurrentOpponent}, target {run.CurrentTarget})");
         OnRestartPressed();
     }
 
@@ -3613,6 +3624,7 @@ public partial class GameManager : Node
     private VBoxContainer _startMenuBox;
     private Button _newRunButton;
     private bool _newRunArmed; // "New Run" over an unfinished climb asks a second time
+    private bool _endlessArmed; // ...and so does Endless
 
     /// Opaque, and a deeper shade of the table's own felt so the menu still reads as this game.
     private static readonly Color MenuBackdrop = new Color(0.04f, 0.10f, 0.07f);
@@ -3707,10 +3719,16 @@ public partial class GameManager : Node
 
         // First, and named with the rung, because a player who left mid-ladder came back for this
         // one thing and should not have to guess which button keeps their climb.
-        if (runInProgress)
+        if (runInProgress && run.Endless)
+        {
+            AddMenuButton($"Continue - Endless, streak {run.EndlessStreak}",
+                          $"target {run.CurrentTarget}{FinaleRulesLine(run, "   -   ")}",
+                          () => MenuStartRun(fresh: false));
+        }
+        else if (runInProgress)
         {
             AddMenuButton($"Continue - Match {run.MatchNumber} of {RunData.LadderLength}",
-                          $"{run.CurrentStep.Opponent}   -   target {run.CurrentTarget}",
+                          $"{run.CurrentOpponent}   -   target {run.CurrentTarget}",
                           () => MenuStartRun(fresh: false));
         }
 
@@ -3733,6 +3751,28 @@ public partial class GameManager : Node
         // No explanatory line under either of the two plain modes (Alexander, 2026-09-13): a menu
         // that describes its own buttons is a menu that does not trust them. The one note that
         // stays is the New Run warning, which is not a description - it is a consequence.
+        // Endless: earned by clearing the ladder once. Over a run in progress it gives that run up,
+        // so it asks twice, exactly as New Run does.
+        if (run != null && run.EndlessUnlocked)
+        {
+            _endlessArmed = false;
+            Button endless = null;
+            endless = AddMenuButton(
+                run.EndlessBest > 0 ? $"Endless   (best streak {run.EndlessBest})" : "Endless",
+                null,
+                () =>
+                {
+                    if (runInProgress && !_endlessArmed)
+                    {
+                        _endlessArmed = true;
+                        endless.Text = "Endless - tap again to give up the run above";
+                        return;
+                    }
+                    RunData.Instance.StartEndless();
+                    MenuStartRun(fresh: false);
+                });
+        }
+
         AddMenuButton("Local 2-Player", null, MenuStartLocal2Player);
 
         _startMenuBox.AddChild(MenuSpacer());

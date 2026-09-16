@@ -132,6 +132,11 @@ public partial class ShopOverlay : Control
     private static RunData.ModifierDef SignatureOffer(Random rng, RunData run,
                                                       List<CardEffect> unlocked, int maxMagnitude)
     {
+        // Endless parks on the last rung, so "the stage just cleared" would be Veto every visit.
+        // Every special Modifier is in play there; any of them is the right signature.
+        if (run.Endless && unlocked.Count > 0)
+            return ToDef(CardEffects.Create(unlocked[rng.Next(unlocked.Count)], rng));
+
         RunData.LadderStep cleared = run.StepAt(run.ClearedStepIndex);
         int stage = run.ClearedStepIndex + 1;
 
@@ -246,8 +251,7 @@ public partial class ShopOverlay : Control
         foreach (RunData.ModifierDef def in RollOffers(_random, run, OfferCount))
             _offers.Add(new Offer { Def = def, Price = PriceOf(def) });
 
-        RunData.LadderStep next = run.CurrentStep;
-        _subtitle.Text = $"Next: {next.Opponent} - target {run.CurrentTarget}";
+        _subtitle.Text = $"Next: {run.CurrentOpponent} - target {run.CurrentTarget}";
 
         // Above the set-end overlay and any stray animation card.
         Node parent = GetParent();
