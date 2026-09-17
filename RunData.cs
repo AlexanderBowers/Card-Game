@@ -593,6 +593,36 @@ public partial class RunData : Node
         return stage > 0 && StepIndex >= stage;
     }
 
+    // ------------------------------------------------------------------
+    // What local 2-player may offer (pass 21): only what single player has shown the player.
+    // Profile level (FurthestStep), not this run - these are things the player has SEEN, and a
+    // lost run does not unsee them.
+    // ------------------------------------------------------------------
+
+    /// True once the player has reached a fixed-target rung that plays to this target.
+    public bool TargetReached(int target)
+    {
+        int last = Mathf.Min(FurthestStep, Ladder.Length - 1);
+        for (int i = 0; i <= last; i++)
+        {
+            if (!Ladder[i].Randomised && Ladder[i].TargetScore == target) return true;
+        }
+        return false;
+    }
+
+    /// The playable effect cards whose introducing rung the player has reached, in ladder order.
+    public List<CardEffect> MetEffects()
+    {
+        List<CardEffect> met = new List<CardEffect>();
+        foreach (CardEffect effect in CardEffects.WiredEffects())
+        {
+            int stage = StageThatIntroduces(effect);
+            if (stage > 0 && stage - 1 <= FurthestStep) met.Add(effect);
+        }
+        met.Sort((a, b) => StageThatIntroduces(a).CompareTo(StageThatIntroduces(b)));
+        return met;
+    }
+
     public List<CardEffect> UnlockedEffects()
     {
         List<CardEffect> unlocked = new List<CardEffect>();

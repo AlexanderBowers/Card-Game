@@ -38,6 +38,10 @@ public static class GameSettings
     /// those rows, so this setting cannot turn them on there.
     public static bool ShowDebugButtons { get; private set; } = true;
 
+    /// Debug preview (pass 21): portrait boards drawn as an overlapping stack instead of 3x3.
+    /// Only read in debug builds.
+    public static bool StackedBoardPortrait { get; private set; }
+
     /// Raised after any change, so open screens can react (the table shows or hides debug rows).
     public static event Action Changed;
 
@@ -60,6 +64,7 @@ public static class GameSettings
             CardAnimations = cfg.GetValue("battery", "card_animations", true).AsBool();
             BatterySaver = cfg.GetValue("battery", "battery_saver", false).AsBool();
             ShowDebugButtons = cfg.GetValue("debug", "show_buttons", true).AsBool();
+            StackedBoardPortrait = cfg.GetValue("debug", "stacked_board", false).AsBool();
         }
 
         Apply();
@@ -88,6 +93,7 @@ public static class GameSettings
     public static void SetCardAnimations(bool on) { EnsureLoaded(); CardAnimations = on; Commit(); }
     public static void SetBatterySaver(bool on) { EnsureLoaded(); BatterySaver = on; Commit(); }
     public static void SetShowDebugButtons(bool on) { EnsureLoaded(); ShowDebugButtons = on; Commit(); }
+    public static void SetStackedBoardPortrait(bool on) { EnsureLoaded(); StackedBoardPortrait = on; Commit(); }
 
     private static void Commit()
     {
@@ -140,6 +146,7 @@ public static class GameSettings
         cfg.SetValue("battery", "card_animations", CardAnimations);
         cfg.SetValue("battery", "battery_saver", BatterySaver);
         cfg.SetValue("debug", "show_buttons", ShowDebugButtons);
+        cfg.SetValue("debug", "stacked_board", StackedBoardPortrait);
 
         Error err = cfg.Save(Path);
         if (err != Error.Ok) GD.PushWarning($"Could not save settings: {err}");
