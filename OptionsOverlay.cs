@@ -64,7 +64,7 @@ public partial class OptionsOverlay : Control
             box.AddChild(SectionLabel("Debug"));
             _debugButtons = Toggle("Show debug buttons", GameSettings.SetShowDebugButtons);
             box.AddChild(_debugButtons);
-            _stackedBoard = Toggle("Stacked cards (portrait)", GameSettings.SetStackedBoardPortrait);
+            _stackedBoard = Toggle("3x3 grid board (portrait)", GameSettings.SetGridBoardPortrait);
             box.AddChild(_stackedBoard);
         }
 
@@ -83,7 +83,7 @@ public partial class OptionsOverlay : Control
         _animations.SetPressedNoSignal(GameSettings.CardAnimations);
         _batterySaver.SetPressedNoSignal(GameSettings.BatterySaver);
         _debugButtons?.SetPressedNoSignal(GameSettings.ShowDebugButtons);
-        _stackedBoard?.SetPressedNoSignal(GameSettings.StackedBoardPortrait);
+        _stackedBoard?.SetPressedNoSignal(GameSettings.GridBoardPortrait);
 
         Node parent = GetParent();
         if (parent != null) parent.MoveChild(this, parent.GetChildCount() - 1);

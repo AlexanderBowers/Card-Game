@@ -1,4 +1,5 @@
 using Godot;
+using System;
 using System.Collections.Generic;
 
 /// <summary>
@@ -12,12 +13,25 @@ using System.Collections.Generic;
 ///
 /// The high-water mark only ever grows. ResetAll() clears it, and the table calls that on a real
 /// resize or rotation, where the old size means nothing any more.
+///
+/// Pass 22: a slot can be given a Measure function instead. It is asked every time and there is
+/// no high-water mark at all, so the slot can never keep a size from some earlier moment. That
+/// was the landscape bug where Draw Card / Hold turned into two tall blocks after a settings
+/// change: the button slot had remembered the height of the portrait Play / Put back / Flip Value
+/// column. The button slot is sized that way now, and its rows keep their own height rather than
+/// being stretched to fill the slot, so a wrong size could only ever show as a gap.
 /// </summary>
 public partial class StableBox : Container
 {
     private static readonly List<StableBox> Live = new List<StableBox>();
 
     private Vector2 _highWater = Vector2.Zero;
+
+    /// When set, the slot's minimum size is exactly this, every time (no high-water mark).
+    public Func<Vector2> Measure;
+
+    /// False: children fill the width but keep their own minimum height, top-aligned.
+    public bool StretchChildrenVertically = true;
 
     public override void _EnterTree() => Live.Add(this);
     public override void _ExitTree() => Live.Remove(this);
@@ -34,6 +48,8 @@ public partial class StableBox : Container
 
     public override Vector2 _GetMinimumSize()
     {
+        if (Measure != null) return Measure();
+
         Vector2 need = Vector2.Zero;
         foreach (Node node in GetChildren())
         {
@@ -51,7 +67,11 @@ public partial class StableBox : Container
         if (what != NotificationSortChildren) return;
         foreach (Node node in GetChildren())
         {
-            if (node is Control child) FitChildInRect(child, new Rect2(Vector2.Zero, Size));
+            if (node is not Control child) continue;
+            float height = StretchChildrenVertically
+                ? Size.Y
+                : Mathf.Min(Size.Y, child.GetCombinedMinimumSize().Y);
+            FitChildInRect(child, new Rect2(Vector2.Zero, new Vector2(Size.X, height)));
         }
     }
 }
