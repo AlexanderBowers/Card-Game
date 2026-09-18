@@ -15,7 +15,6 @@ public partial class OptionsOverlay : Control
     private CheckButton _animations;
     private CheckButton _batterySaver;
     private CheckButton _debugButtons;
-    private CheckButton _stackedBoard;
     private Action _onClosed;
     private bool _built;
 
@@ -64,8 +63,6 @@ public partial class OptionsOverlay : Control
             box.AddChild(SectionLabel("Debug"));
             _debugButtons = Toggle("Show debug buttons", GameSettings.SetShowDebugButtons);
             box.AddChild(_debugButtons);
-            _stackedBoard = Toggle("3x3 grid board (portrait)", GameSettings.SetGridBoardPortrait);
-            box.AddChild(_stackedBoard);
         }
 
         Button close = new Button { Text = "Close", CustomMinimumSize = new Vector2(220, 44) };
@@ -83,7 +80,6 @@ public partial class OptionsOverlay : Control
         _animations.SetPressedNoSignal(GameSettings.CardAnimations);
         _batterySaver.SetPressedNoSignal(GameSettings.BatterySaver);
         _debugButtons?.SetPressedNoSignal(GameSettings.ShowDebugButtons);
-        _stackedBoard?.SetPressedNoSignal(GameSettings.GridBoardPortrait);
 
         Node parent = GetParent();
         if (parent != null) parent.MoveChild(this, parent.GetChildCount() - 1);

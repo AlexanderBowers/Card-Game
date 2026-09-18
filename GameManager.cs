@@ -111,8 +111,6 @@ public partial class GameManager : Node
     // own while a Modifier is being previewed (pass 21).
     private ScoreLines _p1Score;
     private ScoreLines _p2Score;
-    // Portrait board drawn as an overlapping stack instead of the 3x3 grid (debug preview, pass 21).
-    private bool _boardStacked;
     private Button _p1PlayButton;
     private Button _p2PlayButton;
     private Button _p1FlipValueButton;
@@ -134,8 +132,13 @@ public partial class GameManager : Node
     private const int WinsToTakeMatch = GameState.SetsToWinMatch;  // one chip slot per win needed
     private static readonly Vector2 BaseCardSize = new Vector2(84, 114); // Kenney cards are 140x190
     private const float ModifierCardScale = 0.8f;
-    /// Portrait has the width for a bigger hand (pass 22); landscape keeps 0.8.
-    private const float ModifierCardScalePortrait = 0.95f;
+    /// Portrait: the hand is the one place the 3x3 grid can borrow height from, and a hand card is
+    /// picked up one at a time rather than read across the table, so it gives some back (pass 23:
+    /// was 0.95, which was set when the board was two rows tall and the height was there).
+    private const float ModifierCardScalePortrait = 0.86f;
+    /// The face-down deck in the middle panel: a prop, not something anyone reads, so portrait
+    /// draws it small and spends the height on the boards.
+    private const float DeckCardScalePortrait = 0.75f;
     private bool _portraitLayout;
     private const float MinCardScale = 0.6f;
     private float _cardScale = 1f;
@@ -173,7 +176,7 @@ public partial class GameManager : Node
     private static readonly Color EffectTint = new Color(1.15f, 0.85f, 1.35f);    // violet wash
     private static readonly Rect2 RegionChipWon = new Rect2(0, 194, 68, 68);    // chipGreen_border
     private static readonly Rect2 RegionChipEmpty = new Rect2(68, 0, 68, 68);   // chipWhite_border
-    private const float ChipSize = 28f;
+    private const float ChipSize = 33f; // pass 23: was 28
     private HBoxContainer _p1WinChips;
     private HBoxContainer _p2WinChips;
 
@@ -340,8 +343,8 @@ public partial class GameManager : Node
         if (!IsInsideTree()) return;
         foreach (Control row in _debugRows)
             if (IsInstanceValid(row)) row.Visible = GameSettings.ShowDebugButtons;
-        // The stacked-board preview reshapes both boards, which is a new layout: let the fixed
-        // slots settle on the new sizes rather than keep the old ones.
+        // Some settings reshape a whole side, which is a new layout: let the fixed slots settle
+        // on the new sizes rather than keep the old ones.
         StableBox.ResetAll();
         ApplyResponsiveLayout(); // also re-runs EnsureLayoutFits (the debug rows change the height)
     }
@@ -361,8 +364,10 @@ public partial class GameManager : Node
     // Left deliberately on the SMALL side: EnsureLayoutFits was built to correct an underestimate
     // (its high-water mark exists for exactly that), whereas an overestimate is never corrected -
     // it just scales the whole UI down further than it needs to go and nothing ever says so.
-    private static readonly Vector2 NeedPortrait = new Vector2(520, 1220);
-    private static readonly Vector2 NeedLandscape = new Vector2(1040, 690);
+    // Pass 23 put the third board row back (the stack is gone) and raised every font, so both
+    // grew. Still deliberately on the small side - see the note above.
+    private static readonly Vector2 NeedPortrait = new Vector2(560, 1320);
+    private static readonly Vector2 NeedLandscape = new Vector2(1080, 700);
 
     /// The GameUI MarginContainer's margin, per side, as both .tscn files set it. The estimate
     /// above is of MainLayout's contents; this is the frame around them.
@@ -428,9 +433,6 @@ public partial class GameManager : Node
             StableBox.ResetAll(); // sizes from the old window mean nothing in this one
         }
 
-        // Portrait always stacks now (pass 22); only a debug build can ask for the old grid back.
-        _boardStacked = portrait && !(OS.IsDebugBuild() && GameSettings.GridBoardPortrait);
-
         // What the viewport would be at the plain 720px base, and how much bigger it must be.
         float baseScale = Mathf.Min(win.X / BaseSide, win.Y / BaseSide);
         Vector2 baseViewport = win / Mathf.Max(baseScale, 0.001f);
@@ -488,7 +490,8 @@ public partial class GameManager : Node
 
         ResizeBoard(_p1BoardContainer);
         ResizeBoard(_p2BoardContainer);
-        if (_mainDeckPosition != null) _mainDeckPosition.CustomMinimumSize = CardSize;
+        if (_mainDeckPosition != null)
+            _mainDeckPosition.CustomMinimumSize = portrait ? CardSize * DeckCardScalePortrait : CardSize;
         _deckCountLabel?.AddThemeFontSizeOverride("font_size", Mathf.RoundToInt(CardSize.Y * 0.30f));
         RefreshModifiersUI();
         CallDeferred(MethodName.UpdateRotatorSize);
@@ -823,29 +826,31 @@ public partial class GameManager : Node
     }
 
     // ------------------------------------------------------------------
-    // Stacked board (portrait, pass 22)
+    // The board (3x3, both orientations)
     //
-    // Pass 21 tried a one-column pile behind a debug switch. Alexander's verdict, 2026-09-16:
-    // stack SIDEWAYS instead, in groups of five, and drop the floating outline for the next card.
-    // So the portrait board is now two rows of up to five cards, each covering most of the one
-    // before it and leaving its left strip - the big corner number - showing, the way a hand of
-    // playing cards is fanned. Landscape keeps the 3x3 grid. A debug build can still ask for the
-    // grid in portrait (Options > Debug) to compare.
+    // Pass 21 tried a one-column pile in portrait, pass 22 a sideways five-wide fan. Alexander's
+    // verdict, 2026-09-17: scrap the stack, the 3x3 grid is the board. So there is one board
+    // layout again - nine slots, three columns, in portrait and in landscape alike - and the
+    // debug switch that let the two be compared is gone with it.
     //
-    // Still the same nine slots in the same GridContainer: five columns and a NEGATIVE column gap.
-    // Later children draw on top, so the newest card is the one shown whole. Both rows keep their
-    // space from the start, so the board never grows as cards land; empty slots are not drawn.
+    // What the stack was really buying was SIZE: two rows instead of three left height over, and
+    // the height paid for bigger cards. The grid has to find that room somewhere else, so it is
+    // found in the things around the board instead - a smaller hand and a tighter middle panel in
+    // portrait (see ModifierCardScalePortrait and CompactPortraitPanel) - and spent here, on the
+    // board, through PortraitBoardCardScale.
     //
-    // The freed height pays for bigger cards: a stacked card is StackedCardScale of a grid card.
+    // The ceiling is arithmetic and worth writing down, because the next "make them bigger" runs
+    // into it: portrait shows TWO boards, so six card-heights plus two hands plus the middle panel
+    // have to fit one phone. That caps a portrait card at roughly 1.25x what the grid drew before
+    // this pass. Past that the rows have to overlap, which is the stack again.
     // ------------------------------------------------------------------
-    private const int StackColumns = 5;
-    private const float StackPeek = 0.46f;          // how much of each covered card stays visible
-    private const float StackedCardScale = 1.15f;
-    private const float StackedCornerFontScale = 0.27f;
     private const int GridGap = 10;                 // the .tscn h/v_separation
+    private const int GridGapPortrait = 6;          // every pixel here is a pixel off the cards
+    /// Portrait spends the room reclaimed from the hand and the panel on the board itself.
+    private const float PortraitBoardCardScale = 1.25f;
 
     /// The size of a card ON A BOARD. Everything else (deck, flying card, shop) keeps CardSize.
-    private Vector2 BoardCardSize => _boardStacked ? CardSize * StackedCardScale : CardSize;
+    private Vector2 BoardCardSize => _portraitLayout ? CardSize * PortraitBoardCardScale : CardSize;
 
     private void ResizeBoard(Control board)
     {
@@ -854,10 +859,10 @@ public partial class GameManager : Node
 
         if (board is GridContainer grid)
         {
-            grid.Columns = _boardStacked ? StackColumns : 3;
-            int hGap = _boardStacked ? -Mathf.RoundToInt(size.X * (1f - StackPeek)) : GridGap;
-            grid.AddThemeConstantOverride("h_separation", hGap);
-            grid.AddThemeConstantOverride("v_separation", GridGap);
+            grid.Columns = 3;
+            int gap = _portraitLayout ? GridGapPortrait : GridGap;
+            grid.AddThemeConstantOverride("h_separation", gap);
+            grid.AddThemeConstantOverride("v_separation", gap);
         }
 
         foreach (Node child in board.GetChildren())
@@ -867,25 +872,24 @@ public partial class GameManager : Node
                 slot.CustomMinimumSize = size;
                 foreach (Node inner in slot.GetChildren())
                 {
-                    if (inner is TextureRect view) ApplyCardSize(view, size, _boardStacked);
+                    if (inner is TextureRect view) ApplyCardSize(view, size);
                 }
             }
         }
         RefreshBoardSlots(board);
     }
 
-    /// Grid: every empty slot outline shows. Stack: none do - an outline peeking out from under
-    /// the last card read as a card that was not there (Alexander, 2026-09-16).
+    /// Every empty slot shows its outline: on a grid the nine places ARE the board, and an empty
+    /// one says how much room is left. (The stack hid them, because an outline peeking out from
+    /// under the last card read as a card that was not there.)
     private void RefreshBoardSlots(Control board)
     {
         if (board == null) return;
         foreach (Node child in board.GetChildren())
         {
             if (child is not Control slot) continue;
-            bool empty = slot.GetChildCount() == 0;
-            bool show = !_boardStacked || !empty;
             // SelfModulate: hides the slot's own outline without touching a card inside it.
-            slot.SelfModulate = show ? Colors.White : new Color(1, 1, 1, 0);
+            slot.SelfModulate = Colors.White;
         }
     }
 
@@ -2449,15 +2453,15 @@ public partial class GameManager : Node
 
         // The target is the whole difficulty curve on this ladder - it moves from 20 to 23 to 18
         // and back up - so it is the one number that cannot be a fragment of a status string.
-        _targetLabel = OverlayUi.MakeLabel(string.Empty, 30);
+        _targetLabel = OverlayUi.MakeLabel(string.Empty, 36); // pass 23: was 30
         column.AddChild(_targetLabel);
         column.MoveChild(_targetLabel, at);
 
         // Kept VISIBLE and empty rather than hidden, so the panel does not jump by a line every
         // time an effect card resolves.
-        _effectBanner = OverlayUi.MakeLabel(string.Empty, 17, new Color(0.86f, 0.74f, 1.0f));
+        _effectBanner = OverlayUi.MakeLabel(string.Empty, 21, new Color(0.86f, 0.74f, 1.0f));
         _effectBanner.AutowrapMode = TextServer.AutowrapMode.WordSmart;
-        _effectBanner.CustomMinimumSize = new Vector2(0, 46);
+        _effectBanner.CustomMinimumSize = new Vector2(0, 50); // two lines at the bigger font
         column.AddChild(_effectBanner);
         column.MoveChild(_effectBanner, at + 2);
     }
@@ -2583,17 +2587,6 @@ public partial class GameManager : Node
             RestartToMenu(); // there is no match left to go back to
         };
         row.AddChild(wipe);
-
-        // Portrait board (pass 22): the stack in rows of five, or the old 3x3 grid to compare.
-        Button board = new Button();
-        void BoardText() => board.Text = GameSettings.GridBoardPortrait ? "Board: grid" : "Board: stack";
-        BoardText();
-        board.Pressed += () =>
-        {
-            GameSettings.SetGridBoardPortrait(!GameSettings.GridBoardPortrait);
-            BoardText();
-        };
-        row.AddChild(board);
 
         // Monetization switches (monetization-spec.md), on a second row so the first stays narrow.
         HBoxContainer adRow = new HBoxContainer { Alignment = BoxContainer.AlignmentMode.Center };
@@ -3302,15 +3295,19 @@ public partial class GameManager : Node
     /// question for a screen rather than for a spec (claude/playtest-feedback-family.md).
     private const bool PipsOnMainCards = true;
 
-    private const float CornerFontScale = 0.25f;     // was 0.20 before pass 22
-    private const float CentreFontScale = 0.46f;     // was 0.36
-    private const float FlipHalfFontScale = 0.40f;   // was 0.33 - two numbers, half a card each
-    private const float EffectFontScale = 0.26f;     // was 0.22 - a mark ("->+4"), not a digit
+    // Pass 23 (Alexander, 2026-09-17: "cards and all other text need to be MUCH bigger"). These
+    // cost the layout NOTHING - the number is drawn inside a card that is already that size - so
+    // they are the one place readability is free, and they are pushed as far as the card face
+    // takes before a two-digit number runs into the border.
+    private const float CornerFontScale = 0.32f;     // was 0.25 (0.20 before pass 22)
+    private const float CentreFontScale = 0.58f;     // was 0.46
+    private const float FlipHalfFontScale = 0.50f;   // was 0.40 - two numbers, half a card each
+    private const float EffectFontScale = 0.32f;     // was 0.26 - a mark ("->+4"), not a digit
 
     private static readonly string[] CardLabelNames = { "Label", "LabelMinus", "CornerTL", "CornerBR" };
     private static readonly string[] CardCornerNames = { "CornerTL", "CornerBR" };
 
-    private void ApplyCardSize(TextureRect view, Vector2 size, bool bigCorners = false)
+    private void ApplyCardSize(TextureRect view, Vector2 size)
     {
         view.CustomMinimumSize = size;
 
@@ -3347,15 +3344,12 @@ public partial class GameManager : Node
         // Adding corners put four numbers on one card and ran them into the borders
         // (Alexander, S25 Ultra, 2026-09-15). The halves are the two-way reading there.
         //
-        // On a STACKED board the corner is the only part of a covered card that shows, so a "+/-"
-        // card gets its top-left corner there too, or it would read as a blank strip (pass 22).
-        float cornerScale = bigCorners ? StackedCornerFontScale : CornerFontScale;
-        int cornerFont = Mathf.Max(10, Mathf.RoundToInt(size.Y * cornerScale));
+        int cornerFont = Mathf.Max(10, Mathf.RoundToInt(size.Y * CornerFontScale));
         foreach (string name in CardCornerNames)
         {
             Label corner = view.GetNodeOrNull<Label>(name);
             if (corner == null) continue;
-            corner.Visible = !flipValueFace || (bigCorners && name == "CornerTL");
+            corner.Visible = !flipValueFace;
             corner.AddThemeFontSizeOverride("font_size", cornerFont);
         }
 
@@ -3384,7 +3378,7 @@ public partial class GameManager : Node
         host.AnchorTop = 0.15f;
         host.AnchorBottom = 0.85f;
 
-        float dot = Mathf.Max(4f, size.Y * 0.082f);
+        float dot = Mathf.Max(4f, size.Y * 0.098f); // pass 23: the pips ARE the number, so they grew too
         int gap = Mathf.Max(2, Mathf.RoundToInt(dot * 0.7f));
 
         VBoxContainer rows = new VBoxContainer
@@ -3501,22 +3495,24 @@ public partial class GameManager : Node
     /// wider than the screen (which was the original reason for shrinking it - a too-wide side
     /// inside a CenterContainer spills off BOTH edges and EnsureLayoutFits answers by scaling the
     /// whole UI down), so it only gives up what the extra line costs in height.
-    private const int ScoreFontSize = 34;
-    private const int ScoreFontSizeMirrored = 30;
-    private const int ActionFontSize = 30;
-    private const float ActionButtonHeight = 76f;
+    private const int ScoreFontSize = 40;          // pass 23: was 34
+    private const int ScoreFontSizeMirrored = 36;  // was 30
+    private const int ActionFontSize = 35;         // was 30
+    private const float ActionButtonHeight = 86f;  // was 76
 
-    // Portrait sizes (pass 22, Alexander 2026-09-16: "text sizes need to be increased
-    // significantly in portrait mode"). The stacked board freed the height that pays for them;
-    // EnsureLayoutFits still scales the whole table down if a small phone cannot take it.
-    private const int ScoreFontSizePortrait = 46;
-    private const int ScoreFontSizeMirroredPortrait = 40;
-    private const int ActionFontSizePortrait = 34;
-    private const float ActionButtonHeightPortrait = 84f;
-    private const int StatusFontSizePortrait = 28;
-    private const int WinsFontSizePortrait = 28;
-    private const float ChipSizePortrait = 36f;
-    private const int PanelFontSizePortrait = 28;
+    // Portrait sizes, raised again in pass 23 (Alexander, 2026-09-17: "cards and all other text
+    // need to be MUCH bigger"). EnsureLayoutFits scales the whole table down if a phone cannot
+    // take them, so this is not free: every point here is shared with the board through the fit.
+    // The score line is the expensive one - it sits in the column BESIDE the board in portrait,
+    // so its width comes straight off the cards. That is why it stops at 54 and not higher.
+    private const int ScoreFontSizePortrait = 54;          // was 46
+    private const int ScoreFontSizeMirroredPortrait = 46;  // was 40
+    private const int ActionFontSizePortrait = 38;         // was 34
+    private const float ActionButtonHeightPortrait = 92f;  // was 84
+    private const int StatusFontSizePortrait = 33;         // was 28
+    private const int WinsFontSizePortrait = 33;           // was 28
+    private const float ChipSizePortrait = 42f;            // was 36
+    private const int PanelFontSizePortrait = 34;          // was 28
 
     /// Font sizes that differ by orientation, applied on every layout pass.
     private void ApplyOrientationTypography(bool portrait)
@@ -3552,6 +3548,19 @@ public partial class GameManager : Node
             if (portrait) _setInfoLabel.AddThemeFontSizeOverride("font_size", PanelFontSizePortrait);
             else _setInfoLabel.RemoveThemeFontSizeOverride("font_size");
         }
+
+        CompactPortraitPanel(portrait);
+    }
+
+    /// The middle panel sits BETWEEN the two boards in portrait, so every pixel of padding in it
+    /// is a pixel the two 3x3 grids do not get (pass 23). Landscape keeps the roomier spacing -
+    /// it has the width, and the playtesters said it already felt right.
+    private void CompactPortraitPanel(bool portrait)
+    {
+        Control panel = _mainLayout?.GetNodeOrNull<Control>("SharedControlPanel");
+        if (panel?.GetNodeOrNull<BoxContainer>("VBoxContainer") is not BoxContainer column) return;
+        column.AddThemeConstantOverride("separation", portrait ? 4 : 10);
+        if (_mainLayout != null) _mainLayout.AddThemeConstantOverride("separation", portrait ? 6 : 12);
     }
 
     private IEnumerable<Button> ActionButtons()
@@ -3988,7 +3997,6 @@ public partial class GameManager : Node
         {
             parentContainer.AddChild(cardNode);
         }
-        if (_boardStacked) ApplyCardSize(cardNode, BoardCardSize, true);
         RefreshBoardSlots(parentContainer);
 
         // Defer the animation by one frame so Godot has time to calculate its final Grid position
@@ -4232,6 +4240,18 @@ public partial class GameManager : Node
     private VBoxContainer _setEndBox;
     private Action _setEndAction;
 
+    /// Pass 23: "set won text is much better, but ... also increase text size" (Alexander,
+    /// 2026-09-17). This panel is read once per set, from wherever the player is sitting, and it
+    /// is the only thing on screen while it is up - so it can afford to be the biggest text in
+    /// the game.
+    private const int SetEndTitleFont = 42;          // was 30
+    private const int SetEndBodyFont = 32;           // was 22
+    private const int SetEndTitleFontMirrored = 46;  // was 36
+    private const int SetEndBodyFontMirrored = 34;   // was 26
+    private const int SetEndButtonFont = 34;
+    /// The gap either side of the divider when two copies share the panel.
+    private const float SetEndMirrorGap = 34f;
+
     private void BuildSetEndOverlay()
     {
         _setEndOverlay = new Control { Visible = false, MouseFilter = Control.MouseFilterEnum.Stop };
@@ -4277,28 +4297,31 @@ public partial class GameManager : Node
             _setEndFlippedBox.PivotOffset = _setEndFlippedBox.Size / 2f;
             _setEndFlippedBox.RotationDegrees = 180f;
         };
-        _setEndFlippedTitle = MakeOverlayLabel(30);
-        _setEndFlippedBody = MakeOverlayLabel(22);
+        _setEndFlippedTitle = MakeOverlayLabel(SetEndTitleFont);
+        _setEndFlippedBody = MakeOverlayLabel(SetEndBodyFont);
         _setEndFlippedBox.AddChild(_setEndFlippedTitle);
         _setEndFlippedBox.AddChild(_setEndFlippedBody);
-        // Mirrored only: the two copies used to sit a line apart in the middle of the screen and
-        // read as one crowded block (Alexander, 2026-09-16). The panel now grows to most of the
-        // screen and these push each copy toward its own reader's end.
-        _setEndSpacerTop = new Control { Visible = false, SizeFlagsVertical = Control.SizeFlags.ExpandFill,
-                                         MouseFilter = Control.MouseFilterEnum.Ignore };
+        // Mirrored only: a gap either side of the divider so the two copies read as two blocks
+        // rather than one. Pass 22 made these EXPANDING, inside a panel stretched to 86% x 62% of
+        // the screen, which threw each copy out to its own edge; Alexander, 2026-09-17: "centre
+        // the text instead of having them at the edges". So they are FIXED gaps now, the panel
+        // hugs its content again, and the whole block sits in the middle of the screen with each
+        // player's copy the right way up for them.
+        _setEndSpacerTop = new Control { Visible = false, MouseFilter = Control.MouseFilterEnum.Ignore };
         box.AddChild(_setEndSpacerTop);
         _setEndDivider = new HSeparator { Visible = false };
         box.AddChild(_setEndDivider);
-        _setEndSpacerBottom = new Control { Visible = false, SizeFlagsVertical = Control.SizeFlags.ExpandFill,
-                                            MouseFilter = Control.MouseFilterEnum.Ignore };
+        _setEndSpacerBottom = new Control { Visible = false, MouseFilter = Control.MouseFilterEnum.Ignore };
         box.AddChild(_setEndSpacerBottom);
 
-        _setEndTitle = MakeOverlayLabel(30);
-        _setEndBody = MakeOverlayLabel(22);
+        _setEndTitle = MakeOverlayLabel(SetEndTitleFont);
+        _setEndBody = MakeOverlayLabel(SetEndBodyFont);
         box.AddChild(_setEndTitle);
         box.AddChild(_setEndBody);
 
         _setEndButton = new Button { Text = "Next Set" };
+        _setEndButton.AddThemeFontSizeOverride("font_size", SetEndButtonFont);
+        _setEndButton.CustomMinimumSize = new Vector2(260, 84);
         _setEndButton.Pressed += OnSetEndButtonPressed;
         box.AddChild(_setEndButton);
     }
@@ -4334,17 +4357,32 @@ public partial class GameManager : Node
         _setEndSpacerTop.Visible = mirrored;
         _setEndSpacerBottom.Visible = mirrored;
 
-        // Mirrored: a big panel, most of the screen, so each player's copy has room of its own.
-        Vector2 vp = GetViewport().GetVisibleRect().Size;
-        _setEndPanel.CustomMinimumSize = mirrored ? new Vector2(vp.X * 0.86f, vp.Y * 0.62f) : Vector2.Zero;
-        _setEndBox.AddThemeConstantOverride("separation", mirrored ? 22 : 14);
-        int titleFont = mirrored ? 36 : 30;
-        int bodyFont = mirrored ? 26 : 22;
+        // Centred, both forms: the panel hugs its content and the content sits in the middle of
+        // the screen. Mirrored only adds the two fixed gaps and the divider between the copies.
+        _setEndPanel.CustomMinimumSize = Vector2.Zero;
+        float gap = mirrored ? SetEndMirrorGap : 0f;
+        _setEndSpacerTop.CustomMinimumSize = new Vector2(0, gap);
+        _setEndSpacerBottom.CustomMinimumSize = new Vector2(0, gap);
+        _setEndBox.AddThemeConstantOverride("separation", mirrored ? 18 : 16);
+        int titleFont = mirrored ? SetEndTitleFontMirrored : SetEndTitleFont;
+        int bodyFont = mirrored ? SetEndBodyFontMirrored : SetEndBodyFont;
+        // One column width for every line, so both copies are the same block and each line is
+        // centred in it. The body is a sentence, and at this size a long one would otherwise push
+        // the panel wider than the phone, so it wraps instead.
+        float wrap = Mathf.Clamp(GetViewport().GetVisibleRect().Size.X * 0.78f, 340f, 620f);
         foreach (Label heading in new[] { _setEndTitle, _setEndFlippedTitle })
+        {
             heading.AddThemeFontSizeOverride("font_size", titleFont);
+            heading.AutowrapMode = TextServer.AutowrapMode.WordSmart;
+            heading.CustomMinimumSize = new Vector2(wrap, 0);
+        }
         foreach (Label text in new[] { _setEndBody, _setEndFlippedBody })
+        {
             text.AddThemeFontSizeOverride("font_size", bodyFont);
-        _setEndFlippedBox.AddThemeConstantOverride("separation", mirrored ? 14 : 6);
+            text.AutowrapMode = TextServer.AutowrapMode.WordSmart;
+            text.CustomMinimumSize = new Vector2(wrap, 0);
+        }
+        _setEndFlippedBox.AddThemeConstantOverride("separation", mirrored ? 12 : 6);
         if (mirrored)
         {
             _setEndFlippedTitle.Text = title;

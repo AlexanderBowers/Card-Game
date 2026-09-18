@@ -38,12 +38,6 @@ public static class GameSettings
     /// those rows, so this setting cannot turn them on there.
     public static bool ShowDebugButtons { get; private set; } = true;
 
-    /// Portrait boards are an overlapping stack, rows of five (pass 22). This debug switch brings
-    /// back the old 3x3 grid for comparison. Only read in debug builds. A new key on purpose: the
-    /// pass 21 "stacked_board" key is saved as false in nearly every settings file, and reading it
-    /// the other way round would have turned the new default off for everyone who had one.
-    public static bool GridBoardPortrait { get; private set; }
-
     /// Raised after any change, so open screens can react (the table shows or hides debug rows).
     public static event Action Changed;
 
@@ -66,7 +60,6 @@ public static class GameSettings
             CardAnimations = cfg.GetValue("battery", "card_animations", true).AsBool();
             BatterySaver = cfg.GetValue("battery", "battery_saver", false).AsBool();
             ShowDebugButtons = cfg.GetValue("debug", "show_buttons", true).AsBool();
-            GridBoardPortrait = cfg.GetValue("debug", "grid_board", false).AsBool();
         }
 
         Apply();
@@ -95,7 +88,6 @@ public static class GameSettings
     public static void SetCardAnimations(bool on) { EnsureLoaded(); CardAnimations = on; Commit(); }
     public static void SetBatterySaver(bool on) { EnsureLoaded(); BatterySaver = on; Commit(); }
     public static void SetShowDebugButtons(bool on) { EnsureLoaded(); ShowDebugButtons = on; Commit(); }
-    public static void SetGridBoardPortrait(bool on) { EnsureLoaded(); GridBoardPortrait = on; Commit(); }
 
     private static void Commit()
     {
@@ -148,7 +140,8 @@ public static class GameSettings
         cfg.SetValue("battery", "card_animations", CardAnimations);
         cfg.SetValue("battery", "battery_saver", BatterySaver);
         cfg.SetValue("debug", "show_buttons", ShowDebugButtons);
-        cfg.SetValue("debug", "grid_board", GridBoardPortrait);
+        // "debug/grid_board" (pass 22's stacked-board switch) is no longer written; an old
+        // settings file keeps the stale key and nothing reads it.
 
         Error err = cfg.Save(Path);
         if (err != Error.Ok) GD.PushWarning($"Could not save settings: {err}");
