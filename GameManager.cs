@@ -132,10 +132,12 @@ public partial class GameManager : Node
     private const int WinsToTakeMatch = GameState.SetsToWinMatch;  // one chip slot per win needed
     private static readonly Vector2 BaseCardSize = new Vector2(84, 114); // Kenney cards are 140x190
     private const float ModifierCardScale = 0.8f;
-    /// Portrait: the hand is the one place the 3x3 grid can borrow height from, and a hand card is
-    /// picked up one at a time rather than read across the table, so it gives some back (pass 23:
-    /// was 0.95, which was set when the board was two rows tall and the height was there).
-    private const float ModifierCardScalePortrait = 0.86f;
+    /// Portrait has the width for a bigger hand. Pass 23 shrank this to 0.86 to buy height for
+    /// the 3x3 board; Alexander, 2026-09-17: "modifier placement was shifted a little, it was
+    /// better where it was before" - the hand is right-aligned, so a smaller card moves its left
+    /// edge inward and the whole row appears to shift. Back to 0.95, and the height comes from
+    /// the middle panel instead.
+    private const float ModifierCardScalePortrait = 0.95f;
     /// The face-down deck in the middle panel: a prop, not something anyone reads, so portrait
     /// draws it small and spends the height on the boards.
     private const float DeckCardScalePortrait = 0.75f;
@@ -490,8 +492,7 @@ public partial class GameManager : Node
 
         ResizeBoard(_p1BoardContainer);
         ResizeBoard(_p2BoardContainer);
-        if (_mainDeckPosition != null)
-            _mainDeckPosition.CustomMinimumSize = portrait ? CardSize * DeckCardScalePortrait : CardSize;
+        ApplyDeckOrientation(portrait);
         _deckCountLabel?.AddThemeFontSizeOverride("font_size", Mathf.RoundToInt(CardSize.Y * 0.30f));
         RefreshModifiersUI();
         CallDeferred(MethodName.UpdateRotatorSize);
@@ -848,6 +849,54 @@ public partial class GameManager : Node
     private const int GridGapPortrait = 6;          // every pixel here is a pixel off the cards
     /// Portrait spends the room reclaimed from the hand and the panel on the board itself.
     private const float PortraitBoardCardScale = 1.25f;
+
+    // ------------------------------------------------------------------
+    // The face-down deck in the middle panel
+    //
+    // Portrait lays it on its SIDE (Alexander, 2026-09-17: "deck should be rotated in portrait
+    // mode to be horizontal"). The middle panel is a wide, short strip between the two boards
+    // there, so an upright card is the one thing in it fighting the shape of its own space; on its
+    // side it costs the strip roughly a third of the height and reads as a deck on a table edge.
+    //
+    // A container resets its children's rotation on every layout pass - the same fact that gave
+    // Player 2 its Holder/Rotator pair - so the node that TURNS cannot be the row's direct child.
+    // A plain holder stands in the row instead, reserving the footprint the turned card occupies,
+    // and the deck sits inside it unmanaged.
+    // ------------------------------------------------------------------
+    private Control _deckHolder;
+
+    private void ApplyDeckOrientation(bool portrait)
+    {
+        if (_mainDeckPosition == null) return;
+        Vector2 size = portrait ? CardSize * DeckCardScalePortrait : CardSize;
+
+        if (_deckHolder == null && _mainDeckPosition.GetParent() is Control row)
+        {
+            int at = _mainDeckPosition.GetIndex();
+            _deckHolder = new Control
+            {
+                Name = "DeckHolder",
+                MouseFilter = Control.MouseFilterEnum.Ignore,
+                SizeFlagsVertical = Control.SizeFlags.ShrinkCenter,
+            };
+            row.AddChild(_deckHolder);
+            row.MoveChild(_deckHolder, at);
+            row.RemoveChild(_mainDeckPosition);
+            _deckHolder.AddChild(_mainDeckPosition);
+        }
+
+        _mainDeckPosition.CustomMinimumSize = size;
+        _mainDeckPosition.Size = size;
+        _mainDeckPosition.PivotOffset = size / 2f; // turn about the middle, so the centre holds
+
+        if (_deckHolder == null) return;
+
+        // What the card occupies once it has turned: its own size with the axes swapped.
+        Vector2 footprint = portrait ? new Vector2(size.Y, size.X) : size;
+        _deckHolder.CustomMinimumSize = footprint;
+        _mainDeckPosition.RotationDegrees = portrait ? 90f : 0f;
+        _mainDeckPosition.Position = (footprint - size) / 2f;
+    }
 
     /// The size of a card ON A BOARD. Everything else (deck, flying card, shop) keeps CardSize.
     private Vector2 BoardCardSize => _portraitLayout ? CardSize * PortraitBoardCardScale : CardSize;
@@ -3326,10 +3375,16 @@ public partial class GameManager : Node
     // cost the layout NOTHING - the number is drawn inside a card that is already that size - so
     // they are the one place readability is free, and they are pushed as far as the card face
     // takes before a two-digit number runs into the border.
-    private const float CornerFontScale = 0.32f;     // was 0.25 (0.20 before pass 22)
-    private const float CentreFontScale = 0.58f;     // was 0.46
-    private const float FlipHalfFontScale = 0.50f;   // was 0.40 - two numbers, half a card each
-    private const float EffectFontScale = 0.32f;     // was 0.26 - a mark ("->+4"), not a digit
+    // Pass 25 splits the corner in two. On a MAIN-DECK card the pips are the middle and the
+    // corner number is the only text there is, so it can be huge; on a Modifier the corner sits
+    // under a big centre number and is a second reading of it, so it stays a corner.
+    // "Reduce size of center icons if necessary to fit larger text" (Alexander, 2026-09-17) - so
+    // the pips gave way, here and in BuildPips.
+    private const float CornerFontScale = 0.34f;        // a card that also shows a centre number
+    private const float PippedCornerFontScale = 0.44f;  // a main-deck card: the corner IS the number
+    private const float CentreFontScale = 0.62f;     // was 0.58
+    private const float FlipHalfFontScale = 0.52f;   // was 0.50 - two numbers, half a card each
+    private const float EffectFontScale = 0.34f;     // was 0.32 - a mark ("->+4"), not a digit
 
     private static readonly string[] CardLabelNames = { "Label", "LabelMinus", "CornerTL", "CornerBR" };
     private static readonly string[] CardCornerNames = { "CornerTL", "CornerBR" };
@@ -3371,7 +3426,8 @@ public partial class GameManager : Node
         // Adding corners put four numbers on one card and ran them into the borders
         // (Alexander, S25 Ultra, 2026-09-15). The halves are the two-way reading there.
         //
-        int cornerFont = Mathf.Max(10, Mathf.RoundToInt(size.Y * CornerFontScale));
+        int cornerFont = Mathf.Max(10, Mathf.RoundToInt(
+            size.Y * (pipped ? PippedCornerFontScale : CornerFontScale)));
         foreach (string name in CardCornerNames)
         {
             Label corner = view.GetNodeOrNull<Label>(name);
@@ -3400,12 +3456,14 @@ public partial class GameManager : Node
         Control host = new Control { Name = "Pips", MouseFilter = Control.MouseFilterEnum.Ignore };
         view.AddChild(host);
         host.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
-        host.AnchorLeft = 0.26f;
-        host.AnchorRight = 0.74f;
-        host.AnchorTop = 0.15f;
-        host.AnchorBottom = 0.85f;
+        // Narrower and shorter than it was: the corner numbers grew into the space this used to
+        // take, and a pip overlapping a digit is worse than a smaller pip.
+        host.AnchorLeft = 0.30f;
+        host.AnchorRight = 0.70f;
+        host.AnchorTop = 0.26f;
+        host.AnchorBottom = 0.74f;
 
-        float dot = Mathf.Max(4f, size.Y * 0.098f); // pass 23: the pips ARE the number, so they grew too
+        float dot = Mathf.Max(4f, size.Y * 0.058f); // pass 25: the corner number is the number now
         int gap = Mathf.Max(2, Mathf.RoundToInt(dot * 0.7f));
 
         VBoxContainer rows = new VBoxContainer
@@ -3760,6 +3818,7 @@ public partial class GameManager : Node
     }
 
     private Control _tableMenuOverlay;
+    private VBoxContainer _tableMenuBox;
 
     private void BuildTableMenu()
     {
@@ -3772,8 +3831,8 @@ public partial class GameManager : Node
         _tableMenuOverlay.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
         OverlayUi.AddDim(_tableMenuOverlay);
 
-        VBoxContainer box = OverlayUi.AddPanel(_tableMenuOverlay);
-        box.AddChild(OverlayUi.MakeLabel("Menu", 30));
+        VBoxContainer box = OverlayUi.AddPanel(_tableMenuOverlay, contentMargin: 30, separation: 12);
+        box.AddChild(OverlayUi.MakeLabel("Menu", MenuTitleFont));
 
         Button howTo = new Button { Text = "How to Play" };
         howTo.Pressed += () => { HideTableMenu(); ShowHowToPlay(); };
@@ -3816,6 +3875,8 @@ public partial class GameManager : Node
         close.Pressed += HideTableMenu;
         box.AddChild(close);
 
+        _tableMenuBox = box; // re-sized on every open: MenuButtonWidth follows the viewport
+
         // ...and the one button left on the table, in the slot the Restart / Exit row had.
         Button open = new Button { Text = "Menu" };
         open.Pressed += ShowTableMenu;
@@ -3823,9 +3884,26 @@ public partial class GameManager : Node
         if (systemRow.GetParent() == column) column.MoveChild(open, systemRow.GetIndex());
     }
 
+    /// One size for every button on a full-screen menu. See the MenuButton* constants for why
+    /// this can be generous where the table cannot.
+    private void StyleMenuButton(Button button)
+    {
+        if (button == null) return;
+        button.AddThemeFontSizeOverride("font_size", MenuButtonFont);
+        button.CustomMinimumSize = new Vector2(MenuButtonWidth, MenuButtonHeight);
+    }
+
     private void ShowTableMenu()
     {
         if (_tableMenuOverlay == null) return;
+
+        // Every button in here, on every open - including Restart, Main Menu and the mirror
+        // toggle, which were MOVED in from the table and so arrive carrying the table's sizing.
+        // Done here rather than at build time because MenuButtonWidth follows the viewport, and
+        // the viewport changes with the orientation and with how far portrait has zoomed in.
+        if (_tableMenuBox != null)
+            foreach (Node child in _tableMenuBox.GetChildren())
+                if (child is Button menuButton) StyleMenuButton(menuButton);
 
         // The toggle only means anything with two people at one device.
         if (_mirrorToggle != null) _mirrorToggle.Visible = !_isVsBot;
@@ -4492,7 +4570,7 @@ public partial class GameManager : Node
         _startMenuOverlay.AddChild(backdrop);
         backdrop.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
 
-        _startMenuBox = OverlayUi.AddPanel(_startMenuOverlay, contentMargin: 28, separation: 10);
+        _startMenuBox = OverlayUi.AddPanel(_startMenuOverlay, contentMargin: 32, separation: 12);
 
         _collectionOverlay = new CollectionOverlay();
         AddChild(_collectionOverlay);
@@ -4556,14 +4634,17 @@ public partial class GameManager : Node
         // copy of the title to go stale.
         string title = ProjectSettings.GetSetting("application/config/name").AsString();
         if (string.IsNullOrWhiteSpace(title)) title = "Card Game";
-        _startMenuBox.AddChild(OverlayUi.MakeLabel(title, 40));
+        _startMenuBox.AddChild(OverlayUi.MakeLabel(title, MenuTitleFont));
 
         RunData run = RunData.Instance;
         bool runInProgress = run != null && run.RunActive && !run.RunComplete;
 
-        _startMenuBox.AddChild(OverlayUi.MakeLabel(
+        Label blurb = OverlayUi.MakeLabel(
             runInProgress ? "A climb is in progress." : "Climb the ladder, or play someone across the table.",
-            15, OverlayUi.Muted));
+            MenuNoteFont, OverlayUi.Muted);
+        blurb.AutowrapMode = TextServer.AutowrapMode.WordSmart;
+        blurb.CustomMinimumSize = new Vector2(MenuButtonWidth, 0);
+        _startMenuBox.AddChild(blurb);
         _startMenuBox.AddChild(MenuSpacer());
 
         // First, and named with the rung, because a player who left mid-ladder came back for this
@@ -4635,8 +4716,6 @@ public partial class GameManager : Node
         if (run != null)
             AddMenuButton($"Collection   {run.CollectionFound}/{RunData.CollectionKeys.Length}", null, OpenCollection);
 
-        AddStoreRow();
-
         // Quit everywhere but iOS (Alexander, 2026-09-16: "start menu should have quit game").
         // Android allows an app to close itself; Apple's review guidelines reject a quit button,
         // and iOS apps are left to the home gesture.
@@ -4647,46 +4726,13 @@ public partial class GameManager : Node
         if (run != null && (run.Medals > 0 || run.FurthestStep > 0))
         {
             _startMenuBox.AddChild(MenuSpacer());
-            _startMenuBox.AddChild(OverlayUi.MakeLabel(
+            Label banked = OverlayUi.MakeLabel(
                 $"{run.Medals} medals   -   {run.Inventory.Count} cards owned   -   best: match {run.FurthestStep + 1}",
-                13, OverlayUi.Muted));
+                MenuNoteFont, OverlayUi.Muted);
+            banked.AutowrapMode = TextServer.AutowrapMode.WordSmart;
+            banked.CustomMinimumSize = new Vector2(MenuButtonWidth, 0);
+            _startMenuBox.AddChild(banked);
         }
-    }
-
-    /// Remove Ads and Restore Purchases (monetization-spec.md §4), side by side so they cost the
-    /// menu one row. Only where there is a store to talk to: no ads on this platform means nothing
-    /// to remove, and the stub store only exists in debug builds.
-    private void AddStoreRow()
-    {
-        if (!PurchaseService.StoreAvailable) return;
-
-        HBoxContainer row = new HBoxContainer { Alignment = BoxContainer.AlignmentMode.Center };
-        row.AddThemeConstantOverride("separation", 8);
-        row.CustomMinimumSize = new Vector2(MenuButtonWidth, 0);
-        _startMenuBox.AddChild(row);
-
-        Button StoreButton(string text, Action onPressed)
-        {
-            Button button = new Button { Text = text, CustomMinimumSize = new Vector2(0, 40) };
-            button.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
-            button.AddThemeFontSizeOverride("font_size", 15);
-            button.Pressed += onPressed;
-            row.AddChild(button);
-            return button;
-        }
-
-        if (PurchaseService.OwnsNoAds)
-        {
-            row.AddChild(OverlayUi.MakeLabel("No Ads - thank you!", 15, OverlayUi.Muted));
-        }
-        else
-        {
-            StoreButton($"Remove Ads  {PurchaseService.NoAdsPriceLabel}",
-                        () => PurchaseService.BuyNoAds(_ => FillStartMenu()));
-        }
-
-        if (PurchaseService.ShowRestoreButton)
-            StoreButton("Restore Purchases", () => PurchaseService.RestorePurchases(_ => FillStartMenu()));
     }
 
     /// One row of the menu: a wide button, and optionally a line under it saying what it does. The
@@ -4694,14 +4740,14 @@ public partial class GameManager : Node
     /// Run button has exactly one string to rewrite.
     private Button AddMenuButton(string text, string note, Action onPressed)
     {
-        Button button = new Button { Text = text, CustomMinimumSize = new Vector2(MenuButtonWidth, 44) };
-        button.AddThemeFontSizeOverride("font_size", 18);
+        Button button = new Button { Text = text, CustomMinimumSize = new Vector2(MenuButtonWidth, MenuButtonHeight) };
+        button.AddThemeFontSizeOverride("font_size", MenuButtonFont);
         if (onPressed != null) button.Pressed += onPressed;
         _startMenuBox.AddChild(button);
 
         if (!string.IsNullOrEmpty(note))
         {
-            Label label = OverlayUi.MakeLabel(note, 12, OverlayUi.Muted);
+            Label label = OverlayUi.MakeLabel(note, MenuNoteFont, OverlayUi.Muted);
             label.AutowrapMode = TextServer.AutowrapMode.WordSmart;
             label.CustomMinimumSize = new Vector2(MenuButtonWidth, 0);
             _startMenuBox.AddChild(label);
@@ -4710,7 +4756,25 @@ public partial class GameManager : Node
         return button;
     }
 
-    private const int MenuButtonWidth = 340;
+    // Pass 25 (Alexander, 2026-09-17: "menu text needs to be significantly enlarged"). These are
+    // FREE in a way the table's fonts are not: every menu is a full-screen overlay over the table
+    // rather than part of MainLayout, so EnsureLayoutFits never measures them and nothing shrinks
+    // to pay for them. The only ceiling is the panel fitting a phone held upright, which at a
+    // 720-wide base leaves room for a 420 button and its margins.
+    /// The widest a menu button may get, and how much air is left either side of it. The width
+    /// is CLAMPED to the viewport rather than fixed, because portrait enlarges the whole UI when
+    /// there is room (EnsureLayoutFits) - which shrinks the design-pixel viewport, sometimes well
+    /// below the 720 base. A fixed 420 would hang off both edges of a table zoomed that far in.
+    private const float MenuButtonWidthMax = 460f; // was a fixed 340
+    private const float MenuSideGutter = 44f;
+    private float MenuButtonWidth => Mathf.Clamp(
+        GetViewport().GetVisibleRect().Size.X - 2f * MenuSideGutter, 240f, MenuButtonWidthMax);
+    private const float MenuButtonHeight = 62; // was 44
+    private const int MenuButtonFont = 26;     // was 18
+    private const int MenuTitleFont = 52;      // was 40
+    private const int MenuNoteFont = 17;       // was 12
+    private const int MenuHeadingFont = 34;    // a sub-page's title (Local 2-Player, Endless Scores)
+    private const int MenuSectionFont = 26;    // a heading inside a sub-page (Target, Specials)
 
     private static Control MenuSpacer() => new Control { CustomMinimumSize = new Vector2(0, 8) };
 
@@ -4759,12 +4823,12 @@ public partial class GameManager : Node
         }
 
         OverlayUi.ClearChildren(_startMenuBox);
-        _startMenuBox.AddChild(OverlayUi.MakeLabel("Local 2-Player", 34));
+        _startMenuBox.AddChild(OverlayUi.MakeLabel("Local 2-Player", MenuHeadingFont));
         _startMenuBox.AddChild(MenuSpacer());
 
         if (targets.Count > 1)
         {
-            _startMenuBox.AddChild(OverlayUi.MakeLabel("Target", 20));
+            _startMenuBox.AddChild(OverlayUi.MakeLabel("Target", MenuSectionFont));
             HBoxContainer targetRow = AddChoiceRow();
             foreach (int target in targets)
             {
@@ -4777,7 +4841,7 @@ public partial class GameManager : Node
         if (effects.Count > 0)
         {
             _startMenuBox.AddChild(MenuSpacer());
-            _startMenuBox.AddChild(OverlayUi.MakeLabel("Special Modifiers", 20));
+            _startMenuBox.AddChild(OverlayUi.MakeLabel("Special Modifiers", MenuSectionFont));
             HBoxContainer specials = AddChoiceRow();
             AddChoice(specials, "Off", !_local2PlayerSpecials, () => _local2PlayerSpecials = false);
             AddChoice(specials, "On", _local2PlayerSpecials, () => _local2PlayerSpecials = true);
@@ -4786,7 +4850,7 @@ public partial class GameManager : Node
             foreach (CardEffect effect in effects) names.Add(CardEffects.Label(effect));
             Label note = OverlayUi.MakeLabel(
                 $"On: each hand has one special Modifier - {string.Join(", ", names)}.",
-                12, OverlayUi.Muted);
+                MenuNoteFont, OverlayUi.Muted);
         note.AutowrapMode = TextServer.AutowrapMode.WordSmart;
         note.HorizontalAlignment = HorizontalAlignment.Center;
             note.CustomMinimumSize = new Vector2(MenuButtonWidth, 0);
@@ -4807,9 +4871,9 @@ public partial class GameManager : Node
         if (run == null) { FillStartMenu(); return; }
 
         OverlayUi.ClearChildren(_startMenuBox);
-        _startMenuBox.AddChild(OverlayUi.MakeLabel("Endless Scores", 34));
+        _startMenuBox.AddChild(OverlayUi.MakeLabel("Endless Scores", MenuHeadingFont));
         _startMenuBox.AddChild(OverlayUi.MakeLabel(
-            "How many matches in a row, before the run ended.", 14, OverlayUi.Muted));
+            "How many matches in a row, before the run ended.", MenuNoteFont, OverlayUi.Muted));
         _startMenuBox.AddChild(MenuSpacer());
 
         for (int i = 0; i < run.EndlessScores.Count; i++)
@@ -4822,19 +4886,19 @@ public partial class GameManager : Node
             row.AddThemeConstantOverride("separation", 10);
             _startMenuBox.AddChild(row);
 
-            Label place = OverlayUi.MakeLabel($"{i + 1}.", 20, best ? OverlayUi.MedalGold : OverlayUi.Muted);
-            place.CustomMinimumSize = new Vector2(34, 0);
+            Label place = OverlayUi.MakeLabel($"{i + 1}.", 26, best ? OverlayUi.MedalGold : OverlayUi.Muted);
+            place.CustomMinimumSize = new Vector2(44, 0);
             place.HorizontalAlignment = HorizontalAlignment.Right;
             row.AddChild(place);
 
-            Label streak = OverlayUi.MakeLabel($"{score.Streak}", 26, best ? OverlayUi.MedalGold : Colors.White);
-            streak.CustomMinimumSize = new Vector2(56, 0);
+            Label streak = OverlayUi.MakeLabel($"{score.Streak}", 34, best ? OverlayUi.MedalGold : Colors.White);
+            streak.CustomMinimumSize = new Vector2(72, 0);
             streak.HorizontalAlignment = HorizontalAlignment.Left;
             row.AddChild(streak);
 
             Label when = OverlayUi.MakeLabel(
                 score.UnixTime > 0 ? Time.GetDateStringFromUnixTime(score.UnixTime) : string.Empty,
-                13, OverlayUi.Muted);
+                MenuNoteFont, OverlayUi.Muted);
             when.HorizontalAlignment = HorizontalAlignment.Left;
             when.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
             row.AddChild(when);
@@ -4844,7 +4908,7 @@ public partial class GameManager : Node
         Label footer = OverlayUi.MakeLabel(
             $"Best streak {run.EndlessBest}.   The rules are re-rolled every match; "
             + $"past a streak of {RunData.EndlessThirdRuleStreak} the opponent carries three specials.",
-            12, OverlayUi.Muted);
+            MenuNoteFont, OverlayUi.Muted);
         footer.AutowrapMode = TextServer.AutowrapMode.WordSmart;
         footer.CustomMinimumSize = new Vector2(MenuButtonWidth, 0);
         _startMenuBox.AddChild(footer);
@@ -4900,9 +4964,9 @@ public partial class GameManager : Node
             ToggleMode = true,
             ButtonGroup = group,
             ButtonPressed = selected,
-            CustomMinimumSize = new Vector2(96, 44),
+            CustomMinimumSize = new Vector2(120, 58),
         };
-        button.AddThemeFontSizeOverride("font_size", 18);
+        button.AddThemeFontSizeOverride("font_size", 26);
         button.Toggled += pressed => { if (pressed) onChosen(); };
         row.AddChild(button);
     }
@@ -5117,7 +5181,7 @@ public partial class GameManager : Node
         switch (step)
         {
             case 0: return _p1Score?.Root ?? _p1ScoreLabel;
-            case 1: return _mainDeckPosition;
+            case 1: return _deckHolder ?? _mainDeckPosition; // the holder is the turned deck's footprint
             case 2: return _p1ModifierContainer;
             case 3: return _p1ActionRow;
             case 4: return _p1WinsLabel?.GetParent() as Control;
