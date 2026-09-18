@@ -2406,8 +2406,9 @@ public partial class GameManager : Node
             // The cards are the progress, and they survive - say so plainly, on the screen where
             // losing is most likely to make someone put the game down.
             if (run.EndlessStreak > 0 || run.Endless)
-                return $"\n\nYour endless streak ends at {run.EndlessStreak} (best {run.EndlessBest}). " +
-                       $"Every card you own ({run.Inventory.Count}) and your {run.Medals} medals are still yours.";
+                return $"\n\nYour endless streak ends at {run.EndlessStreak} (best {run.EndlessBest})." +
+                       EndlessBoardLine(run) +
+                       $"\nEvery card you own ({run.Inventory.Count}) and your {run.Medals} medals are still yours.";
             return $"\n\nThe run ends here. Every card you have unlocked ({run.Inventory.Count}) is " +
                    $"still yours, along with {run.Medals} medals.\nPlay Again starts a fresh climb " +
                    $"from stage 1 with your deck intact.";
@@ -2428,6 +2429,32 @@ public partial class GameManager : Node
                FinaleRulesLine(run, "\n") +
                "\nThe market is open first.";
     }
+
+    /// Where the streak just banked landed on the endless board, if it landed at all. CompleteMatch
+    /// has already written it, so the run being reported on is row 0 when it is the new best.
+    private static string EndlessBoardLine(RunData run)
+    {
+        List<RunData.EndlessScore> board = run.EndlessScores;
+        if (board.Count == 0) return string.Empty;
+
+        for (int i = 0; i < board.Count; i++)
+        {
+            if (board[i].Streak != run.EndlessStreak) continue;
+            if (i == 0) return "\nThat is your best yet - it tops the endless board.";
+            return $"\nThat is {Ordinal(i + 1)} on the endless board.";
+        }
+        return $"\nNot enough for the board - {board[board.Count - 1].Streak} is the score to beat.";
+    }
+
+    private static string Ordinal(int place) => place switch
+    {
+        1 => "first",
+        2 => "second",
+        3 => "third",
+        4 => "fourth",
+        5 => "fifth",
+        _ => $"{place}th",
+    };
 
     /// "Stage 3/10 - Silver" while a run is on; nothing otherwise. The rank is named here because
     /// the table is already wearing its colour - the words label what the player can see.
@@ -4593,6 +4620,11 @@ public partial class GameManager : Node
                     RunData.Instance.StartEndless();
                     MenuStartRun(fresh: false);
                 });
+
+            // Only once there is something on it. An empty board on a player who has unlocked
+            // endless but never played it is a row that explains nothing.
+            if (run.EndlessScores.Count > 0)
+                AddMenuButton("Endless Scores", null, FillEndlessScores);
         }
 
         AddMenuButton("Local 2-Player", null, FillLocal2PlayerSetup);
@@ -4763,6 +4795,61 @@ public partial class GameManager : Node
 
         _startMenuBox.AddChild(MenuSpacer());
         AddMenuButton("Deal", null, MenuStartLocal2Player);
+        AddMenuButton("Back", null, FillStartMenu);
+    }
+
+    /// The endless board (pass 24). A page of the start menu rather than an overlay of its own:
+    /// it is read from the menu, it is five rows long, and FillLocal2PlayerSetup already proved
+    /// the pattern - swap the menu's contents, and Back swaps them straight back.
+    private void FillEndlessScores()
+    {
+        RunData run = RunData.Instance;
+        if (run == null) { FillStartMenu(); return; }
+
+        OverlayUi.ClearChildren(_startMenuBox);
+        _startMenuBox.AddChild(OverlayUi.MakeLabel("Endless Scores", 34));
+        _startMenuBox.AddChild(OverlayUi.MakeLabel(
+            "How many matches in a row, before the run ended.", 14, OverlayUi.Muted));
+        _startMenuBox.AddChild(MenuSpacer());
+
+        for (int i = 0; i < run.EndlessScores.Count; i++)
+        {
+            RunData.EndlessScore score = run.EndlessScores[i];
+            bool best = i == 0;
+
+            HBoxContainer row = new HBoxContainer();
+            row.CustomMinimumSize = new Vector2(MenuButtonWidth, 0);
+            row.AddThemeConstantOverride("separation", 10);
+            _startMenuBox.AddChild(row);
+
+            Label place = OverlayUi.MakeLabel($"{i + 1}.", 20, best ? OverlayUi.MedalGold : OverlayUi.Muted);
+            place.CustomMinimumSize = new Vector2(34, 0);
+            place.HorizontalAlignment = HorizontalAlignment.Right;
+            row.AddChild(place);
+
+            Label streak = OverlayUi.MakeLabel($"{score.Streak}", 26, best ? OverlayUi.MedalGold : Colors.White);
+            streak.CustomMinimumSize = new Vector2(56, 0);
+            streak.HorizontalAlignment = HorizontalAlignment.Left;
+            row.AddChild(streak);
+
+            Label when = OverlayUi.MakeLabel(
+                score.UnixTime > 0 ? Time.GetDateStringFromUnixTime(score.UnixTime) : string.Empty,
+                13, OverlayUi.Muted);
+            when.HorizontalAlignment = HorizontalAlignment.Left;
+            when.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
+            row.AddChild(when);
+        }
+
+        _startMenuBox.AddChild(MenuSpacer());
+        Label footer = OverlayUi.MakeLabel(
+            $"Best streak {run.EndlessBest}.   The rules are re-rolled every match; "
+            + $"past a streak of {RunData.EndlessThirdRuleStreak} the opponent carries three specials.",
+            12, OverlayUi.Muted);
+        footer.AutowrapMode = TextServer.AutowrapMode.WordSmart;
+        footer.CustomMinimumSize = new Vector2(MenuButtonWidth, 0);
+        _startMenuBox.AddChild(footer);
+
+        _startMenuBox.AddChild(MenuSpacer());
         AddMenuButton("Back", null, FillStartMenu);
     }
 

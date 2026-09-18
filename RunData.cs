@@ -344,6 +344,60 @@ public partial class RunData : Node
     public bool EndlessUnlocked => FurthestStep >= Ladder.Length;
 
     // ------------------------------------------------------------------
+    // The endless scoreboard (pass 24)
+    //
+    // EndlessBest is one number, and one number cannot say "I have been close three times". The
+    // playtest asked for endless to have "its own high-score list" - so every endless run that
+    // ends with a streak on it is written down with the date, and the best five are kept.
+    // The streak IS the score; the target it died on was noise on the row (Alexander, 2026-09-17).
+    // Local only: the online list in the GDD is a stretch goal, and this is
+    // the shape it will eventually upload.
+    //
+    // A run is BANKED once, whenever it stops being playable: lost, given up for a new run, or
+    // given up for a fresh endless run. EndlessRunBanked is what stops the same streak landing on
+    // the board twice, and it is saved, because quitting the app between the loss and the next
+    // menu is an ordinary thing to do.
+    // ------------------------------------------------------------------
+    public const int EndlessScoreboardSize = 5;
+
+    public readonly struct EndlessScore
+    {
+        public readonly int Streak;
+        public readonly long UnixTime;
+
+        public EndlessScore(int streak, long unixTime)
+        {
+            Streak = streak;
+            UnixTime = unixTime;
+        }
+    }
+
+    /// Best first, and for a tie the more recent run first. Never longer than EndlessScoreboardSize.
+    public List<EndlessScore> EndlessScores { get; } = new List<EndlessScore>();
+
+    /// Whether the endless run in progress (or just lost) has already been written to the board.
+    public bool EndlessRunBanked { get; private set; }
+
+    /// Writes the endless run in progress onto the board, if it earned a place. Safe to call from
+    /// anywhere a run can end; the second call for the same run does nothing.
+    private void BankEndlessRun()
+    {
+        if (!Endless || EndlessRunBanked || EndlessStreak <= 0) return;
+        EndlessRunBanked = true;
+        EndlessScores.Add(new EndlessScore(EndlessStreak, (long)Time.GetUnixTimeFromSystem()));
+        SortEndlessScores();
+    }
+
+    private void SortEndlessScores()
+    {
+        EndlessScores.Sort((a, b) => a.Streak != b.Streak
+            ? b.Streak.CompareTo(a.Streak)
+            : b.UnixTime.CompareTo(a.UnixTime));
+        if (EndlessScores.Count > EndlessScoreboardSize)
+            EndlessScores.RemoveRange(EndlessScoreboardSize, EndlessScores.Count - EndlessScoreboardSize);
+    }
+
+    // ------------------------------------------------------------------
     // The rescue offer (claude/monetization-spec.md §3)
     //
     // Ladder stages 4-10 and endless: a bust that would lose the set rolls RescueChance, at most
@@ -374,10 +428,21 @@ public partial class RunData : Node
         return (Math.Max(15, 18 - widen), Math.Min(30, 25 + widen));
     }
 
+    /// The range above stops widening at a streak of 10, and after that endless stopped getting
+    /// harder at all - every match past it was the same match (pass 24). Past this streak the
+    /// opponent carries a THIRD rolled effect card instead of two, which fills its whole hand:
+    /// one "+/-" and three specials, no ordinary cards. That is the last escalation there is, and
+    /// it is deliberately the last one - it is bounded (each effect is spent when it is played)
+    /// and it is announced, because the rolled rules are printed over the table before the deal.
+    public const int EndlessThirdRuleStreak = 12;
+
+    public static int EndlessRuleCount(int streak) => streak >= EndlessThirdRuleStreak ? 3 : 2;
+
     public void StartEndless()
     {
-        StartNewRun();          // the collection check, the deck repair, the cleared roll
+        StartNewRun();          // banks any endless run being given up, then resets the rest
         Endless = true;
+        EndlessRunBanked = false;
         EndlessStreak = 0;
         StepIndex = Ladder.Length - 1;
         EnsureRuleset();
@@ -415,24 +480,35 @@ public partial class RunData : Node
     public List<CardEffect> CurrentRolledEffects =>
         (CurrentStep.Randomised && RolledStep == StepIndex) ? RolledEffects : null;
 
-    /// A target away from the familiar 20, and two different effect cards - never Copy with
+    /// A target away from the familiar 20, and `count` different effect cards - never Copy with
     /// Trade Totals, which are both "the AI undoes the draw that ruined it" and together read as
     /// the game cheating rather than as two rules.
-    public static Ruleset RollRuleset(Random rng, int minTarget = 18, int maxTarget = 25)
+    ///
+    /// `count` is 2 everywhere except deep in an endless streak (EndlessRuleCount). It is clamped
+    /// to what the wired pool can actually supply, so adding or removing a card never rolls a
+    /// ruleset with a hole in it.
+    public static Ruleset RollRuleset(Random rng, int minTarget = 18, int maxTarget = 25, int count = 2)
     {
         int target;
         do target = rng.Next(minTarget, maxTarget + 1); while (target == 20 && minTarget < maxTarget);
 
         List<CardEffect> pool = CardEffects.WiredEffects();
-        CardEffect first = pool[rng.Next(pool.Count)];
-        pool.Remove(first);
-        if (first == CardEffect.Copy) pool.Remove(CardEffect.TradeTotals);
-        if (first == CardEffect.TradeTotals) pool.Remove(CardEffect.Copy);
-        if (pool.Count == 0) return new Ruleset(target, new[] { first });
-        CardEffect second = pool[rng.Next(pool.Count)];
+        List<CardEffect> picked = new List<CardEffect>();
+        int wanted = Math.Max(1, count);
+
+        while (picked.Count < wanted && pool.Count > 0)
+        {
+            CardEffect next = pool[rng.Next(pool.Count)];
+            picked.Add(next);
+            pool.Remove(next);
+            // The exclusion is between these two specifically, and it applies however many are
+            // rolled: whichever of the pair comes out first, the other stops being available.
+            if (next == CardEffect.Copy) pool.Remove(CardEffect.TradeTotals);
+            if (next == CardEffect.TradeTotals) pool.Remove(CardEffect.Copy);
+        }
 
         // Stage order, so the finale names them the way the ladder taught them.
-        CardEffect[] effects = { first, second };
+        CardEffect[] effects = picked.ToArray();
         Array.Sort(effects, (a, b) => StageThatIntroduces(a).CompareTo(StageThatIntroduces(b)));
         return new Ruleset(target, effects);
     }
@@ -447,7 +523,7 @@ public partial class RunData : Node
         if (Endless)
         {
             (int min, int max) = EndlessTargetRange(EndlessStreak);
-            rolled = RollRuleset(_random, min, max);
+            rolled = RollRuleset(_random, min, max, EndlessRuleCount(EndlessStreak));
         }
         else
         {
@@ -474,7 +550,9 @@ public partial class RunData : Node
     /// and carry into the next one. What a loss costs is the climb, not the cards.
     public void StartNewRun()
     {
+        BankEndlessRun();       // an endless run being given up still earned its place
         RunActive = true;
+        EndlessRunBanked = false;
         StepIndex = 0;
         Endless = false;
         EndlessStreak = 0;
@@ -513,6 +591,7 @@ public partial class RunData : Node
 
     public void EndRun()
     {
+        BankEndlessRun();
         RunActive = false;
         Endless = false;
         Save();
@@ -546,6 +625,11 @@ public partial class RunData : Node
         {
             // The run ends, and that is ALL it costs: Inventory, SideDeck and Medals are untouched
             // here, and StartNewRun deliberately keeps them.
+            //
+            // Banked BEFORE RunActive goes false, and the streak is left standing: the run-end
+            // screen reads EndlessStreak to say where the run stopped, so zeroing it here would
+            // tell the player their streak ended at 0.
+            BankEndlessRun();
             RunActive = false;
         }
 
@@ -669,6 +753,8 @@ public partial class RunData : Node
         Endless = false;
         EndlessStreak = 0;
         EndlessBest = 0;
+        EndlessRunBanked = false;
+        EndlessScores.Clear();
         MatchRescueUsed = false;
         ClearRuleset();
         TutorialSeen = false; // a wiped save IS a first launch, tutorial included
@@ -771,9 +857,19 @@ public partial class RunData : Node
         Godot.Collections.Array cardsMet = new Godot.Collections.Array();
         foreach (string key in CardsMet) cardsMet.Add(key);
 
+        Godot.Collections.Array endlessScores = new Godot.Collections.Array();
+        foreach (EndlessScore score in EndlessScores)
+        {
+            endlessScores.Add(new Godot.Collections.Dictionary
+            {
+                { "streak", score.Streak },
+                { "at", score.UnixTime },
+            });
+        }
+
         Godot.Collections.Dictionary data = new Godot.Collections.Dictionary
         {
-            { "version", 7 },
+            { "version", 8 },
             { "active", RunActive },
             { "medals", Medals },
             { "step", StepIndex },
@@ -784,6 +880,8 @@ public partial class RunData : Node
             { "endless", Endless },
             { "endlessStreak", EndlessStreak },
             { "endlessBest", EndlessBest },
+            { "endlessBanked", EndlessRunBanked },
+            { "endlessScores", endlessScores },
             { "matchRescueUsed", MatchRescueUsed },
             { "rolledStep", RolledStep },
             { "rolledTarget", RolledTarget },
@@ -821,6 +919,28 @@ public partial class RunData : Node
         Endless = data.TryGetValue("endless", out Variant endless) && endless.AsBool();
         EndlessStreak = data.TryGetValue("endlessStreak", out Variant streak) ? streak.AsInt32() : 0;
         EndlessBest = data.TryGetValue("endlessBest", out Variant best) ? best.AsInt32() : 0;
+
+        // Version 8. A version 7 save has neither key: the board loads empty and the run in
+        // progress loads as not yet banked, so an endless run that survives the update still gets
+        // its place when it ends. EndlessBest is untouched, so the one number that existed before
+        // is not lost - it simply has no dated rows behind it until the next run ends.
+        EndlessRunBanked = data.TryGetValue("endlessBanked", out Variant banked) && banked.AsBool();
+        EndlessScores.Clear();
+        if (data.TryGetValue("endlessScores", out Variant scores))
+        {
+            foreach (Variant entry in scores.AsGodotArray())
+            {
+                if (entry.VariantType != Variant.Type.Dictionary) continue;
+                Godot.Collections.Dictionary row = entry.AsGodotDictionary();
+                // rowStreak, not streak: "streak" already names the out-variable of the
+                // EndlessStreak read above, and an out-variable's scope is the whole method.
+                int rowStreak = row.TryGetValue("streak", out Variant st) ? st.AsInt32() : 0;
+                if (rowStreak <= 0) continue;
+                long at = row.TryGetValue("at", out Variant when) ? when.AsInt64() : 0;
+                EndlessScores.Add(new EndlessScore(rowStreak, at));
+            }
+            SortEndlessScores();
+        }
         // Version 7. A version 6 save carried "endlessRescueUsed" (once per endless RUN), which
         // no longer means anything; it is ignored, and a missing key loads as a fresh match.
         MatchRescueUsed = data.TryGetValue("matchRescueUsed", out Variant rescued) && rescued.AsBool();
