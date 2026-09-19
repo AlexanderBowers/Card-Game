@@ -3,7 +3,7 @@ using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
 
-public partial class GameManager : Node, IBotTable
+public partial class GameManager : Node, IBotTable, ITableHost
 {
     private GameState _gameState;
     private Player _player1;
@@ -46,38 +46,6 @@ public partial class GameManager : Node, IBotTable
     private bool _isGameStarted = false;
     private bool _isVsBot = false;
     private bool _setOverPending = false; // the set-end explanation is up; nothing moves until it's acknowledged
-    private bool _firstTurnOfSet = false; // the next turn is this set's opening one (see DealCards)
-
-    /// At or above this target the opening deal is two cards, because two cards cannot exceed 20.
-    private const int OpeningDoubleDealTarget = 20;
-
-    /// How long the second opening card waits behind the first, so the pair reads as two cards.
-    private const float OpeningDealStagger = 0.18f;
-
-    // One opponent-facing card per side per turn. Two in one turn cannot be read, however well
-    // they animate - see claude/stage-ladder-spec.md.
-    private bool _p1PlayedEffectThisTurn = false;
-    private bool _p2PlayedEffectThisTurn = false;
-
-    /// A card just brought back by Recall cannot be played until the NEXT turn. This is the whole
-    /// of Recall's design: without it the card is "an extra modifier exactly when I need one",
-    /// which is a rescue, and stage 8 is meant to be the rung that stops being about rescues.
-    ///
-    /// It needs its own store because _pXPlayedEffectThisTurn does NOT cover it - that flag gates
-    /// a second EFFECT card, and a recalled +4 is a plain modifier.
-    private Card _p1RecallLock;
-    private Card _p2RecallLock;
-
-    // ------------------------------------------------------------------
-    // Modifier hands
-    //
-    // Each match deals every player a fresh random hand: non-zero values in -4..+4, and a 1-in-10
-    // chance for any of them to be a "+/-" (flip) card the player can swap between plus and minus
-    // before committing it. Cards are spent for the whole match, not the set.
-    // ------------------------------------------------------------------
-    private const int ModifierCount = 4;
-    private const int MaxModifierMagnitude = 4;
-    private const double FlipValueChance = 0.10;
 
     // ------------------------------------------------------------------
     // Tap to pick up, tap again to play
@@ -199,8 +167,9 @@ public partial class GameManager : Node, IBotTable
         _gameState = new GameState();
         _player1 = new Player("Player 1");
         _player2 = new Player("Player 2");
-        _bot = new Bot(this); // before DealMatchModifiers: it deals the bot's hand
-        DealMatchModifiers();
+        _table = new Table(this);
+        _bot = new Bot(this); // before the first deal: the table asks it for the bot's hand
+        _table.DealMatchHands();
 
         _cardSheet = GD.Load<Texture2D>("res://assets/kenney/cards.png");
         _chipSheet = GD.Load<Texture2D>("res://assets/kenney/chips.png");
@@ -1051,7 +1020,7 @@ public partial class GameManager : Node, IBotTable
         bool tutorial = ShouldRunTutorial();
         _tutorialStaged = tutorial && ShouldStageTutorial();
 
-        DealMatchModifiers(); // the hand has to last all three sets of the match
+        _table.DealMatchHands(); // the hand has to last all three sets of the match
 
         StartNewSet(); // UpdateUI enables the Draw Card / Hold buttons
 
@@ -1086,65 +1055,6 @@ public partial class GameManager : Node, IBotTable
         ApplyRankTheme();
     }
 
-    /// A fresh modifier hand for both players. Cards are spent for the whole match, so this runs
-    /// once per match - not per set.
-    ///
-    /// In a run, Player 1's hand is drawn at random from the 12-card deck they built on the deck
-    /// screen: the deck is chosen, the hand is not. Everywhere else (local 2-player, and the bot)
-    /// the hand is dealt at random.
-    private void DealMatchModifiers()
-    {
-        // The staged hand for the tutorial. The +4 is the lesson - it takes the staged opening of
-        // 16 to exactly 20 - and the other three are there so the hand looks like a normal one.
-        if (_tutorialStaged)
-        {
-            _player1.Modifiers.Clear();
-            foreach (int value in TutorialModifiers)
-                _player1.Modifiers.Add(new Card(value, CardType.Modifier));
-
-            _player1.ResetForNewMatch();
-            _player2.ResetForNewMatch();
-            _bot.DealHand();
-            ClearSelections();
-            return;
-        }
-
-        List<Card> runModifiers = _inRun ? RunData.Instance?.DrawMatchModifiers() : null;
-        if (runModifiers != null && runModifiers.Count > 0)
-        {
-            _player1.Modifiers.Clear();
-            _player1.Modifiers.AddRange(runModifiers);
-        }
-        else
-        {
-            _player1.DealRandomModifiers(_random, ModifierCount, FlipValueChance, MaxModifierMagnitude);
-            if (!_isVsBot && _local2PlayerSpecials) AddLocalSpecial(_player1);
-        }
-
-        // The spent pile is per-MATCH, which is what makes Recall a card about a hand that has to
-        // last every set rather than a card about this set. This is the only place it clears.
-        _player1.ResetForNewMatch();
-        _player2.ResetForNewMatch();
-
-        _bot.DealHand();
-        ClearSelections();
-        QueueCoachMarksForModifiers();
-        foreach (Card card in _player1.Modifiers) NoteModifierMet(card);
-    }
-
-    /// Local 2-player with specials on: one of the four cards becomes a random finished special
-    /// Modifier - the ladder's own recipe (three plain cards plus one effect), so a hand is never
-    /// all tricks and no arithmetic. Each player rolls their own, so the two may differ.
-    private void AddLocalSpecial(Player player)
-    {
-        // Only specials the player has met in single player (pass 21).
-        List<CardEffect> wired = UnlockedLocalSpecials();
-        if (wired.Count == 0 || player.Modifiers.Count == 0) return;
-
-        CardEffect effect = wired[_random.Next(wired.Count)];
-        player.Modifiers[_random.Next(player.Modifiers.Count)] = CardEffects.Create(effect, _random);
-        player.EnsureBothSigns(_random); // the replaced card may have been the only plus or minus
-    }
 
 
     private void StartNewSet()
@@ -1158,81 +1068,13 @@ public partial class GameManager : Node, IBotTable
         FillBoardWithSlots(_p1BoardContainer);
         FillBoardWithSlots(_p2BoardContainer);
 
-        // A fresh forty every set, and the next turn is this set's opening one.
-        ShuffleMainDeck();
-        _firstTurnOfSet = true;
+        _table.StartSet(); // a fresh forty, and the next turn is this set's opening one
 
         DealCards();
     }
 
-    // ------------------------------------------------------------------
-    // The main deck (playtest feedback, 2026-09-15)
-    //
-    // It used to be _random.Next(1, 11) on every draw: an infinite stream with no memory, where
-    // four 10s in a row is possible and the player has no way to tell bad luck from the game
-    // cheating. It is now a real object - four copies each of 1 to 10, forty cards, shuffled - and
-    // that is Pazaak's own main deck.
-    //
-    // The reason a blackjack player asked for it is the whole point: a finite deck can be COUNTED.
-    // That is a real skill the 55+ group already owns, it costs the other end of the 5-to-85 range
-    // nothing (a five-year-old plays exactly as before), and the remaining count is on the deck art
-    // so the information is there to be used.
-    //
-    // ONE SHARED DECK, both players drawing from it. Two private decks would make counting nearly
-    // worthless, because half the information would never reach the table - and watching what they
-    // draw is most of what makes counting worth doing.
-    //
-    // SHUFFLED EVERY SET, not every match: Pazaak's rule, and it keeps each set a clean
-    // counting problem rather than a match-long bookkeeping chore.
-    // ------------------------------------------------------------------
 
-    private const int MainDeckCopies = 4; // of each value 1-10, so forty cards
-
-    private readonly List<int> _mainDeck = new List<int>();
     private Label _deckCountLabel;
-
-    private void ShuffleMainDeck()
-    {
-        _mainDeck.Clear();
-        for (int value = 1; value <= 10; value++)
-            for (int copy = 0; copy < MainDeckCopies; copy++)
-                _mainDeck.Add(value);
-
-        // Fisher-Yates, off the same _random every other deal uses.
-        for (int i = _mainDeck.Count - 1; i > 0; i--)
-        {
-            int j = _random.Next(i + 1);
-            int swap = _mainDeck[i];
-            _mainDeck[i] = _mainDeck[j];
-            _mainDeck[j] = swap;
-        }
-
-        // The staged opening for the tutorial's first set. Each value is REMOVED from the
-        // shuffled remainder before being appended, so the deck still holds exactly four of each
-        // and the rest of the set is as random as any other.
-        if (_tutorialStaged && _gameState.IsFirstSet)
-        {
-            foreach (int value in TutorialOpening) _mainDeck.Remove(value);
-            _mainDeck.AddRange(TutorialOpening);
-        }
-    }
-
-    /// The top card. The deck cannot actually run out at any target this game uses. Both players
-    /// draw from the SAME forty, so the adversarial worst case - the deck sorted smallest-first,
-    /// both players drawing until they bust - is 19 cards of 40 at a target of 25, and 200k
-    /// simulated sets across every ladder target never went past 17.
-    ///
-    /// The reshuffle is here anyway, because that arithmetic is a property of TODAY's targets and
-    /// a future rule change should not be able to turn it into a crash.
-    private int DrawFromMainDeck()
-    {
-        if (_mainDeck.Count == 0) ShuffleMainDeck();
-
-        int last = _mainDeck.Count - 1;
-        int value = _mainDeck[last];
-        _mainDeck.RemoveAt(last);
-        return value;
-    }
 
     /// The count on the deck art - the counting aid, and the clearest signal that the deck is a
     /// real object with a bottom rather than a random number generator with a picture on it.
@@ -1261,7 +1103,7 @@ public partial class GameManager : Node, IBotTable
     private void UpdateDeckCounter()
     {
         if (_deckCountLabel == null) return;
-        _deckCountLabel.Text = _isGameStarted ? _mainDeck.Count.ToString() : string.Empty;
+        _deckCountLabel.Text = _isGameStarted ? _table.Remaining.ToString() : string.Empty;
     }
 
     // ------------------------------------------------------------------
@@ -1272,75 +1114,16 @@ public partial class GameManager : Node, IBotTable
     // neither player can act any more the turn is resolved (ResolveTurn) - busts, both holding,
     // or simply the next turn.
     // ------------------------------------------------------------------
+
+    /// A turn begins: the bot forgets last turn's re-opening, the table deals, the screen catches
+    /// up, and the bot starts thinking. The cards themselves are one line of that - Table.DealTurn.
     private void DealCards()
     {
-        _player1.HasEndedTurn = false;
-        _player2.HasEndedTurn = false;
-
-        // Both are about this turn only: who has drawn what, and who has already reached across
-        // the table once.
-        _player1.LastDrawnCard = null;
-        _player2.LastDrawnCard = null;
-        _player1.LastPlayedModifier = null;
-        _player2.LastPlayedModifier = null;
-        _p1PlayedEffectThisTurn = false;
-        _p2PlayedEffectThisTurn = false;
-        _bot.ResetForTurn();
-
-        // A card recalled during the last turn becomes playable now. This is the ONLY place the
-        // lock is lifted, so a recalled card is always dead for exactly one turn.
-        _p1RecallLock = null;
-        _p2RecallLock = null;
-
-        // Two cards on the opening deal when the target is 20 or more (playtest, 2026-09-15).
-        //
-        // The "20 or greater" clause is not a guess: two main-deck cards are at most 10 + 10 = 20,
-        // so at a target of 20 or above the opening deal provably CANNOT bust anyone, and at 20
-        // exactly the best it can do is a perfect score. Below 20 - stages 5 and 6, target 18 - it
-        // could, so those rungs keep the single opening card. That is not a wart; it is free
-        // variety, and it lands on the two rungs that already feel different because the target
-        // dropped.
-        bool opening = _firstTurnOfSet;
-        _firstTurnOfSet = false;
-        int cards = (opening && _gameState.TargetScore >= OpeningDoubleDealTarget) ? 2 : 1;
-
-        for (int i = 0; i < cards; i++)
-        {
-            // Both players' cards fly at once, as they always have; the second pair is staggered so
-            // an opening deal reads as two cards rather than one thick one.
-            float delay = i * OpeningDealStagger;
-            DrawCardFor(_player1, _p1BoardContainer, delay);
-            DrawCardFor(_player2, _p2BoardContainer, delay);
-        }
-
+        _bot.ResetForTurn();  // the bot's re-opening is the bot's, not the deck's
+        _table.DealTurn();    // ...and everything the cards do is the table's
         UpdateUI();
 
         if (_isVsBot) _bot.ProcessTurn();
-    }
-
-    private void DrawCardFor(Player player, Control boardContainer, float delay = 0f)
-    {
-        if (player.IsHolding) return;
-
-        int cardValue = DrawFromMainDeck();
-        player.CurrentScore += cardValue;
-
-        Card drawnMainCard = new Card(cardValue, CardType.Main, cardValue.ToString());
-        player.ActiveCardsOnBoard.Add(drawnMainCard);
-
-        // Copy names this exact card. On a two-card opening deal that is the SECOND one, because
-        // this runs once per card and the last write wins - which is the right answer (it is the
-        // most recent draw), but it is the kind of thing that should be written down rather than
-        // discovered.
-        player.LastDrawnCard = drawnMainCard;
-
-        GD.Print($"{player.PlayerName} drew a {cardValue}. Score: {player.CurrentScore} "
-               + $"({_mainDeck.Count} left in the deck)");
-
-        InstantiateCardView(drawnMainCard, boardContainer, delay);
-
-        // Going over the target here is NOT a bust yet - the player may still play a minus card
-        // before ending the turn. Busts are only decided in ResolveTurn.
     }
 
     /// Called whenever someone finishes their part of the turn (Draw Card, Hold, or the bot).
@@ -1514,6 +1297,40 @@ public partial class GameManager : Node, IBotTable
     }
 
     // ------------------------------------------------------------------
+    // The cards
+    //
+    // The deck, the hands and what has been drawn live in Table.cs. What is left here is the
+    // contract it is handed - same pattern as the bot's above, and read the same way: this list
+    // is the whole of what the cards may touch.
+    // ------------------------------------------------------------------
+    private Table _table;
+
+    Player ITableHost.Player1 => _player1;
+    Player ITableHost.Player2 => _player2;
+    GameState ITableHost.State => _gameState;
+    Random ITableHost.Rng => _random;
+    RunData ITableHost.Run => _inRun ? RunData.Instance : null;
+    bool ITableHost.VsBot => _isVsBot;
+    bool ITableHost.LocalSpecials => _local2PlayerSpecials;
+    bool ITableHost.TutorialStaged => _tutorialStaged;
+    IReadOnlyList<int> ITableHost.TutorialOpening => TutorialOpening;
+    IReadOnlyList<int> ITableHost.TutorialModifiers => TutorialModifiers;
+
+    List<CardEffect> ITableHost.UnlockedLocalSpecials() => UnlockedLocalSpecials();
+    void ITableHost.DealBotHand() => _bot.DealHand();
+
+    void ITableHost.ShowDrawnCard(Player player, Card card, float delay) =>
+        InstantiateCardView(card, player == _player1 ? _p1BoardContainer : _p2BoardContainer, delay);
+
+    void ITableHost.HandsDealt(bool introduceCards)
+    {
+        ClearSelections();
+        if (!introduceCards) return;
+        QueueCoachMarksForModifiers();
+        foreach (Card card in _player1.Modifiers) NoteModifierMet(card);
+    }
+
+    // ------------------------------------------------------------------
     // The opponent
     //
     // Every decision it makes lives in Bot.cs. What is left here is the contract it is handed:
@@ -1529,22 +1346,21 @@ public partial class GameManager : Node, IBotTable
     GameState IBotTable.State => _gameState;
     RunData IBotTable.Run => _inRun ? RunData.Instance : null; // a one-off solo match is never a boss fight
     Random IBotTable.Rng => _random;
-    int IBotTable.HandSize => ModifierCount;
-    int IBotTable.MaxModifierMagnitude => MaxModifierMagnitude;
+    int IBotTable.HandSize => Table.HandSize;
+    int IBotTable.MaxModifierMagnitude => Table.MaxModifierMagnitude;
     bool IBotTable.VsBot => _isVsBot;
     bool IBotTable.LocalSpecials => _local2PlayerSpecials;
-    bool IBotTable.BotPlayedEffectThisTurn => _p2PlayedEffectThisTurn;
+    bool IBotTable.BotPlayedEffectThisTurn => _table.HasPlayedEffect(_player2);
     bool IBotTable.TutorialHoldsBot => _tutorialActive;
 
-    bool IBotTable.IsRecallLocked(Player owner, Card card) => IsRecallLocked(owner, card);
+    bool IBotTable.IsRecallLocked(Player owner, Card card) => _table.IsRecallLocked(owner, card);
     bool IBotTable.CanPlayEffect(Player owner, Card card) => CanPlayEffect(owner, card);
     bool IBotTable.PlayEffectCard(Player owner, Card card, Card chosen) => PlayEffectCard(owner, card, chosen);
-    void IBotTable.AddLocalSpecial(Player player) => AddLocalSpecial(player);
+    void IBotTable.AddLocalSpecial(Player player) => _table.AddLocalSpecial(player);
     void IBotTable.Refresh() => UpdateUI();
     void IBotTable.ResolveTurn() => ResolveTurn();
 
-    void IBotTable.DealPlainHand(Player player) =>
-        player.DealRandomModifiers(_random, ModifierCount, FlipValueChance, MaxModifierMagnitude);
+    void IBotTable.DealPlainHand(Player player) => _table.DealPlainHand(player);
 
     void IBotTable.PlayBotModifier(Card card)
     {
@@ -1566,15 +1382,10 @@ public partial class GameManager : Node, IBotTable
     // from their hand buttons once the market sells them one; neither gets its own rules.
     // ------------------------------------------------------------------
 
-    /// True when this card came back through a Recall during THIS turn and so cannot be played
-    /// yet. Applies to both sides; the bot is bound by it exactly as the player is.
-    private bool IsRecallLocked(Player owner, Card card) =>
-        card != null && card == (owner == _player1 ? _p1RecallLock : _p2RecallLock);
-
     /// Can this player play this ORDINARY modifier right now? The only rule is the Recall lock -
     /// everything else about a plain card is decided by the player's own arithmetic.
     private bool CanPlayModifierNow(Player owner, Card card) =>
-        card != null && card.Effect == CardEffect.None && !IsRecallLocked(owner, card);
+        card != null && card.Effect == CardEffect.None && !_table.IsRecallLocked(owner, card);
 
     /// Can this player reach across the table with this card right now? Legality is the card's
     /// own business (CardEffects.CanPlay); the once-per-turn limit is the turn's.
@@ -1582,7 +1393,7 @@ public partial class GameManager : Node, IBotTable
     {
         if (card == null || card.Effect == CardEffect.None) return false;
         if (!CardEffects.Implemented(card.Effect)) return false;
-        if (owner == _player1 ? _p1PlayedEffectThisTurn : _p2PlayedEffectThisTurn) return false;
+        if (_table.HasPlayedEffect(owner)) return false;
 
         Player target = (owner == _player1) ? _player2 : _player1;
         return CardEffects.CanPlay(card, owner, target, _gameState.TargetScore);
@@ -1598,7 +1409,7 @@ public partial class GameManager : Node, IBotTable
     {
         if (card == null || card.Effect == CardEffect.None) return null;
 
-        if (owner == _player1 ? _p1PlayedEffectThisTurn : _p2PlayedEffectThisTurn)
+        if (_table.HasPlayedEffect(owner))
             return "one card across the table per turn, and you have played yours.";
 
         Player target = (owner == _player1) ? _player2 : _player1;
@@ -1630,16 +1441,11 @@ public partial class GameManager : Node, IBotTable
             return false;
         }
 
-        if (owner == _player1) _p1PlayedEffectThisTurn = true;
-        else _p2PlayedEffectThisTurn = true;
+        _table.NoteEffectPlayed(owner);
 
         // Recall's card is back in hand but dead until the next turn. Set AFTER Resolve, because
         // Resolve is what moved it out of the spent pile.
-        if (card.Effect == CardEffect.Recall)
-        {
-            if (owner == _player1) _p1RecallLock = chosen;
-            else _p2RecallLock = chosen;
-        }
+        if (card.Effect == CardEffect.Recall) _table.LockRecall(owner, chosen);
 
         // THE ANSWERING RULE. A card played at you re-opens your turn for this turn, so you always
         // get a say - unless you are holding, which is the locked state Shave exists to punish.
@@ -2295,7 +2101,7 @@ public partial class GameManager : Node, IBotTable
         if (picked != null)
         {
             if (picked.Effect != CardEffect.None) return EffectPreview(player, picked);
-            if (IsRecallLocked(player, picked)) return "Just recalled - playable from your next turn";
+            if (_table.IsRecallLocked(player, picked)) return "Just recalled - playable from your next turn";
             // A plain Modifier says nothing here: its result is shown on the score itself.
         }
 
@@ -2584,7 +2390,7 @@ public partial class GameManager : Node, IBotTable
         }
 
         // A card that came back this turn through a Recall is not playable until the next one.
-        if (IsRecallLocked(player, card))
+        if (_table.IsRecallLocked(player, card))
         {
             SetSelection(player, card); // keep it under their finger so the status line explains
             UpdateUI();
@@ -3169,7 +2975,7 @@ public partial class GameManager : Node, IBotTable
     private int? PreviewedScore(Player player)
     {
         Card picked = SelectedFor(player);
-        if (picked == null || picked.Effect != CardEffect.None || IsRecallLocked(player, picked)) return null;
+        if (picked == null || picked.Effect != CardEffect.None || _table.IsRecallLocked(player, picked)) return null;
         return player.CurrentScore + picked.Value;
     }
 
