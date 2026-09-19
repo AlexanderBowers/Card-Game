@@ -1,8 +1,9 @@
 using Godot;
 using System;
 using System.Collections.Generic;
+using System.Threading.Tasks;
 
-public partial class GameManager : Node
+public partial class GameManager : Node, IBotTable
 {
     private GameState _gameState;
     private Player _player1;
@@ -44,7 +45,6 @@ public partial class GameManager : Node
     private PackedScene _cardViewScene = GD.Load<PackedScene>("res://CardView.tscn");
     private bool _isGameStarted = false;
     private bool _isVsBot = false;
-    private bool _aiTurnInProgress = false; // the bot is "thinking" for this turn (the human is NOT locked meanwhile)
     private bool _setOverPending = false; // the set-end explanation is up; nothing moves until it's acknowledged
     private bool _firstTurnOfSet = false; // the next turn is this set's opening one (see DealCards)
 
@@ -58,13 +58,6 @@ public partial class GameManager : Node
     // they animate - see claude/stage-ladder-spec.md.
     private bool _p1PlayedEffectThisTurn = false;
     private bool _p2PlayedEffectThisTurn = false;
-
-    /// Set when the bot's turn is re-opened WHILE that turn is still running (the player answers
-    /// a card during one of its animation pauses). Calling ProcessAiTurn there would be swallowed
-    /// by its own guard, and the tail of the in-flight turn would then end the bot's turn anyway -
-    /// so the flag makes it go round again instead. Without this, whether the bot gets its answer
-    /// depends on which pause the player happened to interrupt.
-    private bool _p2ReopenedMidTurn = false;
 
     /// A card just brought back by Recall cannot be played until the NEXT turn. This is the whole
     /// of Recall's design: without it the card is "an extra modifier exactly when I need one",
@@ -206,6 +199,7 @@ public partial class GameManager : Node
         _gameState = new GameState();
         _player1 = new Player("Player 1");
         _player2 = new Player("Player 2");
+        _bot = new Bot(this); // before DealMatchModifiers: it deals the bot's hand
         DealMatchModifiers();
 
         _cardSheet = GD.Load<Texture2D>("res://assets/kenney/cards.png");
@@ -244,7 +238,11 @@ public partial class GameManager : Node
             // Face-to-face on a phone wants P2 flipped by default; on a desktop it doesn't.
             _mirrorToggle.SetPressedNoSignal(OS.HasFeature("mobile"));
             _mirrorToggle.Visible = _gameModeButton != null && _gameModeButton.GetSelectedId() == 0;
-            _mirrorToggle.Toggled += _ => { ApplyResponsiveLayout(); UpdateUI(); };
+            // UpdateUI FIRST. It is what decides the score's font and whether the score is one
+            // line or two, and ApplyResponsiveLayout is what measures the side around it. The
+            // other way round, every slot was sized against the form that was on its way off the
+            // screen (Alexander, 2026-09-18: toggling the mirror shifts Player 1's side).
+            _mirrorToggle.Toggled += _ => { UpdateUI(); ApplyResponsiveLayout(); };
         }
 
         // The button is "Draw Card" (Alexander, 2026-09-15), and the code uses the same words the
@@ -346,8 +344,9 @@ public partial class GameManager : Node
         foreach (Control row in _debugRows)
             if (IsInstanceValid(row)) row.Visible = GameSettings.ShowDebugButtons;
         // Some settings reshape a whole side, which is a new layout: let the fixed slots settle
-        // on the new sizes rather than keep the old ones.
-        StableBox.ResetAll();
+        // on the new sizes rather than keep the old ones, and let the fit find its own scale for
+        // the new shape instead of keeping the one it settled on for the old one.
+        ResetFitState();
         ApplyResponsiveLayout(); // also re-runs EnsureLayoutFits (the debug rows change the height)
     }
 
@@ -400,7 +399,10 @@ public partial class GameManager : Node
     private float _fitScale = 1f;
     private int _fitAttempts;
     private bool _fitCheckPending;
-    private Vector2 _fitWindow = Vector2.Zero;
+    /// Everything the layout is measured AGAINST - it replaces the old _fitWindow, which only
+    /// watched the window. When any of it changes, every size remembered from before it belongs
+    /// to a different table (see ApplyResponsiveLayout).
+    private (Vector2 Window, bool Portrait, bool Mirrored, bool VsBot) _layoutBasis;
     private Vector2 _fitLastNeeded = Vector2.Zero;
     private const int MaxFitAttempts = 6;
 
@@ -415,6 +417,20 @@ public partial class GameManager : Node
     /// Spare room below this fraction is not worth a re-layout.
     private const float GrowThreshold = 0.95f;
 
+    /// Forget every size this layout has settled on.
+    ///
+    /// The fit is ITERATIVE and its state is a set of high-water marks - _fitLastNeeded here, and
+    /// StableBox's own inside each fixed slot - so it only lands on the same answer twice if it
+    /// starts from the same clean state twice. Every route to a given table has to reset the same
+    /// way, or the same screen comes out at two different sizes depending on how it was reached.
+    private void ResetFitState()
+    {
+        _fitScale = 1f;
+        _fitAttempts = 0;
+        _fitLastNeeded = Vector2.Zero;
+        StableBox.ResetAll();
+    }
+
     private void ApplyResponsiveLayout()
     {
         Window root = GetTree().Root;
@@ -423,16 +439,22 @@ public partial class GameManager : Node
         _fitPortrait = portrait;
         _portraitLayout = portrait;
 
-        // A genuine resize or rotation: start the correction over, so the UI can grow back into a
-        // window that has room for it. Re-running ourselves from EnsureLayoutFits changes
-        // ContentScaleSize, not the window, so this does not fire on our own passes.
-        if (win != _fitWindow)
+        // A genuine resize, rotation, mirror toggle or mode change: start the correction over, so
+        // the UI can find the right size for the table it is actually showing. Re-running
+        // ourselves from EnsureLayoutFits changes ContentScaleSize, not the basis below, so this
+        // still does not fire on our own passes.
+        //
+        // The WINDOW alone is not enough, and that was the bug (Alexander, 2026-09-18: rotate to
+        // landscape, back to portrait, then turn Mirror for Player 2 on or off, and Player 1's
+        // side has shifted). The mirror swaps a one-line score for a two-line one and re-shapes
+        // both sides around it at the SAME window size, so nothing here fired: the fixed slots
+        // kept the taller of the two forms for good, and the fit kept the scale it had settled on
+        // for it. The same screen then came out at a different size depending on the route to it.
+        var basis = (win, portrait, IsMirrored, _isVsBot);
+        if (basis != _layoutBasis)
         {
-            _fitWindow = win;
-            _fitScale = 1f;
-            _fitAttempts = 0;
-            _fitLastNeeded = Vector2.Zero;
-            StableBox.ResetAll(); // sizes from the old window mean nothing in this one
+            _layoutBasis = basis;
+            ResetFitState(); // sizes from the old table mean nothing in this one
         }
 
         // What the viewport would be at the plain 720px base, and how much bigger it must be.
@@ -465,6 +487,12 @@ public partial class GameManager : Node
         }
 
         ApplyOrientationTypography(portrait);
+
+        // Before ANYTHING is measured. The score's font and its one-or-two lines are chosen from
+        // the orientation and the mirror, and either may have just changed; left to the next
+        // UpdateUI they would only land after this pass had already sized every slot around the
+        // form that is going away.
+        RefreshScoreLines();
 
         // Portrait spreads each side across the screen (pass 22: "everything is compacted to the
         // middle"): the side is as wide as the screen allows, the score column sits at the left
@@ -1076,7 +1104,7 @@ public partial class GameManager : Node
 
             _player1.ResetForNewMatch();
             _player2.ResetForNewMatch();
-            DealAiModifiers();
+            _bot.DealHand();
             ClearSelections();
             return;
         }
@@ -1098,7 +1126,7 @@ public partial class GameManager : Node
         _player1.ResetForNewMatch();
         _player2.ResetForNewMatch();
 
-        DealAiModifiers();
+        _bot.DealHand();
         ClearSelections();
         QueueCoachMarksForModifiers();
         foreach (Card card in _player1.Modifiers) NoteModifierMet(card);
@@ -1118,98 +1146,6 @@ public partial class GameManager : Node
         player.EnsureBothSigns(_random); // the replaced card may have been the only plus or minus
     }
 
-    /// The AI's hand for this match, built to the rung's recipe rather than rolled flat: stage 1
-    /// is the standard game with no "+/-" cards at all, every stage above it guarantees exactly
-    /// one, and stages 4-8 spend one of the four slots on that stage's effect card.
-    ///
-    /// Local 2-player and a runless solo scene keep the old flat roll.
-    private void DealAiModifiers()
-    {
-        RunData run = _inRun ? RunData.Instance : null;
-        if (run == null)
-        {
-            _player2.DealRandomModifiers(_random, ModifierCount, FlipValueChance, MaxModifierMagnitude);
-            if (!_isVsBot && _local2PlayerSpecials) AddLocalSpecial(_player2);
-            return;
-        }
-
-        RunData.LadderStep step = run.CurrentStep;
-        List<Card> hand = new List<Card>();
-
-        // Plain cards first: no flip chance here, because whether this stage has a "+/-" card is
-        // the stage's decision, not a dice roll.
-        for (int i = 0; i < ModifierCount; i++)
-        {
-            hand.Add(Player.CreateRandomModifier(_random, 0.0, MaxModifierMagnitude));
-        }
-
-        int flipValueIndex = -1;
-        if (step.AiHasFlipValueCards)
-        {
-            flipValueIndex = _random.Next(hand.Count);
-            Card card = hand[flipValueIndex];
-            hand[flipValueIndex] = new Card(Math.Abs(card.Value), CardType.Modifier, "", canFlipValue: true);
-        }
-
-        // The stage's effect card takes one of the four slots.
-        //
-        // From stage 4 up, if the card this rung is NAMED for is not built yet, the bot carries a
-        // finished effect instead of nothing. That is what Alexander was seeing as "the AI is
-        // sometimes starting a match without their new modifier card": a rung naming an unwired
-        // Trade was dealt four ordinary cards and played exactly like the rung below it.
-        //
-        // Pass 5 wired both Trades, so stages 4-7 each deal the card they are named for now. What
-        // still falls back is stage 8 (no card designed yet) and stages 9-10 (which name nothing
-        // at all until the randomizer rolls their ruleset).
-        //
-        // Still ONE card, dealt once for the whole match and spent when it is played. Hands are
-        // not topped up between sets: the drama of a stage card is that there is one of it.
-        // The finale: two plain cards (one of them the "+/-") and one of each rolled effect.
-        List<CardEffect> rolled = run.CurrentRolledEffects;
-        if (rolled != null && rolled.Count > 0)
-        {
-            List<int> free = new List<int>();
-            for (int i = 0; i < hand.Count; i++) if (i != flipValueIndex) free.Add(i);
-            foreach (CardEffect effect in rolled)
-            {
-                if (free.Count == 0) break;
-                int pick = _random.Next(free.Count);
-                hand[free[pick]] = CardEffects.Create(effect, _random);
-                free.RemoveAt(pick);
-            }
-
-            _player2.Modifiers = hand;
-            _player2.EnsureBothSigns(_random);
-            return;
-        }
-
-        CardEffect aiEffect = step.AiEffect;
-        if (!CardEffects.IsWired(aiEffect) && run.MatchNumber >= 4)
-        {
-            List<CardEffect> wired = CardEffects.WiredEffects();
-
-            // Only cards this rung has already EARNED. The ladder's promise is that you meet a
-            // card across the table at its own stage and can buy it one visit later; a fallback
-            // that reached for anything wired would have handed the player a stage 7 Shave at
-            // stage 5, two rungs before the game introduces it and two before the market will
-            // sell it. It became a live risk the moment stage 5 lost its own card.
-            wired.RemoveAll(effect => RunData.StageThatIntroduces(effect) > run.MatchNumber);
-
-            if (wired.Count > 0) aiEffect = wired[_random.Next(wired.Count)];
-        }
-
-        // Never the slot the "+/-" card just took: the recipe is three plain cards (one of them
-        // a "+/-") plus the effect, and eating the flip card would quietly undo stage 2.
-        if (CardEffects.IsWired(aiEffect))
-        {
-            int effectIndex = _random.Next(hand.Count);
-            if (effectIndex == flipValueIndex) effectIndex = (effectIndex + 1) % hand.Count;
-            hand[effectIndex] = CardEffects.Create(aiEffect, _random);
-        }
-
-        _player2.Modifiers = hand;
-        _player2.EnsureBothSigns(_random);
-    }
 
     private void StartNewSet()
     {
@@ -1349,7 +1285,7 @@ public partial class GameManager : Node
         _player2.LastPlayedModifier = null;
         _p1PlayedEffectThisTurn = false;
         _p2PlayedEffectThisTurn = false;
-        _p2ReopenedMidTurn = false;
+        _bot.ResetForTurn();
 
         // A card recalled during the last turn becomes playable now. This is the ONLY place the
         // lock is lifted, so a recalled card is always dead for exactly one turn.
@@ -1379,7 +1315,7 @@ public partial class GameManager : Node
 
         UpdateUI();
 
-        if (_isVsBot) ProcessAiTurn();
+        if (_isVsBot) _bot.ProcessTurn();
     }
 
     private void DrawCardFor(Player player, Control boardContainer, float delay = 0f)
@@ -1578,568 +1514,49 @@ public partial class GameManager : Node
     }
 
     // ------------------------------------------------------------------
-    // How good the bot is
+    // The opponent
     //
-    // Skill rides on the RANK, so it escalates on the same rhythm as the board colour and the
-    // player feels the opponent change every second rung. See claude/ai-skill-tiers.md.
+    // Every decision it makes lives in Bot.cs. What is left here is the contract it is handed:
+    // the table it may read, and the handful of things it may do to it. The list is deliberately
+    // short and deliberately explicit - implemented on the interface rather than as ordinary
+    // methods, so nothing in GameManager can call them by accident and the bot's reach stays
+    // exactly as wide as it looks.
     // ------------------------------------------------------------------
-    private enum AiSkill
+    private Bot _bot;
+
+    Player IBotTable.BotPlayer => _player2;
+    Player IBotTable.HumanPlayer => _player1;
+    GameState IBotTable.State => _gameState;
+    RunData IBotTable.Run => _inRun ? RunData.Instance : null; // a one-off solo match is never a boss fight
+    Random IBotTable.Rng => _random;
+    int IBotTable.HandSize => ModifierCount;
+    int IBotTable.MaxModifierMagnitude => MaxModifierMagnitude;
+    bool IBotTable.VsBot => _isVsBot;
+    bool IBotTable.LocalSpecials => _local2PlayerSpecials;
+    bool IBotTable.BotPlayedEffectThisTurn => _p2PlayedEffectThisTurn;
+    bool IBotTable.TutorialHoldsBot => _tutorialActive;
+
+    bool IBotTable.IsRecallLocked(Player owner, Card card) => IsRecallLocked(owner, card);
+    bool IBotTable.CanPlayEffect(Player owner, Card card) => CanPlayEffect(owner, card);
+    bool IBotTable.PlayEffectCard(Player owner, Card card, Card chosen) => PlayEffectCard(owner, card, chosen);
+    void IBotTable.AddLocalSpecial(Player player) => AddLocalSpecial(player);
+    void IBotTable.Refresh() => UpdateUI();
+    void IBotTable.ResolveTurn() => ResolveTurn();
+
+    void IBotTable.DealPlainHand(Player player) =>
+        player.DealRandomModifiers(_random, ModifierCount, FlipValueChance, MaxModifierMagnitude);
+
+    void IBotTable.PlayBotModifier(Card card)
     {
-        /// Bronze, Silver (stages 1-4). One card per turn, blind to your hand. The opponent that
-        /// teaches the game: it never surprises you while you are still learning what a +/- does.
-        Basic,
-
-        /// Gold, Ruby (stages 5-8). It plays the BOARD: chains cards while each one improves its
-        /// position, which is what lets it play two minus cards to climb back under a bust.
-        Chains,
-
-        /// Obsidian (stages 9-10). It plays YOU: reads your hand to decide whether its own score
-        /// is actually safe, and weighs the match score when taking a risk.
-        Reads,
+        _player2.PlayModifierCard(card, _gameState);
+        NoteModifierMet(card); // played at you, so you have met it
+        InstantiateCardView(card, _p2BoardContainer);
     }
 
-    /// At most this many ordinary cards in one turn, once the bot chains. The cap is the point:
-    /// an unbounded loop empties the hand in a single turn and reads as a machine having a fit.
-    private const int MaxAiChainedCards = 3;
-
-    /// Trade Hands is a bet on the sets still to come, so the bot only makes it once its OWN
-    /// hand is spent - it must be left holding at most this many cards after the trade card goes.
-    /// Without this floor it fires on the first deal of the match, when both hands are full and
-    /// spending a card to gain one is a swap for its own sake.
-    private const int MaxModifiersToTradeAway = 1;
-
-    private AiSkill CurrentAiSkill()
+    async Task<bool> IBotTable.Pause(double seconds)
     {
-        RunData run = _inRun ? RunData.Instance : null;
-        if (run == null) return AiSkill.Basic; // a one-off solo match is never a boss fight
-
-        switch (run.CurrentStep.Rank)
-        {
-            case 4: return AiSkill.Reads;
-            case 3:
-            case 2: return AiSkill.Chains;
-            default: return AiSkill.Basic;
-        }
-    }
-
-    private async void ProcessAiTurn()
-    {
-        // Held for the whole walkthrough. The game is simultaneous and the bot acts on a timer, so
-        // a tutorial step that waited while the bot played would teach a table that had already
-        // moved. FinishTutorial calls this again to release it.
-        if (_tutorialActive) return;
-
-        if (_aiTurnInProgress || !_player2.CanAct) return; // never run two AI turns at once
-        _aiTurnInProgress = true;
-        UpdateUI(); // shows "Thinking..." on the bot's side
-
-        //1. Wait a moment to let the player see the AI's drawn card
-        await ToSignal(GetTree().CreateTimer(1.0f), SceneTreeTimer.SignalName.Timeout);
-        if (!IsInsideTree()) return; // scene was restarted/exited mid-turn
-
-        //2. First, whether to reach across the table at all. At most one such card per turn, and
-        //   only when it decides the set - see TryAiPlayEffectCard.
-        if (TryAiPlayEffectCard())
-        {
-            await ToSignal(GetTree().CreateTimer(1.5f), SceneTreeTimer.SignalName.Timeout);
-            if (!IsInsideTree()) return;
-        }
-
-        //3. Then its own arithmetic. From Gold up it keeps going while each card strictly improves
-        //   its position - capped, and with the same pause between each, so the player can follow
-        //   a chain rather than watch a hand evaporate.
-        AiSkill skill = CurrentAiSkill();
-        int maxCards = (skill == AiSkill.Basic) ? 1 : MaxAiChainedCards;
-
-        for (int played = 0; played < maxCards; played++)
-        {
-            if (!TryAiPlayModifierCard(mayChain: skill != AiSkill.Basic)) break;
-
-            //Wait 1.5 seconds to let the player see each card land
-            await ToSignal(GetTree().CreateTimer(1.5f), SceneTreeTimer.SignalName.Timeout);
-            if (!IsInsideTree()) return;
-        }
-
-        _aiTurnInProgress = false;
-
-        // Answered while it was thinking: start the turn again against the board as it stands now,
-        // rather than closing a turn that was re-opened halfway through.
-        if (_p2ReopenedMidTurn)
-        {
-            _p2ReopenedMidTurn = false;
-            ProcessAiTurn();
-            return;
-        }
-
-        int target = _gameState.TargetScore;
-
-        //4. Still over the target now = the bot ends its turn and busts when the turn resolves.
-        if (_player2.CurrentScore > target)
-        {
-            GD.Print($"AI ends its turn over the target at {_player2.CurrentScore}");
-            _player2.HasEndedTurn = true;
-            ResolveTurn();
-            return;
-        }
-
-        int holdThreshold = Math.Max(10, target - 2);
-
-        // Chasing a score the player has already locked in: play to BEAT it, not to match it.
-        // The first build set the threshold to Player 1's score itself, so against a locked 19 the
-        // bot held at 19 - a tie, which is replayed rather than won. That is not a difficulty
-        // setting, it is the bot declining a win it could take, so it is fixed at every tier.
-        if (_player1.IsHolding && _player1.CurrentScore <= target)
-        {
-            holdThreshold = Math.Min(target, _player1.CurrentScore + 1);
-        }
-        else if (skill == AiSkill.Reads)
-        {
-            // Level 3 weighs the MATCH, not just the set: behind, there is nothing left to
-            // protect and it pushes; level on the DECIDER, a bust loses everything and it plays
-            // safe.
-            //
-            // "The decider" was written as `mine == yours && mine > 0`, which was only ever
-            // correct because the match was best of three - 1-1 was the only level score that
-            // could end it. At best of five that test fires at 1-1 and at 2-2, and 1-1 is an
-            // ordinary mid-match set where playing safe just loses ground. The rule it was
-            // always trying to state is: level, with either side one win from the match.
-            int mine = _gameState.SetsWonPlayer2;
-            int yours = _gameState.SetsWonPlayer1;
-            if (mine < yours) holdThreshold += 1;
-            else if (mine == yours && mine == GameState.SetsToWinMatch - 1) holdThreshold -= 1;
-
-            // ...and it READS PLAYER 1'S HAND, for the one decision it otherwise gets wrong: is my
-            // score actually safe? Against a player sitting on 15 with a +4 in hand, holding on 18
-            // is not safe, so it keeps pushing for the target.
-            //
-            // This is hidden information, on purpose, and only from Obsidian: the early ladder is
-            // honest and the top of it is meant to feel like the opponent knows what you are
-            // holding. Do not "fix" this - if it reads as cheating in playtesting, delete it.
-            if (!_player1.IsHolding && CanBeatWithOrdinary(_player1, _player2.CurrentScore, target))
-            {
-                holdThreshold = target;
-            }
-
-            holdThreshold = Math.Clamp(holdThreshold, 1, target);
-        }
-
-        if (_player2.CurrentScore >= holdThreshold || _player2.CurrentScore == target)
-        {
-            GD.Print($"AI decides to HOLD at {_player2.CurrentScore} (Target: {target})");
-            _player2.IsHolding = true;
-        }
-        else
-        {
-            _player2.HasEndedTurn = true;
-        }
-
-        ResolveTurn();
-    }
-
-    /// Whether the bot reaches across the table this turn, and with what.
-    ///
-    /// The rule behind every branch: an effect card is only spent when it DECIDES something. A
-    /// Copy spent to move two points, or a Shave on a score the bot is already beating, is the
-    /// difference between a boss that feels hard and one that feels cheap.
-    private bool TryAiPlayEffectCard()
-    {
-        if (_p2PlayedEffectThisTurn) return false;
-
-        int target = _gameState.TargetScore;
-        Player me = _player2;
-        Player you = _player1;
-
-        // Trade Totals - I take their score, they take mine. The biggest reach in the game, so it
-        // is asked first: when this and a Copy would both rescue the same turn, taking a whole
-        // legal total off them beats trimming my own draw.
-        //
-        // It is never a free set. CanPlay refuses a holding opponent, so the player it lands on
-        // can always still act - and the answering rule re-opens their turn, handing them my wreck
-        // and a chance to climb out of it. What the card buys is the total, and the total has to be
-        // worth it on its own.
-        foreach (Card card in me.Modifiers)
-        {
-            if (card.Effect != CardEffect.TradeTotals || !CanPlayEffect(me, card)) continue;
-
-            int theirs = you.CurrentScore;
-            if (theirs > target) continue;           // never take a bust off them
-            if (theirs <= me.CurrentScore) continue; // and never trade down
-
-            if (me.CurrentScore > target)
-            {
-                // Busted, and their legal total ends the problem outright - unless my own hand was
-                // going to get me under anyway, in which case keep this for a turn where nothing
-                // else will. Asked against my own skill, since from Gold up I can chain my way back.
-                if (CanGetUnder(me, me.CurrentScore, target, mayChain: CurrentAiSkill() != AiSkill.Basic)) continue;
-                return PlayEffectCard(me, card);
-            }
-
-            // Not busted. Same bar as Copy below: an effect card is not worth a point or two, so
-            // only spend it when it carries me from "not good enough" to "good enough" in one move.
-            int wantTotalAtLeast = Math.Max(10, target - 2);
-            if (me.CurrentScore >= wantTotalAtLeast) continue;   // already where I need to be
-            if (theirs < wantTotalAtLeast) continue;             // their total does not get me there
-            if (CanBeatWithOrdinary(me, wantTotalAtLeast - 1, target)) continue; // a plain card does
-
-            return PlayEffectCard(me, card);
-        }
-
-        // Copy - my drawn card becomes theirs. Entirely my own business: it never touches their
-        // card, their score or their turn, so the only question is whether it changes MY result.
-        foreach (Card card in me.Modifiers)
-        {
-            if (card.Effect != CardEffect.Copy || !CanPlayEffect(me, card)) continue;
-
-            // CanPlayEffect has already guaranteed both drawn cards exist and differ.
-            int mine = me.LastDrawnCard.Value;
-            int theirs = you.LastDrawnCard.Value;
-            int newScore = me.CurrentScore - mine + theirs;
-
-            if (newScore > target) continue; // never copy myself into a bust
-
-            if (me.CurrentScore > target)
-            {
-                // Busted, and this card takes the bust away. Spend it - unless an ordinary card
-                // would already have done the job, in which case keep the Copy for a turn where
-                // nothing else will. Asked against my OWN skill, since from Gold up I can chain
-                // two cards to climb back under.
-                if (CanGetUnder(me, me.CurrentScore, target, mayChain: CurrentAiSkill() != AiSkill.Basic)) continue;
-                return PlayEffectCard(me, card);
-            }
-
-            // Not busted. An effect card is not worth a point or two, so only spend it when it
-            // carries me from "not good enough" to "good enough" in one move.
-            if (newScore <= me.CurrentScore) continue;
-
-            int wantAtLeast = Math.Max(10, target - 2);
-            if (_player1.IsHolding && _player1.CurrentScore <= target)
-            {
-                wantAtLeast = Math.Min(target, _player1.CurrentScore + 1);
-            }
-
-            if (me.CurrentScore >= wantAtLeast) continue;   // already where I need to be
-            if (newScore < wantAtLeast) continue;           // and this does not get me there
-            if (CanBeatWithOrdinary(me, wantAtLeast - 1, target)) continue; // a plain card does it
-
-            return PlayEffectCard(me, card);
-        }
-
-        // Shave - their score is locked below the target, so it can never move again and there is
-        // nothing to wait for. It only ever matters where one point changes the result, which is
-        // exactly when I am level with them or behind: ahead of them it is a wasted card.
-        foreach (Card card in me.Modifiers)
-        {
-            if (card.Effect != CardEffect.Shave || !CanPlayEffect(me, card)) continue;
-            if (me.CurrentScore > target) continue;               // fix my own bust first
-            if (me.CurrentScore > you.CurrentScore) continue;      // already winning
-            if (me.CurrentScore < you.CurrentScore - 1) continue;  // one point cannot bridge more than one
-
-            // And never instead of simply winning: if an ordinary card already beats their locked
-            // score, play that and keep the Shave (priority 1 in the spec's decision order).
-            if (CanBeatWithOrdinary(me, you.CurrentScore, target)) continue;
-
-            return PlayEffectCard(me, card);
-        }
-
-        // Veto - destroy the card they just played. Asked AFTER Shave, which looks backwards until
-        // you read Shave's gates: Shave only fires when one point settles it, and when one point
-        // settles it one point is the cheaper card to spend. Veto is the bigger hammer and the only
-        // card in the game that takes something away forever, so it waits for a job worth it.
-        //
-        // Two things make it decisive, and nothing else does. It can push them OVER the target, or
-        // it can take a total that is beating me and drop it below mine. Short of those, they draw
-        // the points straight back next turn and I have spent the game's dearest attack on a dent.
-        foreach (Card card in me.Modifiers)
-        {
-            if (card.Effect != CardEffect.Veto || !CanPlayEffect(me, card)) continue;
-            if (me.CurrentScore > target) continue; // fix my own bust first - Veto does nothing for it
-
-            // Never repair a bust for them. They are already over; the card they last played was
-            // either a plus that put them there (undoing it RESCUES them) or a minus that failed
-            // to save them (already losing). Both are reasons to leave them exactly where they are.
-            if (you.CurrentScore > target) continue;
-
-            // CanPlayEffect has already guaranteed this is a plain modifier played this turn.
-            Card theirs = you.LastPlayedModifier;
-            int after = you.CurrentScore - theirs.Value;
-
-            // Vetoing a MINUS card sends them up, which is how this lands as a kill: they are over
-            // the target, re-opened, and one modifier short of the hand they were going to fix it
-            // with. Vetoing a plus is the ordinary case - it takes a lead away.
-            bool bustsThem = after > target;
-            bool takesTheLead = you.CurrentScore > me.CurrentScore && after < me.CurrentScore;
-            if (!bustsThem && !takesTheLead) continue;
-
-            // Priority 1, as everywhere: if a plain card already takes the set off a score they
-            // have locked in, take the set and keep this. Doubly so here - Veto un-holds them,
-            // so spending it on a hold I was already going to beat hands the set back.
-            if (you.IsHolding && CanBeatWithOrdinary(me, you.CurrentScore, target)) continue;
-
-            return PlayEffectCard(me, card);
-        }
-
-        // Trade Hands - I take everything they are still holding, they take what I have left. Late,
-        // because it decides nothing about THIS turn: it is a bet on the sets to come, while
-        // every card above it is a bet on the one being played.
-        //
-        // The signal is my own hand being spent, not theirs being good. How many cards someone
-        // holds is visible across any real table, so every tier may count them; what is IN a hand
-        // is hidden information, and pass 3 licensed reading that at Obsidian only. So the Ruby bot
-        // that first carries this card trades on the honest signal - "I have nothing left and they
-        // do" - and the Obsidian bot additionally refuses a trade that would not gain it anything.
-        foreach (Card card in me.Modifiers)
-        {
-            if (card.Effect != CardEffect.TradeHands || !CanPlayEffect(me, card)) continue;
-            if (me.CurrentScore > target) continue; // fix my own bust before playing for next set
-
-            // Priority 1 in the spec's decision order: if a plain card already takes the set off
-            // a score they have locked in, take the set and keep this.
-            if (you.IsHolding && CanBeatWithOrdinary(me, you.CurrentScore, target)) continue;
-
-            // This card is what empties my hand, so count what is left AFTER it goes.
-            int myRemaining = me.Modifiers.Count - 1;
-            if (myRemaining > MaxModifiersToTradeAway) continue;      // my hand is not spent yet
-            // A rescue card never changes hands, so it is not part of what the trade would take.
-            if (you.Modifiers.FindAll(c => !c.IsRescue).Count <= myRemaining) continue; // and theirs has to be bigger
-
-            if (CurrentAiSkill() == AiSkill.Reads
-                && ModifierStrength(you) <= ModifierStrength(me, ignore: card)) continue;
-
-            return PlayEffectCard(me, card);
-        }
-
-        // Recall - I take one of my own spent cards back. Asked LAST, below even Trade Hands: the
-        // card it returns cannot be played until the next turn, so it decides nothing about this
-        // one, and Trade Hands at least has a window that closes (their hand is fat NOW). Recall's
-        // window never closes, so it is always the thing to do when there is nothing better.
-        foreach (Card card in me.Modifiers)
-        {
-            if (card.Effect != CardEffect.Recall || !CanPlayEffect(me, card)) continue;
-            if (me.CurrentScore > target) continue; // fix this turn before playing for the next
-
-            // The floor, and the same one Trade Hands uses. Without it the bot burns Recall in the
-            // first turn of a match, when its hand is full and the card it gets back is worth less
-            // than the one it spends. The moment this card is FOR is "my hand is spent".
-            if (me.Modifiers.Count - 1 > MaxModifiersToTradeAway) continue;
-
-            // A card for next set is worth nothing when there may not be one. Either side one
-            // win from the match means this set can end it.
-            if (_gameState.SetsWonPlayer1 >= GameState.SetsToWinMatch - 1
-                || _gameState.SetsWonPlayer2 >= GameState.SetsToWinMatch - 1) continue;
-
-            Card wanted = PickRecallTarget(me, ignore: card);
-            if (wanted == null) continue;
-
-            return PlayEffectCard(me, card, wanted);
-        }
-
-        return false;
-    }
-
-    /// Which spent card the bot brings back: the biggest one it can - unless what is left in hand
-    /// has no way DOWN, in which case the biggest minus instead.
-    ///
-    /// That second clause is Player.EnsureBothSigns' reasoning applied to a hand of one, and it is
-    /// the difference between recalling a +4 it cannot use against 23 and recalling the -3 that
-    /// saves it. Hands last the whole match and are never topped up, so "playable right now" is
-    /// the wrong measure - a card that is dead this set is the best card in the hand next set.
-    private Card PickRecallTarget(Player player, Card ignore = null)
-    {
-        bool hasWayDown = false;
-        foreach (Card held in player.Modifiers)
-        {
-            if (held == ignore || held.Effect != CardEffect.None) continue;
-            if (held.CanFlipValue || held.Value < 0) { hasWayDown = true; break; }
-        }
-
-        Card best = null;
-        int bestScore = int.MinValue;
-
-        foreach (Card spent in player.SpentCards)
-        {
-            if (!CardEffects.IsPlainModifier(spent)) continue;
-
-            // A "+/-" card counts for more than its number, because it can be played either way up.
-            int score = Math.Abs(spent.Value) + (spent.CanFlipValue ? 1 : 0);
-
-            // ...and when the hand has no way down at all, ANY card that can go down outranks any
-            // size of plus. Scored rather than branched so the answer does not depend on the order
-            // the pile happens to be in.
-            if (!hasWayDown && (spent.CanFlipValue || spent.Value < 0)) score += 100;
-
-            if (score > bestScore) { best = spent; bestScore = score; }
-        }
-
-        return best;
-    }
-
-    /// What a hand is worth, for the one decision that needs to compare two of them.
-    ///
-    /// Deliberately NOT "cards that could be played legally this set": hands last the whole
-    /// match and are never topped up, so a +5 that is dead against 19 is the best card in the hand
-    /// next set. Magnitude is the measure that survives the set. A "+/-" card is worth more
-    /// than its number because it can be played either way up, and an effect card is worth taking
-    /// whatever it happens to be.
-    ///
-    /// `ignore` leaves out the card being spent to make the trade.
-    private static int ModifierStrength(Player player, Card ignore = null)
-    {
-        int strength = 0;
-        foreach (Card card in player.Modifiers)
-        {
-            if (card == ignore) continue;
-            if (card.Effect != CardEffect.None)
-            {
-                strength += EffectCardWorth;
-                continue;
-            }
-            strength += Math.Abs(card.Value) + (card.CanFlipValue ? FlipValueBonus : 0);
-        }
-        return strength;
-    }
-
-    private const int FlipValueBonus = 2;
-    private const int EffectCardWorth = 5;
-
-    /// Could this player still get to or under the target with the ordinary cards in their hand?
-    /// Counts a "+/-" card at its minus face, since that is the orientation that saves a bust.
-    ///
-    /// mayChain says whether they get to play more than one: a person can chain Modifiers for as
-    /// long as they like before ending the turn, while the bot plays at most one per turn - so the
-    /// same question has two different answers depending on who is being asked about. (From Gold
-    /// up the bot chains too, and asks this about itself with mayChain: true.)
-    ///
-    /// `ignore` leaves one card out of the count - the card the caller is about to spend, which is
-    /// no longer available to finish the job it starts.
-    private static bool CanGetUnder(Player player, int score, int target, bool mayChain, Card ignore = null)
-    {
-        if (score <= target) return true;
-
-        int everything = 0;
-        foreach (Card card in player.Modifiers)
-        {
-            if (card.Effect != CardEffect.None) continue;
-            if (card == ignore) continue;
-
-            int best = card.CanFlipValue ? -Math.Abs(card.Value) : card.Value;
-            if (!mayChain && score + best <= target) return true;
-            if (best < 0) everything += best;
-        }
-
-        return mayChain && score + everything <= target;
-    }
-
-    /// Is there an ordinary card that would put the bot past a score the player has locked in,
-    /// without busting? If so it does not need an effect card to win this set.
-    private static bool CanBeatWithOrdinary(Player me, int scoreToBeat, int target)
-    {
-        foreach (Card card in me.Modifiers)
-        {
-            if (card.Effect != CardEffect.None) continue;
-
-            int magnitude = Math.Abs(card.Value);
-            int[] orientations = card.CanFlipValue ? new[] { magnitude, -magnitude } : new[] { card.Value };
-            foreach (int value in orientations)
-            {
-                int result = me.CurrentScore + value;
-                if (result <= target && result > scoreToBeat) return true;
-            }
-        }
-        return false;
-    }
-
-    /// The bot looks at every card in its hand - and, for a "+/-" card, at BOTH orientations -
-    /// and takes the play that leaves it as high as possible without going over the target.
-    ///
-    /// `mayChain` says whether another card may follow this one in the same turn (Gold and up). It
-    /// changes exactly one thing, and it is the thing Alexander caught at the table: a bot on 26
-    /// against a target of 20, holding a -3 and a -4, plays NEITHER, because neither card alone
-    /// gets it under. Allowed to chain it plays the -4, then the -3, and takes the set.
-    private bool TryAiPlayModifierCard(bool mayChain = false)
-    {
-        int target = _gameState.TargetScore;
-        int score = _player2.CurrentScore;
-
-        // How high it wants to be before it stops improving: near the target normally, or one PAST
-        // Player 1 when it is chasing a score Player 1 has already locked in - drawing level with
-        // a locked score is a tie, which is replayed rather than won.
-        int wantAtLeast = Math.Max(10, target - 2);
-        if (_player1.IsHolding && _player1.CurrentScore <= target)
-        {
-            wantAtLeast = Math.Min(target, _player1.CurrentScore + 1);
-        }
-
-        Card bestCard = null;
-        int bestValue = 0;
-        int bestResult = int.MinValue;
-
-        // A partial climb down: still over the target, but closer, and only ever considered when
-        // what is LEFT in the hand can finish the job.
-        Card salvageCard = null;
-        int salvageValue = 0;
-        int salvageResult = int.MaxValue;
-
-        foreach (Card card in _player2.Modifiers)
-        {
-            // Effect cards are chosen by their own logic (pass 2), never scored as a gain to the
-            // bot's own total: Copy takes its number from the table, and a Shave carries Value 1
-            // while subtracting.
-            if (card.Effect != CardEffect.None) continue;
-            if (IsRecallLocked(_player2, card)) continue; // came back this turn, live from the next
-
-            int[] orientations = card.CanFlipValue ? new[] { card.Value, -card.Value } : new[] { card.Value };
-            foreach (int value in orientations)
-            {
-                int result = score + value;
-
-                if (result > target)
-                {
-                    // Never play INTO a bust. Already busted, chaining, and this card leaves it
-                    // strictly closer to legal - that is the one case worth a card, and only if
-                    // the rest of the hand can actually finish the climb down.
-                    if (!mayChain || score <= target || result >= score) continue;
-                    if (!CanGetUnder(_player2, result, target, mayChain: true, ignore: card)) continue;
-                    if (result >= salvageResult) continue;
-
-                    salvageCard = card;
-                    salvageValue = value;
-                    salvageResult = result;
-                    continue;
-                }
-
-                if (score <= target)
-                {
-                    if (result <= score) continue;                    // already safe: only play to improve
-                    if (result < wantAtLeast) continue;               // not worth burning a card for
-                }
-                if (result <= bestResult) continue;
-
-                bestCard = card;
-                bestValue = value;
-                bestResult = result;
-            }
-        }
-
-        // Landing legal always beats getting closer, so the salvage is only ever the fallback.
-        if (bestCard == null && salvageCard != null)
-        {
-            bestCard = salvageCard;
-            bestValue = salvageValue;
-            bestResult = salvageResult;
-        }
-
-        if (bestCard == null) return false;
-
-        if (bestCard.Value != bestValue) bestCard.FlipValue(); // play the +/- card the other way round
-
-        GD.Print($"AI Bot plays modifier {bestCard.CardName}. New Score: {bestResult} (Target: {target})");
-        _player2.PlayModifierCard(bestCard, _gameState);
-        NoteModifierMet(bestCard); // played at you, so you have met it
-        InstantiateCardView(bestCard, _p2BoardContainer);
-
-        UpdateUI();
-
-        return true;
+        await ToSignal(GetTree().CreateTimer(seconds), SceneTreeTimer.SignalName.Timeout);
+        return IsInsideTree(); // false: the scene was restarted or exited while it waited
     }
 
     // ------------------------------------------------------------------
@@ -2267,14 +1684,9 @@ public partial class GameManager : Node
         UpdateUI();
 
         // A re-opened BOT has to be sent round again: ResolveTurn refuses to move while either
-        // side can act, and nothing else would ever call ProcessAiTurn back.
-        if (reopened && _isVsBot && target == _player2)
-        {
-            // Mid-turn the call would hit ProcessAiTurn's own guard and vanish, and its tail would
-            // then close the turn we just re-opened. Leave a note for it to read instead.
-            if (_aiTurnInProgress) _p2ReopenedMidTurn = true;
-            else ProcessAiTurn();
-        }
+        // side can act, and nothing else would ever call the bot back. How it goes round - now, or
+        // as a note for the turn already in flight - is the bot's own business (Bot.TurnReopened).
+        if (reopened && _isVsBot && target == _player2) _bot.TurnReopened();
 
         return true;
     }
@@ -2747,20 +2159,21 @@ public partial class GameManager : Node
     // ------------------------------------------------------------------
     // UI refresh
     // ------------------------------------------------------------------
-    private void UpdateUI()
+    /// The two score lines, in whichever form the orientation and the mirror call for.
+    ///
+    /// Its own method because TWO things need it: UpdateUI, whenever a number changes, and
+    /// ApplyResponsiveLayout, BEFORE it measures - the form decided here is what the fixed slots
+    /// are sized around, so a layout pass that ran first sized them around the outgoing one.
+    ///
+    /// The score is the number the whole decision hangs on, so it says whose it is and what it is
+    /// chasing - "You  17/20" - rather than making the player find two labels on opposite sides of
+    /// the screen and hold a target in their head (playtest, 2026-09-14).
+    ///
+    /// The target appears once per READER, never twice. Against the bot one person is looking at
+    /// the screen, so it rides on their row only; in local 2-player each player reads their own
+    /// row, so both carry it.
+    private void RefreshScoreLines()
     {
-        // A picked-up card that can no longer be played (spent, or the player just held) is
-        // dropped before anything is drawn, so the status line and the buttons agree.
-        ValidateSelections();
-
-        // The score is the number the whole decision hangs on, so it now says whose it is and
-        // what it is chasing - "You  17/20" - rather than making the player find two labels on
-        // opposite sides of the screen and hold a target in their head (playtest, 2026-09-14).
-        //
-        // The target appears once per READER, never twice. Against the bot one person is looking
-        // at the screen, so it rides on their row only; in local 2-player each player reads their
-        // own row, so both carry it.
-        //
         // The size is set every refresh rather than once in _Ready, because the mirror toggle
         // changes which of the two forms is on screen while the game is running.
         int scoreFont = _portraitLayout
@@ -2788,6 +2201,15 @@ public partial class GameManager : Node
             SetScoreLines(_p1Score, scoreFont, "P1  ", _player1, null);
             SetScoreLines(_p2Score, scoreFont, "P2  ", _player2, null);
         }
+    }
+
+    private void UpdateUI()
+    {
+        // A picked-up card that can no longer be played (spent, or the player just held) is
+        // dropped before anything is drawn, so the status line and the buttons agree.
+        ValidateSelections();
+
+        RefreshScoreLines();
 
         UpdateTargetLabel();
         UpdateDeckCounter();
@@ -5373,10 +4795,10 @@ public partial class GameManager : Node
         if (_spotlightOverlay != null) _spotlightOverlay.Visible = false;
         RunData.Instance?.MarkTutorialSeen();
 
-        // The bot has been held for the whole walkthrough (ProcessAiTurn refuses to run while the
-        // tutorial is up) so the lesson could not desync from a table moving underneath it. Let it
-        // think now, and the turn resolves normally from here.
-        if (_isVsBot && _isGameStarted && !_gameState.IsGameOver) ProcessAiTurn();
+        // The bot has been held for the whole walkthrough (Bot.ProcessTurn refuses to run while
+        // the tutorial is up) so the lesson could not desync from a table moving underneath it.
+        // Let it think now, and the turn resolves normally from here.
+        if (_isVsBot && _isGameStarted && !_gameState.IsGameOver) _bot.ProcessTurn();
 
         // Deferred: FinishTutorial can be reached from inside UpdateUI (a DO step completing on
         // the last one), and a re-entrant refresh is the kind of thing that works until it doesn't.
