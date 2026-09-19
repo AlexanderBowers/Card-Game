@@ -216,6 +216,10 @@ public sealed class TableUi
     private void Defer(Action action) =>
         Callable.From(() => { if (GodotObject.IsInstanceValid(_root)) action(); }).CallDeferred();
 
+    /// A refresh at the end of the frame rather than now, and dropped if the table has gone away
+    /// in between. Callers used to get this free from Node.CallDeferred(MethodName.UpdateUI).
+    public void DeferRefresh() => Defer(Refresh);
+
     private Player P1 => _host.Player1;
     private Player P2 => _host.Player2;
     private GameState State => _host.State;

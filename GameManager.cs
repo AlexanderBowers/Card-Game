@@ -3,7 +3,7 @@ using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
 
-public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost
+public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IMenusHost, ITeachingHost, IPromptsHost
 {
     private GameState _gameState;
     private Player _player1;
@@ -92,10 +92,24 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost
             GameModeButton = _gameModeButton,
         });
 
+        _menus = new Menus(this, this, _ui, new Menus.Nodes
+        {
+            StartButton = _startButton,   ExitButton = _exitButton,
+            RestartButton = _restartButton, GameModeButton = _gameModeButton,
+            MirrorToggle = _mirrorToggle,
+        });
+
+        _prompts = new Prompts(this, this, _ui);
+
+        _teaching = new Teaching(this, this, _ui, _menus, new Teaching.Nodes
+        {
+            MainDeckPosition = _mainDeckPosition, P1ModifierContainer = _p1ModifierContainer,
+            P1ScoreLabel = _p1ScoreLabel,         P1WinsLabel = _p1WinsLabel,
+        });
+
         _table = new Table(this);
         _bot = new Bot(this); // before the first deal: the table asks it for the bot's hand
         _table.DealMatchHands();
-
 
         // Both scenes work in portrait and landscape (ApplyResponsiveLayout re-flows on every
         // resize / rotation), so the phone is free to follow its sensor.
@@ -149,9 +163,9 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost
         _ui.FillBoardWithSlots(_p2BoardContainer);
         _ui.BuildWinChips();
         _ui.BuildDeckCounter();
-        BuildSpotlight();
-        BuildSetEndOverlay();
-        BuildHowToPlay();
+        _teaching.BuildSpotlight();
+        _prompts.BuildSetEndOverlay();
+        _menus.BuildHowToPlay();
         _ui.CompactControlPanel(); // must precede BuildConfirmRows - see the method
         _ui.BuildConfirmRows();
         BuildIntermissionOverlays();
@@ -160,7 +174,7 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost
         GameSettings.Changed += OnSettingsChanged;
         BuildDebugRow();
         BuildOptions();
-        BuildStartMenu();
+        _menus.BuildStartMenu();
         _ui.ConfigureStatusLabels();
         _ui.StyleTableForReadability(); // after BuildConfirmRows: it styles those buttons too
         _ui.BuildScoreLines();          // after StyleTableForReadability moved the labels
@@ -179,16 +193,16 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost
         bool autoRun = _gameModeButton == null && RunData.Instance != null && RunData.Instance.AutoStartNextMatch;
         if (autoRun) RunData.Instance.AutoStartNextMatch = false;
 
-        bool autoLocal2P = _gameModeButton != null && _pendingLocal2Player;
+        bool autoLocal2P = _gameModeButton != null && Menus.PendingLocal2Player;
         if (autoLocal2P)
         {
-            _pendingLocal2Player = false;
+            Menus.PendingLocal2Player = false;
             _gameModeButton.Select(0); // or OnStartButtonPressed routes straight back to the solo scene
             if (_mirrorToggle != null) _mirrorToggle.Visible = true;
         }
 
         if (autoRun || autoLocal2P) CallDeferred(MethodName.OnStartButtonPressed);
-        else ShowStartMenu();
+        else _menus.ShowStartMenu();
     }
 
     public override void _ExitTree()
@@ -251,13 +265,13 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost
             {
                 if (RunData.Instance != null) RunData.Instance.AutoStartNextMatch = true;
             }
-            else _pendingLocal2Player = true;
+            else Menus.PendingLocal2Player = true;
         }
         else
         {
             // Land on the menu, and leave nothing behind that would skip past it.
             if (RunData.Instance != null) RunData.Instance.AutoStartNextMatch = false;
-            _pendingLocal2Player = false;
+            Menus.PendingLocal2Player = false;
         }
 
         GD.Print(sameMatch ? "Restarting match..." : "Returning to the start menu...");
@@ -268,7 +282,7 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost
     /// you to go back to start menu"). Quitting the app lives on the start menu now.
     private void OnExitPressed()
     {
-        HideTableMenu();
+        _menus.HideTableMenu();
         RestartToMenu();
     }
 
@@ -304,14 +318,13 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost
 
         // Decided BEFORE the hand is dealt and before the first shuffle, because staging is a
         // change to both of them.
-        bool tutorial = ShouldRunTutorial();
-        _tutorialStaged = tutorial && ShouldStageTutorial();
+        bool tutorial = _teaching.PrepareForMatch();
 
         _table.DealMatchHands(); // the hand has to last all three sets of the match
 
         StartNewSet(); // UpdateUI enables the Draw Card / Hold buttons
 
-        if (tutorial) StartTutorial();
+        if (tutorial) _teaching.StartTutorial();
     }
 
     /// Puts the solo scene onto the ladder: picks up the run in progress (or starts one), and takes
@@ -321,7 +334,7 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost
         _inRun = false;
         if (!_isVsBot)
         {
-            _gameState.TargetScore = _local2PlayerTarget; // the setup page's choice
+            _gameState.TargetScore = Menus.Local2PlayerTarget; // the setup page's choice
             _ui.ApplyRankTheme(); // the clear colour is global: put the plain felt back for 2-player
             return;
         }
@@ -398,7 +411,7 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost
 
         if (anyBust || bothHolding)
         {
-            if (OfferRescue()) return;
+            if (_prompts.OfferRescue()) return;
             EndSet();
             return;
         }
@@ -406,146 +419,66 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost
         DealCards();
     }
 
+
     // ------------------------------------------------------------------
-    // The rescue offer (claude/monetization-spec.md §3)
+    // The three that stop the game
     //
-    // Solo run, ladder stage 4+ or endless. A turn that ends with the player bust - and the bot
-    // not, since both over is a tie that is replayed anyway - rolls 15%. On a hit the set waits:
-    //
-    //   free player   Watch an ad -> a one-off card that puts them on exactly target - 1.
-    //                 No thanks   -> a copy of a random card from their 12-card deck (may not help).
-    //                 Closing the ad early counts as No thanks; no ad to show offers No thanks only.
-    //   No Ads owner  One "Rescue" button -> the exact card. Same 15%, no ad.
-    //   (Steam / desktop release builds have no ads, so they get the No Ads owner's version.)
-    //
-    // Whatever card is given goes into the hand and the turn re-opens: the player still has to
-    // play it, and the bust is judged again when the turn ends. At most one rescue per match -
-    // the flag is spent the moment the offer appears, whichever way the player answers.
+    // The set-end explanation, Recall's chooser and the bust rescue offer are in Prompts.cs. A
+    // prompt arrives rather than being entered, takes the screen, and hands back one decision.
     // ------------------------------------------------------------------
-    private Control _rescueOverlay;
-    private VBoxContainer _rescueBox;
+    private Prompts _prompts;
 
-    /// True from the moment an offer appears until its card is handed over (the ad included), so
-    /// nothing on the table can be pressed underneath it.
-    private bool _rescuePending;
+    Player IPromptsHost.Player1 => _player1;
+    Player IPromptsHost.Player2 => _player2;
+    GameState IPromptsHost.State => _gameState;
+    Random IPromptsHost.Rng => _random;
+    bool IPromptsHost.VsBot => _isVsBot;
+    bool IPromptsHost.InRun => _inRun;
+    bool IPromptsHost.TutorialRunning => _teaching.Running;
+    bool IPromptsHost.PlayEffectCard(Player owner, Card card, Card chosen) => PlayEffectCard(owner, card, chosen);
+    void IPromptsHost.SetSelection(Player player, Card card) => SetSelection(player, card);
 
-    /// Debug row: roll 100% instead of 15%, so the offer can be tested without busting for an hour.
-    private static bool _debugAlwaysRescue;
+    // ------------------------------------------------------------------
+    // The lessons
+    //
+    // The first-launch walkthrough and the coach marks are in Teaching.cs. Both watch the SCREEN
+    // rather than the rules, so what they ask for here is mostly "is anything else up?" - and the
+    // one thing they change is letting the bot think again once the lesson is over.
+    // ------------------------------------------------------------------
+    private Teaching _teaching;
 
-    private bool RescueShowing => _rescuePending;
+    Player ITeachingHost.Player1 => _player1;
+    GameState ITeachingHost.State => _gameState;
+    bool ITeachingHost.GameStarted => _isGameStarted;
+    bool ITeachingHost.VsBot => _isVsBot;
+    bool ITeachingHost.InRun => _inRun;
+    bool ITeachingHost.SetOverPending => _setOverPending;
+    bool ITeachingHost.PromptShowing => _prompts.Showing;
+    void ITeachingHost.ReleaseBot() => _bot.ProcessTurn();
+    void ITeachingHost.CollectionComplete() => AnnounceCollectionComplete();
 
-    /// True if the offer is now up and the set must wait for it.
-    private bool OfferRescue()
+    // ------------------------------------------------------------------
+    // The screens that cover the table
+    //
+    // The start menu and its sub-pages, How to Play, the collection log and the table's own Menu
+    // button are in Menus.cs. The contract is four verbs, because that is all a menu ever does:
+    // take one decision and hand it over.
+    // ------------------------------------------------------------------
+    private Menus _menus;
+
+    bool IMenusHost.GameStarted => _isGameStarted;
+    bool IMenusHost.VsBot => _isVsBot;
+    string IMenusHost.FinaleRulesLine(RunData run, string prefix) => FinaleRulesLine(run, prefix);
+    void IMenusHost.StartMatch() => OnStartButtonPressed();
+    void IMenusHost.OpenOptions(Action onClosed) => OpenOptions(onClosed);
+
+    /// The walkthrough is staged into the deal, so replaying it is a reload rather than a flag
+    /// flipped mid-match - and the flag has to be set before the reload, not after.
+    void IMenusHost.ReplayTutorial()
     {
-        RunData run = _inRun ? RunData.Instance : null;
-        if (run == null || !_isVsBot || _tutorialActive || !run.RescueEligible) return false;
-
-        int target = _gameState.TargetScore;
-        // Only a bust that LOSES the set. Both over is a tie and is replayed anyway.
-        if (_player1.CurrentScore <= target || _player2.CurrentScore > target) return false;
-
-        double chance = _debugAlwaysRescue ? 1.0 : RunData.RescueChance;
-        if (_random.NextDouble() >= chance)
-        {
-            GD.Print($"Rescue roll missed ({chance:P0}).");
-            return false;
-        }
-
-        run.UseMatchRescue(); // spent now: an offer is the match's one rescue, whatever the answer
-        _rescuePending = true;
-
-        if (_rescueOverlay == null)
-        {
-            _rescueOverlay = new Control { MouseFilter = Control.MouseFilterEnum.Stop };
-            AddChild(_rescueOverlay);
-            _rescueOverlay.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
-            OverlayUi.AddDim(_rescueOverlay);
-            _rescueBox = OverlayUi.AddPanel(_rescueOverlay);
-        }
-        OverlayUi.ClearChildren(_rescueBox);
-
-        int landing = target - 1;
-        bool guaranteed = !AdService.AdsActive; // bought No Ads, or a platform with no ads
-
-        if (guaranteed)
-        {
-            _rescueBox.AddChild(OverlayUi.MakeLabel("Bust!  Rescue!", 30, OverlayUi.MedalGold));
-            _rescueBox.AddChild(OverlayUi.MakeLabel(
-                $"Take a card that puts you on {landing}.\nPlay it before you end your turn.",
-                16, OverlayUi.Muted));
-            AddRescueButton("Rescue", 48, GiveExactRescue);
-        }
-        else
-        {
-            bool adReady = AdService.RewardedReady;
-            _rescueBox.AddChild(OverlayUi.MakeLabel("Bust!  Try again?", 30, OverlayUi.MedalGold));
-            _rescueBox.AddChild(OverlayUi.MakeLabel(
-                adReady
-                    ? $"Watch a short ad for a card that puts you on {landing}.\n"
-                      + "Or take a random card from your deck - it might not help."
-                    : "Take a random card from your deck.\nIt might be enough. It might not.",
-                16, OverlayUi.Muted));
-
-            if (adReady) AddRescueButton($"Watch ad - land on {landing}", 48, WatchRescueAd);
-            AddRescueButton("No thanks - random card", adReady ? 40 : 48, GiveRandomRescue);
-        }
-
-        MoveChild(_rescueOverlay, GetChildCount() - 1);
-        _rescueOverlay.Visible = true;
-        _ui.Refresh();
-        return true;
-    }
-
-    private void AddRescueButton(string text, int height, Action onPressed)
-    {
-        Button button = new Button { Text = text, CustomMinimumSize = new Vector2(300, height) };
-        button.Pressed += onPressed;
-        _rescueBox.AddChild(button);
-    }
-
-    private void WatchRescueAd()
-    {
-        _rescueOverlay.Visible = false; // the ad covers the table; the lock stays on
-        AdService.ShowRewarded(this, result =>
-        {
-            GD.Print($"Rescue ad: {result}");
-            if (result == AdService.RewardResult.Completed) GiveExactRescue();
-            else GiveRandomRescue(); // closed early, or nothing to show: that is "No thanks"
-        });
-    }
-
-    /// The card that lands the player on target - 1. Its value can be as low as -11 (a bust
-    /// overshoots by up to 10), which is below any card the game sells - hence its own card rather
-    /// than a lookup into the ordinary modifiers.
-    private void GiveExactRescue()
-    {
-        int value = (_gameState.TargetScore - 1) - _player1.CurrentScore;
-        Card rescue = new Card(value, CardType.Modifier) { IsRescue = true };
-        GiveRescueCard(rescue, $"Rescue: play your {rescue.DisplayText} to land on {_gameState.TargetScore - 1}.");
-    }
-
-    private void GiveRandomRescue()
-    {
-        Card copy = RunData.Instance?.DrawRescueCopy()
-                    ?? new Card(-_random.Next(1, 7), CardType.Modifier); // an empty deck; a live run never has one
-        copy.IsRescue = true;
-        GiveRescueCard(copy, $"Rescue: you take a {copy.DisplayText}. It might be enough.");
-    }
-
-    private void GiveRescueCard(Card card, string banner)
-    {
-        if (_rescueOverlay != null) _rescueOverlay.Visible = false;
-        _rescuePending = false;
-
-        // Into the hand - as a 5th card if the hand is full; it never replaces one the player chose.
-        // Deliberately NOT NoteModifierMet: a rescue card is not part of the collection.
-        _player1.Modifiers.Add(card);
-
-        // Re-open the turn exactly as an effect card does: no new draw, just a chance to play.
-        _player1.IsHolding = false;
-        _player1.HasEndedTurn = false;
-        _ui.ShowEffectBanner(banner);
-        _ui.Refresh();
+        Teaching.PendingTutorial = true;
+        RunData.Instance?.ReplayTutorial();
+        OnRestartPressed();
     }
 
     // ------------------------------------------------------------------
@@ -578,8 +511,8 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost
     void ITableUiHost.PlayPressed(Player player) => PlaySelectedCard(player);
     void ITableUiHost.PutBackPressed(Player player) => SetSelection(player, null);
     void ITableUiHost.FlipValuePressed(Player player) => FlipSelectedValue(player);
-    void ITableUiHost.BuildTableMenu() => BuildTableMenu();
-    void ITableUiHost.LayoutChanged() => RefreshSpotlight();
+    void ITableUiHost.BuildTableMenu() => _menus.BuildTableMenu();
+    void ITableUiHost.LayoutChanged() => _teaching.RefreshSpotlight();
     string ITableUiHost.FinaleRulesLine(RunData run, string prefix) => FinaleRulesLine(run, prefix);
 
     /// The table has just been repainted. The tutorial is watching the screen for the step it set,
@@ -587,8 +520,8 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost
     /// paint and before anything else happens.
     void ITableUiHost.AfterRefresh()
     {
-        CheckTutorialProgress();
-        DrainCoachMarks();
+        _teaching.CheckTutorialProgress();
+        _teaching.DrainCoachMarks();
     }
 
     // ------------------------------------------------------------------
@@ -606,12 +539,12 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost
     Random ITableHost.Rng => _random;
     RunData ITableHost.Run => _inRun ? RunData.Instance : null;
     bool ITableHost.VsBot => _isVsBot;
-    bool ITableHost.LocalSpecials => _local2PlayerSpecials;
-    bool ITableHost.TutorialStaged => _tutorialStaged;
-    IReadOnlyList<int> ITableHost.TutorialOpening => TutorialOpening;
-    IReadOnlyList<int> ITableHost.TutorialModifiers => TutorialModifiers;
+    bool ITableHost.LocalSpecials => Menus.Local2PlayerSpecials;
+    bool ITableHost.TutorialStaged => _teaching.Staged;
+    IReadOnlyList<int> ITableHost.TutorialOpening => Teaching.Opening;
+    IReadOnlyList<int> ITableHost.TutorialModifiers => Teaching.Modifiers;
 
-    List<CardEffect> ITableHost.UnlockedLocalSpecials() => UnlockedLocalSpecials();
+    List<CardEffect> ITableHost.UnlockedLocalSpecials() => Menus.UnlockedLocalSpecials();
     void ITableHost.DealBotHand() => _bot.DealHand();
 
     void ITableHost.ShowDrawnCard(Player player, Card card, float delay) =>
@@ -621,7 +554,7 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost
     {
         ClearSelections();
         if (!introduceCards) return;
-        QueueCoachMarksForModifiers();
+        _teaching.QueueCoachMarksForModifiers();
         foreach (Card card in _player1.Modifiers) NoteModifierMet(card);
     }
 
@@ -644,9 +577,9 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost
     int IBotTable.HandSize => Table.HandSize;
     int IBotTable.MaxModifierMagnitude => Table.MaxModifierMagnitude;
     bool IBotTable.VsBot => _isVsBot;
-    bool IBotTable.LocalSpecials => _local2PlayerSpecials;
+    bool IBotTable.LocalSpecials => Menus.Local2PlayerSpecials;
     bool IBotTable.BotPlayedEffectThisTurn => _table.HasPlayedEffect(_player2);
-    bool IBotTable.TutorialHoldsBot => _tutorialActive;
+    bool IBotTable.TutorialHoldsBot => _teaching.Running;
 
     bool IBotTable.IsRecallLocked(Player owner, Card card) => _table.IsRecallLocked(owner, card);
     bool IBotTable.CanPlayEffect(Player owner, Card card) => CanPlayEffect(owner, card);
@@ -781,7 +714,7 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost
 
         // The ladder's promise, kept: you meet a card when it is used on you, and the game says
         // once what it was. Only the bot's cards - your own were introduced when you were dealt them.
-        if (owner == _player2) QueueCoachMark(card, fromOpponent: true);
+        if (owner == _player2) _teaching.QueueCoachMark(card, fromOpponent: true);
         _ui.Refresh();
 
         // A re-opened BOT has to be sent round again: ResolveTurn refuses to move while either
@@ -797,8 +730,7 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost
     private bool HumanCanAct()
     {
         if (!_isGameStarted || _gameState.IsGameOver || _setOverPending) return false;
-        if (_recallOverlay != null && _recallOverlay.Visible) return false;
-        if (RescueShowing) return false;
+        if (_prompts.Showing) return false; // a set-end panel, a Recall choice or a rescue offer
         return true;
     }
 
@@ -950,7 +882,7 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost
         _setOverPending = true;
         _ui.Refresh(); // locks every button and Modifier; sides show Bust! / Holding
         if (_setInfoLabel != null) _setInfoLabel.Text = title;
-        ShowSetEnd(title, why, buttonText, next);
+        _prompts.ShowSetEnd(title, why, buttonText, next);
     }
 
     /// Banks the match result against the run and says what it was worth. The market and the deck
@@ -1090,9 +1022,9 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost
         adRow.Visible = GameSettings.ShowDebugButtons;
 
         Button rescue = new Button();
-        void RescueText() => rescue.Text = _debugAlwaysRescue ? "Rescue 100%" : "Rescue 15%";
+        void RescueText() => rescue.Text = Prompts.DebugAlwaysRescue ? "Rescue 100%" : "Rescue 15%";
         RescueText();
-        rescue.Pressed += () => { _debugAlwaysRescue = !_debugAlwaysRescue; RescueText(); };
+        rescue.Pressed += () => { Prompts.DebugAlwaysRescue = !Prompts.DebugAlwaysRescue; RescueText(); };
         adRow.AddChild(rescue);
 
         Button fill = new Button();
@@ -1293,7 +1225,7 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost
             // The card is not taken out of the hand until a choice is made - Cancel costs nothing.
             if (card.Effect == CardEffect.Recall && CanPlayEffect(player, card))
             {
-                ShowRecallOverlay(player, card);
+                _prompts.ShowRecallOverlay(player, card);
                 return;
             }
 
@@ -1373,392 +1305,6 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost
     // ------------------------------------------------------------------
 
 
-    private Control _tableMenuOverlay;
-    private VBoxContainer _tableMenuBox;
-
-    private void BuildTableMenu()
-    {
-        Node systemRow = _restartButton?.GetParent();
-        Control column = systemRow?.GetParent() as Control;
-        if (column == null) return;
-
-        _tableMenuOverlay = new Control { Visible = false, MouseFilter = Control.MouseFilterEnum.Stop };
-        AddChild(_tableMenuOverlay);
-        _tableMenuOverlay.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
-        OverlayUi.AddDim(_tableMenuOverlay);
-
-        VBoxContainer box = OverlayUi.AddPanel(_tableMenuOverlay, contentMargin: 30, separation: 12);
-        box.AddChild(OverlayUi.MakeLabel("Menu", MenuTitleFont));
-
-        Button howTo = new Button { Text = "How to Play" };
-        howTo.Pressed += () => { HideTableMenu(); ShowHowToPlay(); };
-        box.AddChild(howTo);
-
-        // Closing Options lands back on this menu, where the player opened it from.
-        Button options = new Button { Text = "Options" };
-        options.Pressed += () => { HideTableMenu(); OpenOptions(ShowTableMenu); };
-        box.AddChild(options);
-
-        // Restart, Exit and the mirror toggle MOVE rather than being rebuilt here. They are
-        // exported nodes whose signals are already connected in _Ready, and a rebuilt copy would
-        // need a second connection to the same handlers - two buttons, one of them dead.
-        if (_mirrorToggle != null)
-        {
-            _mirrorToggle.GetParent()?.RemoveChild(_mirrorToggle);
-            box.AddChild(_mirrorToggle);
-        }
-        if (_exitButton != null) _exitButton.Text = "Main Menu";
-        foreach (Button moved in new[] { _restartButton, _exitButton })
-        {
-            if (moved == null) continue;
-            moved.GetParent()?.RemoveChild(moved);
-            box.AddChild(moved);
-        }
-
-        // Replaying reloads the match, because the walkthrough is staged into the turn - so it
-        // has to be decided before the cards are dealt, not after. The static survives the reload.
-        Button replay = new Button { Text = "Replay the tutorial" };
-        replay.Pressed += () =>
-        {
-            HideTableMenu();
-            _pendingTutorial = true;
-            RunData.Instance?.ReplayTutorial();
-            OnRestartPressed();
-        };
-        box.AddChild(replay);
-
-        Button close = new Button { Text = "Back to the table" };
-        close.Pressed += HideTableMenu;
-        box.AddChild(close);
-
-        _tableMenuBox = box; // re-sized on every open: MenuButtonWidth follows the viewport
-
-        // ...and the one button left on the table, in the slot the Restart / Exit row had.
-        Button open = new Button { Text = "Menu" };
-        open.Pressed += ShowTableMenu;
-        column.AddChild(open);
-        if (systemRow.GetParent() == column) column.MoveChild(open, systemRow.GetIndex());
-    }
-
-    /// One size for every button on a full-screen menu. See the MenuButton* constants for why
-    /// this can be generous where the table cannot.
-    private void StyleMenuButton(Button button)
-    {
-        if (button == null) return;
-        button.AddThemeFontSizeOverride("font_size", MenuButtonFont);
-        button.CustomMinimumSize = new Vector2(MenuButtonWidth, MenuButtonHeight);
-    }
-
-    private void ShowTableMenu()
-    {
-        if (_tableMenuOverlay == null) return;
-
-        // Every button in here, on every open - including Restart, Main Menu and the mirror
-        // toggle, which were MOVED in from the table and so arrive carrying the table's sizing.
-        // Done here rather than at build time because MenuButtonWidth follows the viewport, and
-        // the viewport changes with the orientation and with how far portrait has zoomed in.
-        if (_tableMenuBox != null)
-            foreach (Node child in _tableMenuBox.GetChildren())
-                if (child is Button menuButton) StyleMenuButton(menuButton);
-
-        // The toggle only means anything with two people at one device.
-        if (_mirrorToggle != null) _mirrorToggle.Visible = !_isVsBot;
-
-        MoveChild(_tableMenuOverlay, GetChildCount() - 1); // above every other overlay
-        _tableMenuOverlay.Visible = true;
-    }
-
-    private void HideTableMenu()
-    {
-        if (_tableMenuOverlay != null) _tableMenuOverlay.Visible = false;
-    }
-
-
-    // ------------------------------------------------------------------
-    // Recall: choosing which spent card comes back
-    //
-    // Built in code from OverlayUi's pieces, like every other overlay here, so both the solo and
-    // the 2-player table get it with no NodePath wiring.
-    //
-    // It asks rather than picking for you. Always returning the most recently spent card would
-    // need no screen at all, and it would turn the interesting decision - spend a +4 early KNOWING
-    // you can have it again - into a lookup.
-    // ------------------------------------------------------------------
-    private Control _recallOverlay;
-    private VBoxContainer _recallBox;
-    private Player _recallChooser;
-    private Card _recallCard;
-
-    private void ShowRecallOverlay(Player chooser, Card recallCard)
-    {
-        _recallChooser = chooser;
-        _recallCard = recallCard;
-
-        if (_recallOverlay == null)
-        {
-            _recallOverlay = new Control { MouseFilter = Control.MouseFilterEnum.Stop };
-            AddChild(_recallOverlay); // scene root, after GameUI, so it draws and takes input on top
-            _recallOverlay.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
-            OverlayUi.AddDim(_recallOverlay);
-            _recallBox = OverlayUi.AddPanel(_recallOverlay);
-        }
-
-        OverlayUi.ClearChildren(_recallBox);
-
-        _recallBox.AddChild(OverlayUi.MakeLabel("Recall", 30));
-        _recallBox.AddChild(OverlayUi.MakeLabel(
-            "Take one spent Modifier back.\nYou can play it from your next turn.", 16, OverlayUi.Muted));
-
-        HBoxContainer row = new HBoxContainer { Alignment = BoxContainer.AlignmentMode.Center };
-        row.AddThemeConstantOverride("separation", 10);
-        _recallBox.AddChild(row);
-
-        foreach (Card spent in chooser.SpentCards)
-        {
-            if (!CardEffects.IsPlainModifier(spent)) continue;
-            Card choice = spent; // capture per iteration, not the loop variable
-            row.AddChild(OverlayUi.CardButton(_ui.CreateCardView(choice, _ui.ModifierCardSize), _ui.ModifierCardSize,
-                () => OnRecallChosen(choice)));
-        }
-
-        Button cancel = new Button { Text = "Cancel" };
-        cancel.Pressed += HideRecallOverlay;
-        _recallBox.AddChild(cancel);
-
-        // Mirrored 2-player: Player 2 reads the table upside down, so their chooser does too.
-        if (_recallOverlay.GetChildCount() > 1 && _recallOverlay.GetChild(1) is Control panel)
-        {
-            panel.PivotOffset = panel.Size / 2f;
-            panel.RotationDegrees = (_ui.IsMirrored && chooser == _player2) ? 180f : 0f;
-        }
-
-        _recallOverlay.Visible = true;
-        _ui.Refresh();
-    }
-
-    private void OnRecallChosen(Card chosen)
-    {
-        Player chooser = _recallChooser;
-        Card recallCard = _recallCard;
-        HideRecallOverlay();
-
-        if (chooser == null || recallCard == null) return;
-
-        // A refused play puts the card back under their finger with the reason showing, exactly as
-        // every other effect card does.
-        if (!PlayEffectCard(chooser, recallCard, chosen)) SetSelection(chooser, recallCard);
-        _ui.Refresh();
-    }
-
-    private void HideRecallOverlay()
-    {
-        if (_recallOverlay != null) _recallOverlay.Visible = false;
-        _recallChooser = null;
-        _recallCard = null;
-        _ui.Refresh();
-    }
-
-    // ------------------------------------------------------------------
-    // Set-end overlay
-    //
-    // A full-screen layer over the table (blocks every tap underneath) with a centred panel:
-    // title, why the set ended, and one button. In mirrored 2-player there's also an
-    // upside-down copy of the text at the top of the panel, nearest Player 2. Built in code so
-    // both scenes get it without any NodePath wiring.
-    // ------------------------------------------------------------------
-    private Control _setEndOverlay;
-    private Label _setEndTitle;
-    private Label _setEndBody;
-    private Button _setEndButton;
-    private Control _setEndFlippedHolder;   // plain Control: containers reset a child's rotation, holders don't
-    private VBoxContainer _setEndFlippedBox; // the node that is rotated 180 degrees
-    private Label _setEndFlippedTitle;
-    private Label _setEndFlippedBody;
-    private HSeparator _setEndDivider;
-    private Control _setEndSpacerTop;
-    private Control _setEndSpacerBottom;
-    private PanelContainer _setEndPanel;
-    private VBoxContainer _setEndBox;
-    private Action _setEndAction;
-
-    /// Pass 23: "set won text is much better, but ... also increase text size" (Alexander,
-    /// 2026-09-17). This panel is read once per set, from wherever the player is sitting, and it
-    /// is the only thing on screen while it is up - so it can afford to be the biggest text in
-    /// the game.
-    private const int SetEndTitleFont = 42;          // was 30
-    private const int SetEndBodyFont = 32;           // was 22
-    private const int SetEndTitleFontMirrored = 46;  // was 36
-    private const int SetEndBodyFontMirrored = 34;   // was 26
-    private const int SetEndButtonFont = 34;
-    /// The gap either side of the divider when two copies share the panel.
-    private const float SetEndMirrorGap = 34f;
-
-    private void BuildSetEndOverlay()
-    {
-        _setEndOverlay = new Control { Visible = false, MouseFilter = Control.MouseFilterEnum.Stop };
-        AddChild(_setEndOverlay); // on the scene root, after GameUI, so it draws (and gets input) on top
-        _setEndOverlay.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
-
-        ColorRect dim = new ColorRect { Color = new Color(0, 0, 0, 0.5f), MouseFilter = Control.MouseFilterEnum.Ignore };
-        _setEndOverlay.AddChild(dim);
-        dim.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
-
-        PanelContainer panel = new PanelContainer();
-        StyleBoxFlat style = new StyleBoxFlat
-        {
-            BgColor = new Color(0.1f, 0.14f, 0.2f, 0.98f),
-            BorderColor = new Color(0.55f, 0.65f, 0.8f),
-        };
-        style.SetBorderWidthAll(2);
-        style.SetCornerRadiusAll(12);
-        style.SetContentMarginAll(28);
-        panel.AddThemeStyleboxOverride("panel", style);
-        _setEndOverlay.AddChild(panel);
-        // Anchored to the centre with zero offsets: a Control grows to its minimum size, and with
-        // grow "both" it stays centred, so the panel always hugs its content.
-        panel.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.Center);
-        panel.GrowHorizontal = Control.GrowDirection.Both;
-        panel.GrowVertical = Control.GrowDirection.Both;
-
-        VBoxContainer box = new VBoxContainer { Alignment = BoxContainer.AlignmentMode.Center };
-        box.AddThemeConstantOverride("separation", 14);
-        panel.AddChild(box);
-        _setEndPanel = panel;
-        _setEndBox = box;
-
-        // Player 2's upside-down copy (mirrored 2-player only). Same pattern as P2Holder/P2Rotator.
-        _setEndFlippedHolder = new Control { Visible = false, MouseFilter = Control.MouseFilterEnum.Ignore };
-        box.AddChild(_setEndFlippedHolder);
-        _setEndFlippedBox = new VBoxContainer { Alignment = BoxContainer.AlignmentMode.Center };
-        _setEndFlippedBox.AddThemeConstantOverride("separation", 6);
-        _setEndFlippedHolder.AddChild(_setEndFlippedBox);
-        _setEndFlippedBox.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
-        _setEndFlippedBox.Resized += () =>
-        {
-            _setEndFlippedBox.PivotOffset = _setEndFlippedBox.Size / 2f;
-            _setEndFlippedBox.RotationDegrees = 180f;
-        };
-        _setEndFlippedTitle = MakeOverlayLabel(SetEndTitleFont);
-        _setEndFlippedBody = MakeOverlayLabel(SetEndBodyFont);
-        _setEndFlippedBox.AddChild(_setEndFlippedTitle);
-        _setEndFlippedBox.AddChild(_setEndFlippedBody);
-        // Mirrored only: a gap either side of the divider so the two copies read as two blocks
-        // rather than one. Pass 22 made these EXPANDING, inside a panel stretched to 86% x 62% of
-        // the screen, which threw each copy out to its own edge; Alexander, 2026-09-17: "centre
-        // the text instead of having them at the edges". So they are FIXED gaps now, the panel
-        // hugs its content again, and the whole block sits in the middle of the screen with each
-        // player's copy the right way up for them.
-        _setEndSpacerTop = new Control { Visible = false, MouseFilter = Control.MouseFilterEnum.Ignore };
-        box.AddChild(_setEndSpacerTop);
-        _setEndDivider = new HSeparator { Visible = false };
-        box.AddChild(_setEndDivider);
-        _setEndSpacerBottom = new Control { Visible = false, MouseFilter = Control.MouseFilterEnum.Ignore };
-        box.AddChild(_setEndSpacerBottom);
-
-        _setEndTitle = MakeOverlayLabel(SetEndTitleFont);
-        _setEndBody = MakeOverlayLabel(SetEndBodyFont);
-        box.AddChild(_setEndTitle);
-        box.AddChild(_setEndBody);
-
-        _setEndButton = new Button { Text = "Next Set" };
-        _setEndButton.AddThemeFontSizeOverride("font_size", SetEndButtonFont);
-        _setEndButton.CustomMinimumSize = new Vector2(260, 84);
-        _setEndButton.Pressed += OnSetEndButtonPressed;
-        box.AddChild(_setEndButton);
-    }
-
-    private static Label MakeOverlayLabel(int fontSize)
-    {
-        Label label = new Label { HorizontalAlignment = HorizontalAlignment.Center };
-        label.AddThemeFontSizeOverride("font_size", fontSize);
-        return label;
-    }
-
-    private void ShowSetEnd(string title, string why, string buttonText, Action onAcknowledged)
-    {
-        _setEndAction = onAcknowledged;
-        if (_setEndOverlay == null)
-        {
-            onAcknowledged?.Invoke(); // overlay failed to build: don't strand the game
-            return;
-        }
-
-        // Make it visible first: minimum sizes are only reliable for nodes visible in the tree,
-        // and everything below resolves in the same frame before it is drawn.
-        MoveChild(_setEndOverlay, GetChildCount() - 1); // above any stray animation card
-        _setEndOverlay.Visible = true;
-
-        _setEndTitle.Text = title;
-        _setEndBody.Text = why;
-        _setEndButton.Text = buttonText;
-
-        bool mirrored = _ui.IsMirrored;
-        _setEndFlippedHolder.Visible = mirrored;
-        _setEndDivider.Visible = mirrored;
-        _setEndSpacerTop.Visible = mirrored;
-        _setEndSpacerBottom.Visible = mirrored;
-
-        // Centred, both forms: the panel hugs its content and the content sits in the middle of
-        // the screen. Mirrored only adds the two fixed gaps and the divider between the copies.
-        _setEndPanel.CustomMinimumSize = Vector2.Zero;
-        float gap = mirrored ? SetEndMirrorGap : 0f;
-        _setEndSpacerTop.CustomMinimumSize = new Vector2(0, gap);
-        _setEndSpacerBottom.CustomMinimumSize = new Vector2(0, gap);
-        _setEndBox.AddThemeConstantOverride("separation", mirrored ? 18 : 16);
-        int titleFont = mirrored ? SetEndTitleFontMirrored : SetEndTitleFont;
-        int bodyFont = mirrored ? SetEndBodyFontMirrored : SetEndBodyFont;
-        // One column width for every line, so both copies are the same block and each line is
-        // centred in it. The body is a sentence, and at this size a long one would otherwise push
-        // the panel wider than the phone, so it wraps instead.
-        float wrap = Mathf.Clamp(GetViewport().GetVisibleRect().Size.X * 0.78f, 340f, 620f);
-        foreach (Label heading in new[] { _setEndTitle, _setEndFlippedTitle })
-        {
-            heading.AddThemeFontSizeOverride("font_size", titleFont);
-            heading.AutowrapMode = TextServer.AutowrapMode.WordSmart;
-            heading.CustomMinimumSize = new Vector2(wrap, 0);
-        }
-        foreach (Label text in new[] { _setEndBody, _setEndFlippedBody })
-        {
-            text.AddThemeFontSizeOverride("font_size", bodyFont);
-            text.AutowrapMode = TextServer.AutowrapMode.WordSmart;
-            text.CustomMinimumSize = new Vector2(wrap, 0);
-        }
-        _setEndFlippedBox.AddThemeConstantOverride("separation", mirrored ? 12 : 6);
-        if (mirrored)
-        {
-            _setEndFlippedTitle.Text = title;
-            _setEndFlippedBody.Text = why;
-            // The holder reports 0x0 on its own; give it the rotated block's footprint.
-            _setEndFlippedHolder.CustomMinimumSize = _setEndFlippedBox.GetCombinedMinimumSize();
-        }
-        CallDeferred(MethodName.UpdateSetEndFlippedSize); // re-measure once the first layout pass has run
-    }
-
-    private void UpdateSetEndFlippedSize()
-    {
-        // Hug the content again (a panel never shrinks by itself after being mirrored-size) and
-        // stay centred.
-        if (_setEndPanel != null)
-        {
-            _setEndPanel.ResetSize();
-            _setEndPanel.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.Center, Control.LayoutPresetMode.Minsize);
-            _setEndPanel.GrowHorizontal = Control.GrowDirection.Both;
-            _setEndPanel.GrowVertical = Control.GrowDirection.Both;
-        }
-        if (_setEndFlippedHolder == null || !_setEndFlippedHolder.Visible) return;
-        _setEndFlippedHolder.CustomMinimumSize = _setEndFlippedBox.GetCombinedMinimumSize();
-        _setEndFlippedBox.PivotOffset = _setEndFlippedBox.Size / 2f;
-        _setEndFlippedBox.RotationDegrees = 180f;
-    }
-
-    private void OnSetEndButtonPressed()
-    {
-        _setEndOverlay.Visible = false;
-        Action action = _setEndAction;
-        _setEndAction = null;
-        action?.Invoke();
-    }
-
     // ------------------------------------------------------------------
     // The start menu
     //
@@ -1774,58 +1320,6 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost
     // player discover it.
     // ------------------------------------------------------------------
 
-    /// Set just before ChangeSceneToFile sends the player to the two-player table, and read by the
-    /// _Ready on the other side, so they land in a game rather than on a second front door.
-    ///
-    /// A static rather than a field on RunData, which is where AutoStartNextMatch lives: RunData is
-    /// the RUN, and local 2-player never touches a run - putting this there would be the first
-    /// thing to contradict that file's opening line. A static outlives ChangeSceneToFile for the
-    /// same reason the autoload does, which is the whole reason either of them works.
-    private static bool _pendingLocal2Player;
-
-    private Control _startMenuOverlay;
-    private VBoxContainer _startMenuBox;
-    private Button _newRunButton;
-    private bool _newRunArmed; // "New Run" over an unfinished climb asks a second time
-    private bool _endlessArmed; // ...and so does Endless
-
-    /// Opaque, and a deeper shade of the table's own felt so the menu still reads as this game.
-    private static readonly Color MenuBackdrop = new Color(0.04f, 0.10f, 0.07f);
-
-    private void BuildStartMenu()
-    {
-        _startMenuOverlay = new Control { Visible = false, MouseFilter = Control.MouseFilterEnum.Stop };
-        AddChild(_startMenuOverlay);
-        _startMenuOverlay.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
-
-        // OPAQUE, not OverlayUi.AddDim (Alexander, 2026-09-13). Every other overlay in the game
-        // sits on top of a live table and wants it showing through - that is the point of the dim,
-        // and why the intermission is an overlay rather than a scene change. This one is the screen
-        // BEFORE there is a table, and a dealt hand behind it says a game is already running.
-        ColorRect backdrop = new ColorRect { Color = MenuBackdrop, MouseFilter = Control.MouseFilterEnum.Ignore };
-        _startMenuOverlay.AddChild(backdrop);
-        backdrop.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
-
-        _startMenuBox = OverlayUi.AddPanel(_startMenuOverlay, contentMargin: 32, separation: 12);
-
-        _collectionOverlay = new CollectionOverlay();
-        AddChild(_collectionOverlay);
-        _collectionOverlay.Setup(_ui.CreateCardView);
-    }
-
-    // ------------------------------------------------------------------
-    // The collection log
-    // ------------------------------------------------------------------
-    private CollectionOverlay _collectionOverlay;
-
-    /// Fixed rather than scaled with the table: six across has to fit a phone held upright.
-    private static readonly Vector2 CollectionCardSize = TableUi.BaseCardSize * 0.65f;
-
-    private void OpenCollection()
-    {
-        // Closing refreshes the menu (the count on its button) and the deck back (the toggle).
-        _collectionOverlay?.Open(CollectionCardSize, () => { FillStartMenu(); _ui.ApplyRankTheme(); });
-    }
 
     /// Plain and flip-value Modifiers only; effect cards are marked when a coach-mark explains
     /// them. Ladder only - local 2-player deals random hands and has no profile to write to.
@@ -1841,392 +1335,6 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost
         _ui.ApplyRankTheme();
     }
 
-    private void ShowStartMenu()
-    {
-        if (_startMenuOverlay == null) return;
-
-        FillStartMenu();
-        _startMenuOverlay.Visible = true;
-
-        // The menu replaces them both, and they are behind an opaque backdrop anyway. Leaving them
-        // live is two ways to do one thing, and the dropdown's answer is not the menu's.
-        if (_startButton != null) _startButton.Visible = false;
-        if (_gameModeButton != null) _gameModeButton.Visible = false;
-    }
-
-    private void HideStartMenu()
-    {
-        if (_startMenuOverlay != null) _startMenuOverlay.Visible = false;
-    }
-
-    /// Rebuilt on every show rather than once, because what it has to say changes: whether there is
-    /// a climb to continue, which rung it is on, and what the player has banked.
-    private void FillStartMenu()
-    {
-        OverlayUi.ClearChildren(_startMenuBox);
-        _newRunArmed = false;
-
-        // The project's own name, so renaming the game renames this too instead of leaving a second
-        // copy of the title to go stale.
-        string title = ProjectSettings.GetSetting("application/config/name").AsString();
-        if (string.IsNullOrWhiteSpace(title)) title = "Card Game";
-        _startMenuBox.AddChild(OverlayUi.MakeLabel(title, MenuTitleFont));
-
-        RunData run = RunData.Instance;
-        bool runInProgress = run != null && run.RunActive && !run.RunComplete;
-
-        Label blurb = OverlayUi.MakeLabel(
-            runInProgress ? "A climb is in progress." : "Climb the ladder, or play someone across the table.",
-            MenuNoteFont, OverlayUi.Muted);
-        blurb.AutowrapMode = TextServer.AutowrapMode.WordSmart;
-        blurb.CustomMinimumSize = new Vector2(MenuButtonWidth, 0);
-        _startMenuBox.AddChild(blurb);
-        _startMenuBox.AddChild(MenuSpacer());
-
-        // First, and named with the rung, because a player who left mid-ladder came back for this
-        // one thing and should not have to guess which button keeps their climb.
-        if (runInProgress && run.Endless)
-        {
-            AddMenuButton($"Continue - Endless, streak {run.EndlessStreak}",
-                          $"target {run.CurrentTarget}{FinaleRulesLine(run, "   -   ")}",
-                          () => MenuStartRun(fresh: false));
-        }
-        else if (runInProgress)
-        {
-            AddMenuButton($"Continue - Match {run.MatchNumber} of {RunData.LadderLength}",
-                          $"{run.CurrentOpponent}   -   target {run.CurrentTarget}",
-                          () => MenuStartRun(fresh: false));
-        }
-
-        // Over an unfinished climb this button throws the climb away, so it asks twice. A second
-        // tap is the cheapest confirmation there is and it costs no second overlay.
-        _newRunButton = AddMenuButton(
-            runInProgress ? "New Run" : "Start a Run",
-            runInProgress ? "Gives up the climb above. Your cards and medals stay." : null,
-            () =>
-            {
-                if (runInProgress && !_newRunArmed)
-                {
-                    _newRunArmed = true;
-                    _newRunButton.Text = "New Run - tap again to give up the climb";
-                    return;
-                }
-                MenuStartRun(fresh: true);
-            });
-
-        // No explanatory line under either of the two plain modes (Alexander, 2026-09-13): a menu
-        // that describes its own buttons is a menu that does not trust them. The one note that
-        // stays is the New Run warning, which is not a description - it is a consequence.
-        // Endless: earned by clearing the ladder once. Over a run in progress it gives that run up,
-        // so it asks twice, exactly as New Run does.
-        if (run != null && run.EndlessUnlocked)
-        {
-            _endlessArmed = false;
-            Button endless = null;
-            endless = AddMenuButton(
-                run.EndlessBest > 0 ? $"Endless   (best streak {run.EndlessBest})" : "Endless",
-                null,
-                () =>
-                {
-                    if (runInProgress && !_endlessArmed)
-                    {
-                        _endlessArmed = true;
-                        endless.Text = "Endless - tap again to give up the run above";
-                        return;
-                    }
-                    RunData.Instance.StartEndless();
-                    MenuStartRun(fresh: false);
-                });
-
-            // Only once there is something on it. An empty board on a player who has unlocked
-            // endless but never played it is a row that explains nothing.
-            if (run.EndlessScores.Count > 0)
-                AddMenuButton("Endless Scores", null, FillEndlessScores);
-        }
-
-        AddMenuButton("Local 2-Player", null, FillLocal2PlayerSetup);
-
-        _startMenuBox.AddChild(MenuSpacer());
-        AddMenuButton("How to Play", null, ShowHowToPlay);
-        AddMenuButton("Options", null, () => OpenOptions());
-        if (run != null)
-            AddMenuButton($"Collection   {run.CollectionFound}/{RunData.CollectionKeys.Length}", null, OpenCollection);
-
-        // Quit everywhere but iOS (Alexander, 2026-09-16: "start menu should have quit game").
-        // Android allows an app to close itself; Apple's review guidelines reject a quit button,
-        // and iOS apps are left to the home gesture.
-        if (!OS.HasFeature("ios")) AddMenuButton("Quit Game", null, () => GetTree().Quit());
-
-        // The proof that a lost run did not erase anything - which is the promise the run makes,
-        // and the one place the player can be shown it before deciding to climb again.
-        if (run != null && (run.Medals > 0 || run.FurthestStep > 0))
-        {
-            _startMenuBox.AddChild(MenuSpacer());
-            Label banked = OverlayUi.MakeLabel(
-                $"{run.Medals} medals   -   {run.Inventory.Count} cards owned   -   best: match {run.FurthestStep + 1}",
-                MenuNoteFont, OverlayUi.Muted);
-            banked.AutowrapMode = TextServer.AutowrapMode.WordSmart;
-            banked.CustomMinimumSize = new Vector2(MenuButtonWidth, 0);
-            _startMenuBox.AddChild(banked);
-        }
-    }
-
-    /// One row of the menu: a wide button, and optionally a line under it saying what it does. The
-    /// note is a separate label rather than a second line inside the button so that arming the New
-    /// Run button has exactly one string to rewrite.
-    private Button AddMenuButton(string text, string note, Action onPressed)
-    {
-        Button button = new Button { Text = text, CustomMinimumSize = new Vector2(MenuButtonWidth, MenuButtonHeight) };
-        button.AddThemeFontSizeOverride("font_size", MenuButtonFont);
-        if (onPressed != null) button.Pressed += onPressed;
-        _startMenuBox.AddChild(button);
-
-        if (!string.IsNullOrEmpty(note))
-        {
-            Label label = OverlayUi.MakeLabel(note, MenuNoteFont, OverlayUi.Muted);
-            label.AutowrapMode = TextServer.AutowrapMode.WordSmart;
-            label.CustomMinimumSize = new Vector2(MenuButtonWidth, 0);
-            _startMenuBox.AddChild(label);
-        }
-
-        return button;
-    }
-
-    // Pass 25 (Alexander, 2026-09-17: "menu text needs to be significantly enlarged"). These are
-    // FREE in a way the table's fonts are not: every menu is a full-screen overlay over the table
-    // rather than part of MainLayout, so EnsureLayoutFits never measures them and nothing shrinks
-    // to pay for them. The only ceiling is the panel fitting a phone held upright, which at a
-    // 720-wide base leaves room for a 420 button and its margins.
-    /// The widest a menu button may get, and how much air is left either side of it. The width
-    /// is CLAMPED to the viewport rather than fixed, because portrait enlarges the whole UI when
-    /// there is room (EnsureLayoutFits) - which shrinks the design-pixel viewport, sometimes well
-    /// below the 720 base. A fixed 420 would hang off both edges of a table zoomed that far in.
-    private const float MenuButtonWidthMax = 460f; // was a fixed 340
-    private const float MenuSideGutter = 44f;
-    private float MenuButtonWidth => Mathf.Clamp(
-        GetViewport().GetVisibleRect().Size.X - 2f * MenuSideGutter, 240f, MenuButtonWidthMax);
-    private const float MenuButtonHeight = 62; // was 44
-    private const int MenuButtonFont = 26;     // was 18
-    private const int MenuTitleFont = 52;      // was 40
-    private const int MenuNoteFont = 17;       // was 12
-    private const int MenuHeadingFont = 34;    // a sub-page's title (Local 2-Player, Endless Scores)
-    private const int MenuSectionFont = 26;    // a heading inside a sub-page (Target, Specials)
-
-    private static Control MenuSpacer() => new Control { CustomMinimumSize = new Vector2(0, 8) };
-
-    /// The ladder lives in the solo scene. From the two-player table that is a scene change, and
-    /// the note RunData already keeps for the deck screen is what makes the new scene deal itself.
-    private void MenuStartRun(bool fresh)
-    {
-        if (fresh) RunData.Instance?.StartNewRun();
-
-        if (_gameModeButton != null)
-        {
-            if (RunData.Instance != null) RunData.Instance.AutoStartNextMatch = true;
-            GetTree().ChangeSceneToFile("res://solo_table_scene.tscn");
-            return;
-        }
-
-        HideStartMenu();
-        OnStartButtonPressed();
-    }
-
-    // ------------------------------------------------------------------
-    // Local 2-player setup (roadmap, from the mobile playtest group's ask for effect cards in
-    // local 2-player). Two choices before the deal: the target, and whether the special Modifiers
-    // are in the hands. Static for the same reason _pendingLocal2Player is - they have to survive
-    // the scene change and Restart's reload - and, like it, never saved to disk: the menu
-    // remembers the last choice for this launch only.
-    // ------------------------------------------------------------------
-    private static readonly int[] Local2PlayerTargets = { 18, 20, 23 };
-    private static int _local2PlayerTarget = 20;
-    private static bool _local2PlayerSpecials;
-
-    /// The start menu's second page. Reuses the menu panel rather than opening another overlay,
-    /// so Back is a refill and there is no second panel to stack or dismiss.
-    private void FillLocal2PlayerSetup()
-    {
-        // Only what the player has met in single player is offered (Alexander, 2026-09-16):
-        // a target once a ladder rung has been played at it, a special once its rung has been
-        // reached. Nothing unlocked means nothing to choose, so the page is skipped.
-        List<int> targets = UnlockedLocalTargets();
-        List<CardEffect> effects = UnlockedLocalSpecials();
-        SanitizeLocal2PlayerChoices(targets, effects);
-        if (targets.Count <= 1 && effects.Count == 0)
-        {
-            MenuStartLocal2Player();
-            return;
-        }
-
-        OverlayUi.ClearChildren(_startMenuBox);
-        _startMenuBox.AddChild(OverlayUi.MakeLabel("Local 2-Player", MenuHeadingFont));
-        _startMenuBox.AddChild(MenuSpacer());
-
-        if (targets.Count > 1)
-        {
-            _startMenuBox.AddChild(OverlayUi.MakeLabel("Target", MenuSectionFont));
-            HBoxContainer targetRow = AddChoiceRow();
-            foreach (int target in targets)
-            {
-                int value = target;
-                AddChoice(targetRow, value.ToString(), _local2PlayerTarget == value,
-                          () => _local2PlayerTarget = value);
-            }
-        }
-
-        if (effects.Count > 0)
-        {
-            _startMenuBox.AddChild(MenuSpacer());
-            _startMenuBox.AddChild(OverlayUi.MakeLabel("Special Modifiers", MenuSectionFont));
-            HBoxContainer specials = AddChoiceRow();
-            AddChoice(specials, "Off", !_local2PlayerSpecials, () => _local2PlayerSpecials = false);
-            AddChoice(specials, "On", _local2PlayerSpecials, () => _local2PlayerSpecials = true);
-
-            List<string> names = new List<string>();
-            foreach (CardEffect effect in effects) names.Add(CardEffects.Label(effect));
-            Label note = OverlayUi.MakeLabel(
-                $"On: each hand has one special Modifier - {string.Join(", ", names)}.",
-                MenuNoteFont, OverlayUi.Muted);
-        note.AutowrapMode = TextServer.AutowrapMode.WordSmart;
-        note.HorizontalAlignment = HorizontalAlignment.Center;
-            note.CustomMinimumSize = new Vector2(MenuButtonWidth, 0);
-            _startMenuBox.AddChild(note);
-        }
-
-        _startMenuBox.AddChild(MenuSpacer());
-        AddMenuButton("Deal", null, MenuStartLocal2Player);
-        AddMenuButton("Back", null, FillStartMenu);
-    }
-
-    /// The endless board (pass 24). A page of the start menu rather than an overlay of its own:
-    /// it is read from the menu, it is five rows long, and FillLocal2PlayerSetup already proved
-    /// the pattern - swap the menu's contents, and Back swaps them straight back.
-    private void FillEndlessScores()
-    {
-        RunData run = RunData.Instance;
-        if (run == null) { FillStartMenu(); return; }
-
-        OverlayUi.ClearChildren(_startMenuBox);
-        _startMenuBox.AddChild(OverlayUi.MakeLabel("Endless Scores", MenuHeadingFont));
-        _startMenuBox.AddChild(OverlayUi.MakeLabel(
-            "How many matches in a row, before the run ended.", MenuNoteFont, OverlayUi.Muted));
-        _startMenuBox.AddChild(MenuSpacer());
-
-        for (int i = 0; i < run.EndlessScores.Count; i++)
-        {
-            RunData.EndlessScore score = run.EndlessScores[i];
-            bool best = i == 0;
-
-            HBoxContainer row = new HBoxContainer();
-            row.CustomMinimumSize = new Vector2(MenuButtonWidth, 0);
-            row.AddThemeConstantOverride("separation", 10);
-            _startMenuBox.AddChild(row);
-
-            Label place = OverlayUi.MakeLabel($"{i + 1}.", 26, best ? OverlayUi.MedalGold : OverlayUi.Muted);
-            place.CustomMinimumSize = new Vector2(44, 0);
-            place.HorizontalAlignment = HorizontalAlignment.Right;
-            row.AddChild(place);
-
-            Label streak = OverlayUi.MakeLabel($"{score.Streak}", 34, best ? OverlayUi.MedalGold : Colors.White);
-            streak.CustomMinimumSize = new Vector2(72, 0);
-            streak.HorizontalAlignment = HorizontalAlignment.Left;
-            row.AddChild(streak);
-
-            Label when = OverlayUi.MakeLabel(
-                score.UnixTime > 0 ? Time.GetDateStringFromUnixTime(score.UnixTime) : string.Empty,
-                MenuNoteFont, OverlayUi.Muted);
-            when.HorizontalAlignment = HorizontalAlignment.Left;
-            when.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
-            row.AddChild(when);
-        }
-
-        _startMenuBox.AddChild(MenuSpacer());
-        Label footer = OverlayUi.MakeLabel(
-            $"Best streak {run.EndlessBest}.   The rules are re-rolled every match; "
-            + $"past a streak of {RunData.EndlessThirdRuleStreak} the opponent carries three specials.",
-            MenuNoteFont, OverlayUi.Muted);
-        footer.AutowrapMode = TextServer.AutowrapMode.WordSmart;
-        footer.CustomMinimumSize = new Vector2(MenuButtonWidth, 0);
-        _startMenuBox.AddChild(footer);
-
-        _startMenuBox.AddChild(MenuSpacer());
-        AddMenuButton("Back", null, FillStartMenu);
-    }
-
-    private const int DefaultLocalTarget = 20;
-
-    /// 20 always; 18 and 23 once a ladder rung at that target has been reached.
-    private static List<int> UnlockedLocalTargets()
-    {
-        List<int> targets = new List<int>();
-        foreach (int target in Local2PlayerTargets)
-        {
-            if (target == DefaultLocalTarget || (RunData.Instance?.TargetReached(target) ?? false))
-                targets.Add(target);
-        }
-        return targets;
-    }
-
-    private static List<CardEffect> UnlockedLocalSpecials() =>
-        RunData.Instance?.MetEffects() ?? new List<CardEffect>();
-
-    /// A remembered choice that is not on offer (a wiped save, say) falls back to the default.
-    private static void SanitizeLocal2PlayerChoices(List<int> targets, List<CardEffect> effects)
-    {
-        if (!targets.Contains(_local2PlayerTarget)) _local2PlayerTarget = DefaultLocalTarget;
-        if (effects.Count == 0) _local2PlayerSpecials = false;
-    }
-
-    private HBoxContainer AddChoiceRow()
-    {
-        HBoxContainer row = new HBoxContainer { Alignment = BoxContainer.AlignmentMode.Center };
-        row.AddThemeConstantOverride("separation", 10);
-        _startMenuBox.AddChild(row);
-        return row;
-    }
-
-    /// One option of a pick-one row. Toggle buttons sharing the row's ButtonGroup, so the pressed
-    /// look IS the current choice and there is nothing else to keep in sync. The group is found
-    /// from the row's first button rather than stored, so the row needs no bookkeeping of its own.
-    private static void AddChoice(HBoxContainer row, string text, bool selected, Action onChosen)
-    {
-        ButtonGroup group = (row.GetChildCount() > 0 && row.GetChild(0) is Button first)
-            ? first.ButtonGroup
-            : new ButtonGroup();
-
-        Button button = new Button
-        {
-            Text = text,
-            ToggleMode = true,
-            ButtonGroup = group,
-            ButtonPressed = selected,
-            CustomMinimumSize = new Vector2(120, 58),
-        };
-        button.AddThemeFontSizeOverride("font_size", 26);
-        button.Toggled += pressed => { if (pressed) onChosen(); };
-        row.AddChild(button);
-    }
-
-    /// ...and the mirrored face-to-face table lives in the other scene.
-    private void MenuStartLocal2Player()
-    {
-        SanitizeLocal2PlayerChoices(UnlockedLocalTargets(), UnlockedLocalSpecials());
-
-        if (_gameModeButton == null)
-        {
-            _pendingLocal2Player = true;
-            GetTree().ChangeSceneToFile("res://table_scene.tscn");
-            return;
-        }
-
-        // Before starting, not after: OnStartButtonPressed reads this dropdown to decide whether to
-        // route to the solo scene, and on "vs. Bot" it would send us straight back out again.
-        _gameModeButton.Select(0);
-        if (_mirrorToggle != null) _mirrorToggle.Visible = true;
-
-        HideStartMenu();
-        OnStartButtonPressed();
-    }
 
     // ------------------------------------------------------------------
     // The first-launch tutorial (Alexander, 2026-09-15)
@@ -2248,376 +1356,15 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost
     // and every caption reads live values so none of them can lie.
     // ------------------------------------------------------------------
 
-    /// The opening cards, APPENDED in this order - the deck is drawn from the end, and the turn
-    /// order is P1, P2, P1, P2. So the last entry is Player 1's first card.
-    private static readonly int[] TutorialOpening = { 5, 6, 9, 10 };
-
-    /// Player 1's staged hand. The +4 is the lesson; the rest are there so the hand looks normal.
-    private static readonly int[] TutorialModifiers = { 4, 3, -2, -1 };
-
-    private const int TutorialSteps = 5;
-    private const float SpotlightPad = 10f;
-
-    /// Set by "Replay the tutorial", which reloads the scene - so it is a static, for the same
-    /// reason _pendingLocal2Player is. It survives the reload; it is never saved to disk.
-    private static bool _pendingTutorial;
-
-    private bool _tutorialActive;
-    private bool _tutorialStaged;   // this match's deck and hand are stacked for the lesson
-    private int _tutorialIndex;
-    private int _tutorialModifierCount;  // to notice a card actually being played
-
-    private Control _spotlightOverlay;
-    private ColorRect[] _spotlightShades;
-    private ColorRect _spotlightHoleBlock;
-    private PanelContainer _spotlightCaption;
-    private Label _spotlightLabel;
-    private Button _spotlightNext;
-    private Button _spotlightSkip;
-    private bool _spotlightSettling;
 
     // ---- the overlay -------------------------------------------------
 
-    /// A hole cut in a dim, made of FOUR rects around the highlighted control rather than a
-    /// shader. Cheap, no material, correct at every scale and orientation - and it degrades
-    /// honestly: a wrong rect shows a misplaced hole rather than a black screen.
-    ///
-    /// The shades are the input gate as well as the dim. They stop mouse events; the hole has no
-    /// child, so taps inside it fall straight through to the control being taught. That is the
-    /// whole mechanism behind a "do" step, and it needs no changes to HumanCanActFor at all. A
-    /// "tell" step drops a transparent blocker over the hole as well, and nothing is clickable.
-    private void BuildSpotlight()
-    {
-        _spotlightOverlay = new Control { Visible = false, MouseFilter = Control.MouseFilterEnum.Ignore };
-        AddChild(_spotlightOverlay);
-        _spotlightOverlay.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
-
-        Color shade = new Color(0, 0, 0, 0.72f);
-        _spotlightShades = new ColorRect[4];
-        for (int i = 0; i < _spotlightShades.Length; i++)
-        {
-            ColorRect rect = new ColorRect { Color = shade, MouseFilter = Control.MouseFilterEnum.Stop };
-            _spotlightOverlay.AddChild(rect);
-            _spotlightShades[i] = rect;
-        }
-
-        _spotlightHoleBlock = new ColorRect
-        {
-            Color = new Color(0, 0, 0, 0),
-            MouseFilter = Control.MouseFilterEnum.Stop,
-            Visible = false,
-        };
-        _spotlightOverlay.AddChild(_spotlightHoleBlock);
-
-        _spotlightCaption = new PanelContainer();
-        StyleBoxFlat style = new StyleBoxFlat { BgColor = OverlayUi.PanelBg, BorderColor = OverlayUi.PanelBorder };
-        style.SetBorderWidthAll(2);
-        style.SetCornerRadiusAll(12);
-        style.SetContentMarginAll(18);
-        _spotlightCaption.AddThemeStyleboxOverride("panel", style);
-        _spotlightOverlay.AddChild(_spotlightCaption);
-
-        VBoxContainer box = new VBoxContainer();
-        box.AddThemeConstantOverride("separation", 12);
-        _spotlightCaption.AddChild(box);
-
-        _spotlightLabel = new Label
-        {
-            AutowrapMode = TextServer.AutowrapMode.WordSmart,
-            HorizontalAlignment = HorizontalAlignment.Center,
-        };
-        _spotlightLabel.AddThemeFontSizeOverride("font_size", 22);
-        box.AddChild(_spotlightLabel);
-
-        HBoxContainer buttons = new HBoxContainer { Alignment = BoxContainer.AlignmentMode.Center };
-        buttons.AddThemeConstantOverride("separation", 16);
-        box.AddChild(buttons);
-
-        // Skip is on EVERY step, not earned by sitting through the first one. Somebody who has
-        // played this kind of game before does not want six taps, and making them work for the
-        // way out is how you lose them on the first screen.
-        _spotlightSkip = new Button { Text = "Skip" };
-        _spotlightSkip.Pressed += () => FinishTutorial();
-        buttons.AddChild(_spotlightSkip);
-
-        _spotlightNext = new Button { Text = "Got it" };
-        _spotlightNext.Pressed += OnSpotlightNextPressed;
-        buttons.AddChild(_spotlightNext);
-    }
-
-    /// The highlighted control's axis-aligned box in screen space. Taken through the full
-    /// transform rather than GlobalPosition, for the same reason AnimateCardDrop does it: a side
-    /// of the table may be rotated 180 degrees, and a rotated control's position is not its corner.
-    private static Rect2 ScreenRectOf(Control target)
-    {
-        Transform2D t = target.GetGlobalTransform();
-        Vector2 size = target.Size;
-        Vector2 a = t * Vector2.Zero;
-        Vector2 b = t * new Vector2(size.X, 0f);
-        Vector2 c = t * new Vector2(0f, size.Y);
-        Vector2 d = t * size;
-
-        Vector2 min = new Vector2(Mathf.Min(Mathf.Min(a.X, b.X), Mathf.Min(c.X, d.X)),
-                                  Mathf.Min(Mathf.Min(a.Y, b.Y), Mathf.Min(c.Y, d.Y)));
-        Vector2 max = new Vector2(Mathf.Max(Mathf.Max(a.X, b.X), Mathf.Max(c.X, d.X)),
-                                  Mathf.Max(Mathf.Max(a.Y, b.Y), Mathf.Max(c.Y, d.Y)));
-        return new Rect2(min, max - min);
-    }
-
-    private void PlaceSpotlight(Control target, bool blockHole)
-    {
-        if (_spotlightOverlay == null) return;
-
-        Vector2 vp = GetViewport().GetVisibleRect().Size;
-        Rect2 hole = (target != null && target.IsInsideTree() && target.Size.X > 1f)
-            ? ScreenRectOf(target).Grow(SpotlightPad)
-            : new Rect2(vp / 2f, Vector2.Zero); // no target: a plain dim, no hole
-
-        float left = Mathf.Clamp(hole.Position.X, 0f, vp.X);
-        float top = Mathf.Clamp(hole.Position.Y, 0f, vp.Y);
-        float right = Mathf.Clamp(hole.End.X, 0f, vp.X);
-        float bottom = Mathf.Clamp(hole.End.Y, 0f, vp.Y);
-
-        SetRect(_spotlightShades[0], 0f, 0f, vp.X, top);                       // above
-        SetRect(_spotlightShades[1], 0f, bottom, vp.X, vp.Y - bottom);         // below
-        SetRect(_spotlightShades[2], 0f, top, left, bottom - top);             // left
-        SetRect(_spotlightShades[3], right, top, vp.X - right, bottom - top);  // right
-
-        SetRect(_spotlightHoleBlock, left, top, right - left, bottom - top);
-        _spotlightHoleBlock.Visible = blockHole;
-
-        // The caption goes under the hole, or over it when the hole is low - it must never cover
-        // the thing it is pointing at.
-        //
-        // The width comes from the VIEWPORT, never from the caption's own minimum: an autowrapping
-        // Label reports its UNWRAPPED single-line width as its minimum until it has been laid out
-        // once. Measure first and the panel comes out screen-wide and one line tall, with the text
-        // clipped - the same trap the stats row hit with HFlowContainer. Give it the width, and
-        // the height follows from it. The floor covers the frame before that height is right.
-        float width = Mathf.Min(vp.X * 0.72f, vp.X - 32f);
-        _spotlightLabel.CustomMinimumSize = new Vector2(Mathf.Max(80f, width - 40f), 0f);
-
-        float height = Mathf.Max(_spotlightCaption.GetCombinedMinimumSize().Y, vp.Y * 0.14f);
-        float x = Mathf.Max(16f, (vp.X - width) / 2f);
-        float y = (bottom + 16f + height <= vp.Y - 16f) ? bottom + 16f : Mathf.Max(16f, top - 16f - height);
-        SetRect(_spotlightCaption, x, y, width, height);
-    }
-
-    private static void SetRect(Control control, float x, float y, float width, float height)
-    {
-        control.SetAnchorsPreset(Control.LayoutPreset.TopLeft);
-        control.Position = new Vector2(x, y);
-        control.Size = new Vector2(Mathf.Max(0f, width), Mathf.Max(0f, height));
-    }
 
     // ---- the steps ---------------------------------------------------
 
-    private Control TutorialTarget(int step)
-    {
-        switch (step)
-        {
-            case 0: return _ui.P1ScoreBlock ?? _p1ScoreLabel;
-            case 1: return _ui.DeckFootprint ?? _mainDeckPosition;
-            case 2: return _p1ModifierContainer;
-            case 3: return _ui.P1ActionRow;
-            case 4: return _p1WinsLabel?.GetParent() as Control;
-            default: return null;
-        }
-    }
-
-    /// Steps 2-3 are DO steps: the player performs the thing rather than reading about it. That is
-    /// the difference between a tutorial and a slideshow, and for both ends of the 5-to-85 range
-    /// it is the whole point - playing a card is learned by playing one.
-    ///
-    /// Picking a card up and committing it used to be two steps, with the second one highlighting
-    /// the Play button. That was wrong twice over (Alexander, S25 Ultra): the hole landed beside
-    /// the confirm row rather than on it, so the button the step asked for was under the dim and
-    /// could not be pressed - and the lesson did not need two steps anyway. Tapping the same card
-    /// again commits it (the quick path the touch model has always had), so one step teaches both
-    /// halves and never has to find a control that only exists mid-gesture.
-    private static bool TutorialIsDoStep(int step) => step == 2 || step == 3;
-
-    private string TutorialTextFor(int step)
-    {
-        switch (step)
-        {
-            case 0:
-                return $"This is your score. You are at {_player1.CurrentScore}, and you are aiming "
-                     + $"for {_gameState.TargetScore} without going over.";
-            case 1:
-                return "Four of each card numbered 1 to 10. The number on the deck is how many "
-                     + "are left.";
-            case 2:
-                return "Tap a Modifier to see its effect. Tap it again to Play.";
-            case 3:
-                // Reads the live score, so it is honest on a staged first match and on a replay.
-                return (_player1.CurrentScore >= _gameState.TargetScore - 2)
-                    ? "You are on target. Hold stops you taking cards and locks your score in for "
-                    + "the rest of the set."
-                    : "Draw Card takes another card next turn. Hold stops you there and locks your "
-                    + "score in. Choose one.";
-            case 4:
-                return $"Win {GameState.SetsToWinMatch} sets to take the match. These are yours "
-                     + "so far. That is everything - good luck.";
-            default:
-                return string.Empty;
-        }
-    }
-
-    /// True once the player has done the thing the current DO step asked for.
-    private bool TutorialStepDone(int step)
-    {
-        switch (step)
-        {
-            case 2: return _player1.Modifiers.Count < _tutorialModifierCount;
-            case 3: return !_player1.CanAct;
-            default: return false;
-        }
-    }
 
     // ---- running it --------------------------------------------------
 
-    /// First launch, or an explicit replay. Gated on the run's OWN step rather than the all-time
-    /// best, and on the profile-level flag, so it happens once and never nags.
-    private bool ShouldRunTutorial()
-    {
-        if (!_isVsBot || !_inRun) return false;
-        if (_pendingTutorial) return true;
-
-        RunData run = RunData.Instance;
-        return run != null && !run.TutorialSeen && run.StepIndex == 0;
-    }
-
-    /// Only stage the turn where the staged numbers are true. The lesson lands on exactly the
-    /// target, which needs a two-card opening (target 20 or more) and a +4 that reaches it from
-    /// 16 - so it is stage 1's ruleset or nothing. A replay at any other rung runs the same six
-    /// steps on a real deal, and every caption reads live values, so nothing said is ever wrong.
-    private bool ShouldStageTutorial() => _gameState.TargetScore == 20;
-
-    private async void StartTutorial()
-    {
-        _tutorialActive = true;
-        _tutorialIndex = 0;
-        _tutorialModifierCount = _player1.Modifiers.Count;
-
-        // Let the opening deal land first - being taught about a score before the cards that made
-        // it have arrived is worse than waiting half a second.
-        for (int i = 0; i < 40; i++)
-        {
-            await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
-            if (!IsInsideTree() || !_tutorialActive) return;
-        }
-
-        MoveChild(_spotlightOverlay, GetChildCount() - 1);
-        _spotlightOverlay.Visible = true;
-        RefreshSpotlight();
-    }
-
-    private void AdvanceTutorial()
-    {
-        if (!_tutorialActive) return;
-
-        _tutorialIndex++;
-        if (_tutorialIndex >= TutorialSteps)
-        {
-            FinishTutorial();
-            return;
-        }
-
-        RefreshSpotlight();
-    }
-
-    private void RefreshSpotlight()
-    {
-        PlaceCurrentSpotlight();
-        SettleSpotlight();
-    }
-
-    /// Where the hole goes right now, for whichever of the two owners has the overlay.
-    private void PlaceCurrentSpotlight()
-    {
-        if (_spotlightOverlay == null || !_spotlightOverlay.Visible) return;
-
-        // A coach-mark borrows the same overlay, so it has to be re-placed on a rotation too.
-        if (_coachShowing.HasValue)
-        {
-            PlaceSpotlight(CoachTarget(_coachShowing.Value), blockHole: true);
-            return;
-        }
-
-        if (!_tutorialActive) return;
-
-        bool doStep = TutorialIsDoStep(_tutorialIndex);
-        _spotlightLabel.Text = TutorialTextFor(_tutorialIndex);
-        _spotlightNext.Visible = !doStep;   // a DO step is finished by doing it, not by a button
-        PlaceSpotlight(TutorialTarget(_tutorialIndex), blockHole: !doStep);
-    }
-
-    /// ...and then again once the layout has actually settled.
-    ///
-    /// THE BUG this exists for (Alexander, S25 Ultra, 2026-09-15): rotating portrait to landscape
-    /// left the hole over the score off to one side. A single deferred pass measures the layout
-    /// mid-move - the sides are re-ordered, the base resolution is rewritten, and EnsureLayoutFits
-    /// may still be scaling - so GetGlobalTransform returns where the control WAS. This is the
-    /// same two-frame lesson EnsureLayoutFits already learned, and for the same reason: a
-    /// container's geometry is only right on the pass after the one that changed it.
-    ///
-    /// Placed immediately as well, so the hole never blinks; the settle pass only corrects it.
-    /// Latched, because RefreshSpotlight is deferred from every UpdateUI and a pile of overlapping
-    /// waits would all place the same rect.
-    private async void SettleSpotlight()
-    {
-        if (_spotlightSettling || _spotlightOverlay == null || !_spotlightOverlay.Visible) return;
-        _spotlightSettling = true;
-
-        try
-        {
-            for (int i = 0; i < 2; i++)
-            {
-                await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
-                if (!IsInsideTree()) return;
-            }
-            PlaceCurrentSpotlight();
-        }
-        finally
-        {
-            _spotlightSettling = false;
-        }
-    }
-
-    /// Runs from UpdateUI, which is called after every action that could complete a step - so a
-    /// step's completion never has to be wired into the five handlers that could cause it.
-    private void CheckTutorialProgress()
-    {
-        if (!_tutorialActive || _spotlightOverlay == null || !_spotlightOverlay.Visible) return;
-
-        if (TutorialIsDoStep(_tutorialIndex) && TutorialStepDone(_tutorialIndex))
-        {
-            AdvanceTutorial();
-            return;
-        }
-
-        CallDeferred(MethodName.RefreshSpotlight); // the highlighted control may have moved
-    }
-
-    private void FinishTutorial()
-    {
-        if (!_tutorialActive) return;
-
-        _tutorialActive = false;
-        _pendingTutorial = false;
-        if (_spotlightOverlay != null) _spotlightOverlay.Visible = false;
-        RunData.Instance?.MarkTutorialSeen();
-
-        // The bot has been held for the whole walkthrough (Bot.ProcessTurn refuses to run while
-        // the tutorial is up) so the lesson could not desync from a table moving underneath it.
-        // Let it think now, and the turn resolves normally from here.
-        if (_isVsBot && _isGameStarted && !_gameState.IsGameOver) _bot.ProcessTurn();
-
-        // Deferred: FinishTutorial can be reached from inside UpdateUI (a DO step completing on
-        // the last one), and a re-entrant refresh is the kind of thing that works until it doesn't.
-        CallDeferred(MethodName.UpdateUI);
-    }
 
     // ------------------------------------------------------------------
     // Coach-marks: one line, the first time you meet a card
@@ -2634,311 +1381,5 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost
     // same set a collection log will read.
     // ------------------------------------------------------------------
 
-    private readonly struct CoachMark
-    {
-        public readonly Card Card;
-        public readonly bool FromOpponent;
-
-        public CoachMark(Card card, bool fromOpponent)
-        {
-            Card = card;
-            FromOpponent = fromOpponent;
-        }
-    }
-
-    private readonly Queue<CoachMark> _coachQueue = new Queue<CoachMark>();
-    private CoachMark? _coachShowing;
-
-    /// Where the highlight goes: the middle panel's banner when the card was played AT you (the
-    /// banner is the thing that just narrated it), your own hand when it is a card you now hold.
-    private Control CoachTarget(CoachMark mark) =>
-        mark.FromOpponent ? _ui.EffectBanner : _p1ModifierContainer;
-
-    private void QueueCoachMark(Card card, bool fromOpponent)
-    {
-        string key = CardEffects.MetKey(card);
-        if (key == null) return; // a plain +3 explains itself
-
-        RunData run = RunData.Instance;
-        if (run == null || run.HasMetCard(key)) return;
-
-        // The same card can arrive twice in one turn - once in the hand and once across the table
-        // - and the same explanation twice is worse than none.
-        foreach (CoachMark queued in _coachQueue)
-            if (CardEffects.MetKey(queued.Card) == key) return;
-        if (_coachShowing.HasValue && CardEffects.MetKey(_coachShowing.Value.Card) == key) return;
-
-        _coachQueue.Enqueue(new CoachMark(card, fromOpponent));
-    }
-
-    /// Local 2-player is left alone on purpose: there is a person in the room to explain, which is
-    /// the same reason that mode's How to Play is short.
-    private void QueueCoachMarksForModifiers()
-    {
-        if (!_isVsBot) return;
-        foreach (Card card in _player1.Modifiers) QueueCoachMark(card, fromOpponent: false);
-    }
-
-    /// Runs from UpdateUI. Shows at most one at a time, and only when nothing else owns the
-    /// screen - a card explained over the top of a set-end panel teaches nobody anything.
-    private void DrainCoachMarks()
-    {
-        if (_coachShowing.HasValue)
-        {
-            CallDeferred(MethodName.RefreshSpotlight); // the highlighted control may have moved
-            return;
-        }
-
-        if (_tutorialActive || _coachQueue.Count == 0) return;
-        if (!_isGameStarted || _gameState.IsGameOver || _setOverPending) return;
-        if (_howToPlayOverlay != null && _howToPlayOverlay.Visible) return;
-        if (_tableMenuOverlay != null && _tableMenuOverlay.Visible) return;
-        if (_recallOverlay != null && _recallOverlay.Visible) return;
-        if (RescueShowing) return;
-
-        ShowCoachMark(_coachQueue.Dequeue());
-    }
-
-    private void ShowCoachMark(CoachMark mark)
-    {
-        _coachShowing = mark;
-
-        _spotlightLabel.Text = CardEffects.Introduction(mark.Card);
-        _spotlightNext.Visible = true;
-        _spotlightSkip.Visible = false; // there is nothing to skip: it is one line, once ever
-
-        MoveChild(_spotlightOverlay, GetChildCount() - 1);
-        _spotlightOverlay.Visible = true;
-        PlaceSpotlight(CoachTarget(mark), blockHole: true);
-    }
-
-    private void DismissCoachMark()
-    {
-        if (!_coachShowing.HasValue) return;
-
-        if (RunData.Instance != null && RunData.Instance.MarkCardMet(CardEffects.MetKey(_coachShowing.Value.Card)))
-            AnnounceCollectionComplete();
-        _coachShowing = null;
-
-        if (_spotlightOverlay != null) _spotlightOverlay.Visible = false;
-        if (_spotlightSkip != null) _spotlightSkip.Visible = true;
-
-        CallDeferred(MethodName.UpdateUI); // which drains the next one, if there is one
-    }
-
-    /// One button, two owners. The tutorial advances; a coach-mark is simply done.
-    private void OnSpotlightNextPressed()
-    {
-        if (_coachShowing.HasValue) DismissCoachMark();
-        else AdvanceTutorial();
-    }
-
-    // ------------------------------------------------------------------
-    // How to Play
-    //
-    // A "How to Play" button is added in code to the middle panel's ButtonColumn (just above the
-    // Restart / Exit row) so both scenes get it without NodePath wiring. It opens a full-screen
-    // overlay with the rules; it can be opened at any time and changes no game state. In mirrored
-    // 2-player mode a "Flip for other player" button turns the panel upside down for Player 2.
-    // ------------------------------------------------------------------
-    // TWO texts, because the two modes have different learners (Alexander, 2026-09-15).
-    //
-    // In local 2-player somebody who already knows the game is sitting next to somebody who does
-    // not, and a person explains it far better than a panel does. That screen only has to carry
-    // the handful of rules the explainer might forget - so it is short on purpose, and making it
-    // longer would make it worse.
-    //
-    // Against the bot nobody is there to explain, so the game has to teach. The first-launch
-    // tutorial does that (claude/tutorial-and-how-to-play-spec.md); this text is the reference
-    // you come back to, and it deliberately does NOT enumerate the six effect cards - the ladder
-    // introduces them one rung at a time and explains each one where you meet it. A list of all
-    // six here would undo that, and it is exactly the "text-heavy wall" the tenets rule out.
-    private static readonly string HowToPlayShort =
-        "GOAL\n" +
-        "Get as close to the target without going over. The target is on your score line - " +
-        $"\"You  17/20\". Win {GameState.SetsToWinMatch} sets to win the match.\n\n" +
-        "EACH TURN\n" +
-        "Both players are dealt a card at the same time. You both decide at the same time too - " +
-        "nobody waits for anyone.\n\n" +
-        "MODIFIERS\n" +
-        "Tap a Modifier to see its effect, then tap it again to play it. It adds its value to your " +
-        "score. You get four, and they have to last the whole match.\n\n" +
-        "DRAW CARD or HOLD\n" +
-        "Draw Card: you are done for this turn, and you take another card on the next one.\n" +
-        "Hold: you stop taking cards, and your score is locked for the rest of the set.\n\n" +
-        "GOING OVER\n" +
-        "Over the target is only a warning until you press Draw Card or Hold - a minus Modifier can " +
-        "still save you. Draw while over, and you bust.\n\n" +
-        "That is the whole game. Everything else is a Modifier that explains itself when you meet it.";
-
-    private static readonly string HowToPlayFull =
-        "GOAL\n" +
-        "Get as close to the target as you can without going over. The target is on your own score " +
-        "line - \"You  17/20\" - and it CHANGES as you climb: 20 at first, then 23, then 18, and on " +
-        $"up. Win {GameState.SetsToWinMatch} sets to win the match.\n\n" +
-        "MATCH, SET, TURN\n" +
-        "A match is played in sets, and a set is played in turns. Win a set by finishing closer to " +
-        "the target than your opponent.\n\n" +
-        "THE DECK\n" +
-        "One deck of 40 cards, shared by both players: four each of 1 to 10. It is shuffled fresh " +
-        "every set, and the number on it is how many cards are left - so it can be counted.\n\n" +
-        "A TURN\n" +
-        "Each turn, every player who isn't holding is dealt one card at the same time. Both players " +
-        "then decide - at the same time, without waiting for each other - whether to play a " +
-        "Modifier, and then press Draw Card or Hold.\n" +
-        "When the target is 20 or more, the FIRST turn of a set gives everyone two cards. Two " +
-        "cards can never total more than 20, so that opening can never bust you.\n\n" +
-        "MODIFIERS\n" +
-        "You get 4 Modifiers at the start of a match, and they have to last every set of it - " +
-        "a Modifier spent in the first set is gone for the rest. Plain ones are worth -4 to +4 and " +
-        "add their value to your score.\n\n" +
-        "PLAYING A MODIFIER\n" +
-        "Tap a Modifier to pick it up. It lifts, and your score changes to what it would " +
-        "become - for example 17/20 turns into 20/20. Blue means you would still be at or under the " +
-        "target, orange means it would take you over. Nothing is spent yet: tap Play (or tap it again) to " +
-        "commit it, or Put back to change your mind.\n\n" +
-        "+/- MODIFIERS\n" +
-        "A Modifier marked +/- can be played either way round. Pick it up and press Flip Value " +
-        "to swap it between plus and minus - as often as you like - before playing it. " +
-        "A +3 becomes a -3, and back again.\n\n" +
-        "DRAW CARD\n" +
-        "You are done for this turn, and you take another card on the next one.\n\n" +
-        "HOLD\n" +
-        "You stop taking cards for the rest of the set. Your score is locked in.\n\n" +
-        "GOING OVER\n" +
-        "Going over the target is only a warning (\"Over target!\") - you can still play a " +
-        "minus Modifier to get back under. If you press Draw Card or Hold while still over the " +
-        "target, you bust and lose the set when the turn resolves.\n\n" +
-        "HOW A SET ENDS\n" +
-        "Once both players have pressed Draw Card or Hold, the turn resolves:\n" +
-        "- Anyone over the target busts. If both bust, the set is a tie and is replayed.\n" +
-        "- If both players are holding, the higher score wins the set. Equal scores tie and the set " +
-        "is replayed.\n" +
-        "- Otherwise the next turn is dealt to everyone who isn't holding.\n\n" +
-        "Filling all 9 board slots without busting is still a good place to be - hold!\n\n" +
-        "THE BOT\n" +
-        "It plays the same rules as you and decides at the same time as you do - you never wait for " +
-        "it. It gets sharper as you climb: the early opponents play their own Modifiers, " +
-        "the last ones play yours.\n\n" +
-        "THE CLIMB\n" +
-        "Ten matches, each against a tougher opponent at a different target. Winning pays medals; " +
-        "medals buy Modifiers in the market between matches; the Modifiers you own are slotted into " +
-        "a deck of 12, and 4 of those 12 are dealt to you each match. Losing a match ends the run - " +
-        "but nothing you own is ever taken away.\n\n" +
-        "SPECIAL MODIFIERS\n" +
-        "Most rungs of the climb introduce one new Modifier that does something other than add a " +
-        "number - changing a card, taking a score, undoing a play. Each one is explained the first " +
-        "time you meet it, and the market sells it to you straight afterwards. There is nothing to " +
-        "memorise here: you will always have met a Modifier before you can buy it.";
-
-    private Control _howToPlayOverlay;
-    private Label _howToPlayRules;
-    private PanelContainer _howToPlayPanel;
-    private Button _howToPlayFlipButton;
-    private bool _howToPlayFlipped = false;
-
-    private void BuildHowToPlay()
-    {
-        // The button that opens this lives in the table menu now (CompactControlPanel) - it was
-        // one of four things permanently on screen in a middle column the playtest called
-        // cluttered, and it is pressed once a session.
-        //
-        // The overlay: dim + centred panel + scrolling rules + Close (and Flip when mirrored).
-        _howToPlayOverlay = new Control { Visible = false, MouseFilter = Control.MouseFilterEnum.Stop };
-        AddChild(_howToPlayOverlay);
-        _howToPlayOverlay.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
-
-        ColorRect dim = new ColorRect { Color = new Color(0, 0, 0, 0.6f), MouseFilter = Control.MouseFilterEnum.Ignore };
-        _howToPlayOverlay.AddChild(dim);
-        dim.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
-
-        _howToPlayPanel = new PanelContainer();
-        StyleBoxFlat style = new StyleBoxFlat
-        {
-            BgColor = new Color(0.1f, 0.14f, 0.2f, 0.98f),
-            BorderColor = new Color(0.55f, 0.65f, 0.8f),
-        };
-        style.SetBorderWidthAll(2);
-        style.SetCornerRadiusAll(12);
-        style.SetContentMarginAll(20);
-        _howToPlayPanel.AddThemeStyleboxOverride("panel", style);
-        _howToPlayOverlay.AddChild(_howToPlayPanel);
-        // Fill the screen with a margin so the rules get as much room as the device has.
-        _howToPlayPanel.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
-        _howToPlayPanel.OffsetLeft = 24;
-        _howToPlayPanel.OffsetTop = 24;
-        _howToPlayPanel.OffsetRight = -24;
-        _howToPlayPanel.OffsetBottom = -24;
-        _howToPlayPanel.Resized += () =>
-        {
-            _howToPlayPanel.PivotOffset = _howToPlayPanel.Size / 2f;
-            _howToPlayPanel.RotationDegrees = _howToPlayFlipped ? 180f : 0f;
-        };
-
-        VBoxContainer box = new VBoxContainer();
-        box.AddThemeConstantOverride("separation", 12);
-        _howToPlayPanel.AddChild(box);
-
-        Label title = MakeOverlayLabel(30);
-        title.Text = "How to Play";
-        box.AddChild(title);
-
-        ScrollContainer scroll = new ScrollContainer
-        {
-            SizeFlagsVertical = Control.SizeFlags.ExpandFill,
-            HorizontalScrollMode = ScrollContainer.ScrollMode.Disabled,
-        };
-        box.AddChild(scroll);
-
-        _howToPlayRules = new Label
-        {
-            Text = HowToPlayShort,
-            AutowrapMode = TextServer.AutowrapMode.Word,
-            SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
-        };
-        _howToPlayRules.AddThemeFontSizeOverride("font_size", 20);
-        scroll.AddChild(_howToPlayRules);
-
-        HBoxContainer buttons = new HBoxContainer { Alignment = BoxContainer.AlignmentMode.Center };
-        buttons.AddThemeConstantOverride("separation", 16);
-        box.AddChild(buttons);
-
-        _howToPlayFlipButton = new Button { Text = "Flip for other player", Visible = false };
-        _howToPlayFlipButton.Pressed += () =>
-        {
-            _howToPlayFlipped = !_howToPlayFlipped;
-            _howToPlayPanel.PivotOffset = _howToPlayPanel.Size / 2f;
-            _howToPlayPanel.RotationDegrees = _howToPlayFlipped ? 180f : 0f;
-        };
-        buttons.AddChild(_howToPlayFlipButton);
-
-        Button close = new Button { Text = "Close" };
-        close.Pressed += HideHowToPlay;
-        buttons.AddChild(close);
-    }
-
-    /// Which of the two texts this screen is showing. Against the bot, the long one; with two
-    /// people at one device, the short one. From the start menu - before a mode has been picked -
-    /// the short one too: somebody who has not started yet wants to know what the game IS, and the
-    /// tutorial will teach them the rest at the table.
-    private string HowToPlayForThisMode() =>
-        (_isGameStarted && _isVsBot) ? HowToPlayFull : HowToPlayShort;
-
-    private void ShowHowToPlay()
-    {
-        if (_howToPlayOverlay == null) return;
-        if (_howToPlayRules != null) _howToPlayRules.Text = HowToPlayForThisMode();
-        _howToPlayFlipped = false;
-        _howToPlayPanel.RotationDegrees = 0f;
-        _howToPlayFlipButton.Visible = _ui.IsMirrored;
-        MoveChild(_howToPlayOverlay, GetChildCount() - 1); // above any stray animation card
-        _howToPlayOverlay.Visible = true;
-    }
-
-    private void HideHowToPlay()
-    {
-        if (_howToPlayOverlay == null) return;
-        _howToPlayOverlay.Visible = false;
-    }
 
 }
