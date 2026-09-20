@@ -535,10 +535,11 @@ public sealed class TableUi
 
     /// Re-flows ONE player's side for the orientation (Alexander's sketch, S25 Ultra, 2026-09-15).
     ///
-    /// Landscape keeps the original column - stats, board, hand, buttons - because landscape has
-    /// the width to spend and the playtesters said it already felt right.
+    /// BOTH orientations now stand the score in a column BESIDE the board instead of in a row
+    /// above it. What differs is which side of the board that column stands on, and whether the
+    /// buttons travel into it.
     ///
-    /// Portrait puts the score and the buttons BESIDE the board instead of above and below it:
+    /// Portrait takes the score AND the buttons over, on the board's left:
     ///
     ///     [ You: 13   Wins O O O ]  [ . . . ]
     ///     [ Them: 8              ]  [ . . . ]
@@ -552,6 +553,18 @@ public sealed class TableUi
     /// of an action row and a stats block per side - which is what pays for the bigger buttons
     /// without EnsureLayoutFits shrinking everything to fit them.
     ///
+    /// Landscape takes the score only, and puts it on the board's INNER side - P1 owns the screen's
+    /// left half so its column goes to the RIGHT of its grid, P2's to the LEFT of its (Alexander,
+    /// 2026-09-19). The two scores then face each other across the middle panel instead of sitting
+    /// in the screen's two outer corners, where reading both of them meant crossing the whole
+    /// table. The buttons stay under the hand, where landscape has the width to spare:
+    ///
+    ///     [ . . . ]  Wins O O O      Wins O O O  [ . . . ]
+    ///     [ . . . ]  You  21/20      Them  20    [ . . . ]
+    ///     [ . . . ]  Over target!    Thinking... [ . . . ]
+    ///     [     the hand     ]        [     the hand     ]
+    ///     [ Draw Card ][ Hold ]
+    ///
     /// The confirm row travels WITH the action row it stands in for. It was inserted as that row's
     /// sibling (BuildConfirmRow), so leaving it behind would put Play / +- / Put back on the other
     /// side of the board from the buttons they replace.
@@ -560,17 +573,17 @@ public sealed class TableUi
     {
         if (layout == null) return;
 
-        // Found by name rather than held, because they move: after one portrait pass they live
-        // under SideRow. owned:false - SideRow and LeftColumn are built here and have no owner.
+        // Found by name rather than held, because they move: after one layout pass they live
+        // under SideRow. owned:false - SideRow and SideColumn are built here and have no owner.
         Control stats = layout.FindChild("Stats", true, false) as Control;
         Control board = layout.FindChild("BoardSlotsContainer", true, false) as Control;
         Control hand = layout.FindChild("ModifierContainer", true, false) as Control;
         if (stats == null || board == null || hand == null) return;
 
-        HBoxContainer sideRow = layout.GetNodeOrNull<HBoxContainer>("SideRow");
+        bool isP1 = layout == _p1SideLayout;
 
         // Pieces that change shape rather than just place (Alexander's sketch, 2026-09-16).
-        ApplyWinsRow(stats, layout == _p1SideLayout ? _p1WinChips : _p2WinChips, portrait);
+        ApplyWinsRow(stats, isP1 ? _p1WinChips : _p2WinChips);
         // Stacked in portrait (Alexander, 2026-09-16, asked twice). This silently did nothing
         // before pass 21: the rows were HBoxContainers, and Godot refuses to change the
         // orientation of an HBox/VBox - only a plain BoxContainer can turn. Both rows are plain
@@ -579,76 +592,97 @@ public sealed class TableUi
         SetRowOrientation(confirmRow, portrait);
         hand.SizeFlagsHorizontal = portrait ? Control.SizeFlags.ShrinkEnd : Control.SizeFlags.ShrinkCenter;
 
-        if (!portrait)
-        {
-            PlaceChild(stats, layout, 0);
-            PlaceChild(board, layout, 1);
-            PlaceChild(hand, layout, 2);
-            PlaceChild(buttonSlot ?? actionRow, layout, 3);
-            if (buttonSlot == null) PlaceChild(confirmRow, layout, 4);
+        HBoxContainer sideRow = EnsureSideRow(layout);
+        Control slot = sideRow.GetNodeOrNull<Control>("SideSlot");
+        Control column = slot?.GetNodeOrNull<Control>("SideColumn");
+        Control columnSpacer = column?.GetNodeOrNull<Control>("ColumnSpacer");
+        Control rowSpacer = sideRow.GetNodeOrNull<Control>("RowSpacer");
+        if (slot == null || column == null) return;
 
-            if (sideRow != null)
-            {
-                // RemoveChild before QueueFree: a queued node stays in the tree until the end of
-                // the frame and still counts toward the layout's minimum size. That is the bug
-                // that squeezed P1 off screen when the hand was rebuilt (ui-scaling-and-art.md).
-                layout.RemoveChild(sideRow);
-                sideRow.QueueFree();
-            }
-            return;
-        }
+        // Which side of the board the column stands on. Portrait keeps it on the left, where the
+        // sketch put it. Landscape wants the inner edge, which is the right of P1's board and the
+        // left of P2's - EXCEPT that P2's whole side is rotated 180 degrees for face-to-face play,
+        // and a rotation swaps which end of the row draws on the left. So the child order flips
+        // back with it, and P2 lands on the middle panel either way.
+        bool columnFirst = portrait || (!isP1 && !IsMirrored);
 
-        if (sideRow == null)
-        {
-            sideRow = new HBoxContainer { Name = "SideRow", Alignment = BoxContainer.AlignmentMode.Center };
-            sideRow.AddThemeConstantOverride("separation", 14);
-            layout.AddChild(sideRow);
+        PlaceChild(stats, column, 0);
+        PlaceChild(columnSpacer, column, 1);
 
-            // The column sits in a fixed-size slot: a score growing from 7/20 to 24/20 or a
-            // status line changing must not slide the board sideways (pass 21).
-            StableBox leftSlot = new StableBox { Name = "LeftSlot", SizeFlagsVertical = Control.SizeFlags.Fill };
-            sideRow.AddChild(leftSlot);
-
-            // Takes whatever width the side has spare, so the column and the board sit at the two
-            // edges instead of huddling in the middle (pass 22).
-            sideRow.AddChild(new Control
-            {
-                Name = "RowSpacer",
-                SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
-                MouseFilter = Control.MouseFilterEnum.Ignore,
-            });
-
-            VBoxContainer column = new VBoxContainer
-            {
-                Name = "LeftColumn",
-                Alignment = BoxContainer.AlignmentMode.Begin,
-                SizeFlagsVertical = Control.SizeFlags.Fill,
-            };
-            column.AddThemeConstantOverride("separation", 12);
-            leftSlot.AddChild(column);
-
-            // Pushes the buttons to the bottom of the column, level with the board's last row, and
-            // leaves Wins + score at the top level with its first (the sketch).
-            column.AddChild(new Control
-            {
-                Name = "ColumnSpacer",
-                SizeFlagsVertical = Control.SizeFlags.ExpandFill,
-                MouseFilter = Control.MouseFilterEnum.Ignore,
-            });
-        }
-
-        Control left = sideRow.GetNodeOrNull<Control>("LeftSlot/LeftColumn");
-        Control spacer = left?.GetNodeOrNull<Control>("ColumnSpacer");
-        if (left == null) return;
-
-        PlaceChild(stats, left, 0);
-        PlaceChild(spacer, left, 1);
-        PlaceChild(buttonSlot ?? actionRow, left, 2);
-        if (buttonSlot == null) PlaceChild(confirmRow, left, 3);
-        PlaceChild(board, sideRow, 2);
+        // Ordered board-first on purpose: PlaceChild clamps to the child count as it goes, so
+        // moving the far end into place before the near one is what survives a flip between the
+        // two arrangements without leaving the spacer stranded on the wrong side.
+        PlaceChild(board, sideRow, columnFirst ? 2 : 0);
+        PlaceChild(rowSpacer, sideRow, 1);
+        PlaceChild(slot, sideRow, columnFirst ? 0 : 2);
 
         layout.MoveChild(sideRow, 0);
         PlaceChild(hand, layout, 1);
+
+        // Portrait carries the buttons up into the column as well; landscape leaves them below the
+        // hand, which is where the thumbs already expect them and where the width is free.
+        Control buttons = buttonSlot ?? actionRow;
+        if (portrait)
+        {
+            PlaceChild(buttons, column, 2);
+            if (buttonSlot == null) PlaceChild(confirmRow, column, 3);
+        }
+        else
+        {
+            PlaceChild(buttons, layout, 2);
+            if (buttonSlot == null) PlaceChild(confirmRow, layout, 3);
+        }
+    }
+
+    /// The row holding one player's board and the column that stands beside it.
+    ///
+    /// Built on demand and then kept for good: both orientations use it now, where portrait alone
+    /// used to, so nothing tears it down on a rotation any more. (The old teardown had to
+    /// RemoveChild before QueueFree - a queued node stays in the tree until the end of the frame
+    /// and still counts toward the layout's minimum size, which is the bug that squeezed P1 off
+    /// screen when the hand was rebuilt, ui-scaling-and-art.md. One less way to hit it.)
+    private static HBoxContainer EnsureSideRow(Control layout)
+    {
+        HBoxContainer sideRow = layout.GetNodeOrNull<HBoxContainer>("SideRow");
+        if (sideRow != null) return sideRow;
+
+        sideRow = new HBoxContainer { Name = "SideRow", Alignment = BoxContainer.AlignmentMode.Center };
+        sideRow.AddThemeConstantOverride("separation", 14);
+        layout.AddChild(sideRow);
+
+        // The column sits in a fixed-size slot: a score growing from 7/20 to 24/20 or a status
+        // line changing must not slide the board sideways (pass 21).
+        StableBox slot = new StableBox { Name = "SideSlot", SizeFlagsVertical = Control.SizeFlags.Fill };
+        sideRow.AddChild(slot);
+
+        // Takes whatever width the side has spare, so the column and the board sit at the two
+        // edges instead of huddling in the middle (pass 22).
+        sideRow.AddChild(new Control
+        {
+            Name = "RowSpacer",
+            SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+            MouseFilter = Control.MouseFilterEnum.Ignore,
+        });
+
+        VBoxContainer column = new VBoxContainer
+        {
+            Name = "SideColumn",
+            Alignment = BoxContainer.AlignmentMode.Begin,
+            SizeFlagsVertical = Control.SizeFlags.Fill,
+        };
+        column.AddThemeConstantOverride("separation", 12);
+        slot.AddChild(column);
+
+        // Holds Wins + score at the TOP of the column, level with the board's first row, and
+        // pushes anything below it (portrait's buttons) down level with the board's last.
+        column.AddChild(new Control
+        {
+            Name = "ColumnSpacer",
+            SizeFlagsVertical = Control.SizeFlags.ExpandFill,
+            MouseFilter = Control.MouseFilterEnum.Ignore,
+        });
+
+        return sideRow;
     }
 
     /// Turns a button row, and lines its buttons up from the top-left in portrait so Draw Card
@@ -667,50 +701,37 @@ public sealed class TableUi
         (row.GetParent() as Control)?.UpdateMinimumSize();
     }
 
-    /// Portrait gives "Wins" and its chips their own line above the score; landscape keeps them on
-    /// the score's row, after it (Alexander's sketch, 2026-09-16):
+    /// "Wins" and its chips take a line of their own ABOVE the score, in both orientations now
+    /// that the block stands in a narrow column beside the board rather than a wide row above it
+    /// (Alexander's sketch, 2026-09-16; landscape joined it on 2026-09-19):
     ///
-    ///     Wins: O O O          [ . . . ]
-    ///     You: 14/20           [ . . . ]
-    ///     Them: 18             [ . . . ]
-    ///     [ Draw Card ]
-    ///     [   Hold    ]
-    ///                     [ hand, under the board ]
-    private void ApplyWinsRow(Control stats, HBoxContainer chips, bool portrait)
+    ///     Wins: O O O     [ . . . ]
+    ///     You  14/20      [ . . . ]
+    ///     Them 18         [ . . . ]
+    ///
+    /// Everything in the column reads from the same left edge, so the eye drops straight down the
+    /// three lines instead of tracking a centred block that re-centres itself every time the score
+    /// gains a digit.
+    private void ApplyWinsRow(Control stats, HBoxContainer chips)
     {
         Label wins = stats.FindChild("WinsLabel", true, false) as Label;
         Control scoreRow = stats.GetNodeOrNull<Control>("Row1");
         if (wins == null || scoreRow == null) return;
 
+        stats.AddThemeConstantOverride("separation", 14);
+        if (stats is BoxContainer statsBox) statsBox.Alignment = BoxContainer.AlignmentMode.Begin;
+        if (scoreRow is BoxContainer scoreBox) scoreBox.Alignment = BoxContainer.AlignmentMode.Begin;
+
         HBoxContainer winsRow = stats.GetNodeOrNull<HBoxContainer>("WinsRow");
-        stats.AddThemeConstantOverride("separation", portrait ? 14 : 0);
-        if (stats is BoxContainer statsBox)
-            statsBox.Alignment = portrait ? BoxContainer.AlignmentMode.Begin : BoxContainer.AlignmentMode.Center;
-        if (scoreRow is BoxContainer scoreBox)
-            scoreBox.Alignment = portrait ? BoxContainer.AlignmentMode.Begin : BoxContainer.AlignmentMode.Center;
-
-        if (portrait)
+        if (winsRow == null)
         {
-            if (winsRow == null)
-            {
-                winsRow = new HBoxContainer { Name = "WinsRow" };
-                winsRow.AddThemeConstantOverride("separation", 8);
-                stats.AddChild(winsRow);
-            }
-            PlaceChild(winsRow, stats, 0);
-            PlaceChild(wins, winsRow, 0);
-            PlaceChild(chips, winsRow, 1);
-            return;
+            winsRow = new HBoxContainer { Name = "WinsRow" };
+            winsRow.AddThemeConstantOverride("separation", 8);
+            stats.AddChild(winsRow);
         }
-
-        // Landscape: back onto the score row, after the score (StyleTableForReadability put it first).
-        PlaceChild(wins, scoreRow, scoreRow.GetChildCount());
-        PlaceChild(chips, scoreRow, scoreRow.GetChildCount());
-        if (winsRow != null)
-        {
-            stats.RemoveChild(winsRow); // before QueueFree - see the SideRow note above
-            winsRow.QueueFree();
-        }
+        PlaceChild(winsRow, stats, 0);
+        PlaceChild(wins, winsRow, 0);
+        PlaceChild(chips, winsRow, 1);
     }
 
     /// Move a node to an exact slot under a parent, reparenting only when it is somewhere else.
