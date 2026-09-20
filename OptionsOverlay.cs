@@ -146,12 +146,25 @@ public partial class OptionsOverlay : Control
         else
         {
             _storeRows.AddChild(StoreButton($"Remove Ads  {PurchaseService.NoAdsPriceLabel}",
-                                            () => PurchaseService.BuyNoAds(_ => FillStore())));
+                                            () => PurchaseService.BuyNoAds(_ => Redraw())));
         }
 
         if (PurchaseService.ShowRestoreButton)
             _storeRows.AddChild(StoreButton("Restore Purchases",
-                                            () => PurchaseService.RestorePurchases(_ => FillStore())));
+                                            () => PurchaseService.RestorePurchases(_ => Redraw())));
+    }
+
+    /// FillStore, but safe to be called back into from the store.
+    ///
+    /// A real purchase is asynchronous: Play's sheet can sit on top of the game for a minute, and
+    /// the player can close this screen - or the whole table can be restarted - before the answer
+    /// arrives. Rebuilding rows on a freed node is a hard crash, so the callback checks it is
+    /// still here first. It is not enough to be alive: a screen that has since been closed should
+    /// not silently rebuild itself either, which Visible covers.
+    private void Redraw()
+    {
+        if (!GodotObject.IsInstanceValid(this) || !Visible) return;
+        FillStore();
     }
 
     private Button StoreButton(string text, Action onPressed)

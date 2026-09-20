@@ -71,6 +71,10 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
 
     public override void _Ready()
     {
+        // First, because it is the slowest: Play takes a second or two to say what this account
+        // owns, and AdMob wants its first ad preloaded long before a match can end.
+        Monetization.Initialize(this);
+
         _gameState = new GameState();
         _player1 = new Player("Player 1");
         _player2 = new Player("Player 2");

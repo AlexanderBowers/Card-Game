@@ -2,16 +2,32 @@ using Godot;
 using System;
 
 /// <summary>
-/// Ads and the No Ads purchase (claude/monetization-spec.md, decided 2026-09-16).
+/// One call to start both services. Made from GameManager._Ready, before anything asks whether an
+/// ad is ready or whether No Ads is owned - Play takes a second or two to answer, and the options
+/// screen should not be the thing that starts the clock.
+/// </summary>
+public static class Monetization
+{
+    public static void Initialize(Node host)
+    {
+        AdMobBackend.Initialize();
+        PurchaseService.Initialize(host);
+    }
+}
+
+/// <summary>
+/// Ads (claude/monetization-spec.md, decided 2026-09-16; wired to AdMob in pass 28).
 ///
-/// STUBS. No ad SDK and no store plugin are wired yet. The spec's build order says to build and
-/// playtest the flows first, then add AdMob / Play Billing / StoreKit behind these same calls, so
-/// nothing in GameManager has to change when they arrive.
+/// The shape of this class has not changed since it was stubs - ShowInterstitial, ShowRewarded,
+/// RewardedReady - because the point of the stubs was that it would not have to. What changed is
+/// where the calls go:
 ///
-///   - A "test ad" is a full-screen overlay with a countdown: watch it to the end, or close it
-///     early. Both outcomes of the rescue can be exercised on desktop and on the S25.
-///   - The test store grants No Ads for free, but ONLY in debug builds. A release export reports
-///     the store as unavailable, so a stub can never give the purchase away in a shipped game.
+///   - On a phone with the AdMob plugin compiled in, to AdMobBackend and a real ad.
+///   - In the editor and on a desktop debug build, to the same "test ad" overlay as before: a
+///     full-screen countdown you can watch out or close early, so both outcomes of the bust
+///     rescue can still be exercised without a phone.
+///   - On a release build with no ad SDK, nowhere. A shipped game must never show a player a
+///     placeholder that says TEST AD, so the ad is simply skipped and the caller carries on.
 /// </summary>
 public static class AdService
 {
@@ -39,11 +55,18 @@ public static class AdService
     /// True when this player should see ads at all.
     public static bool AdsActive => PlatformHasAds && !PurchaseService.OwnsNoAds;
 
-    /// Whether a rewarded ad could be shown right now. The real SDK answers this from its
-    /// preloaded ad; the stub answers from the debug switch.
-    public static bool RewardedReady => AdsActive && !DebugSimulateNoFill;
+    /// Whether there is anything to stand in for an ad at all when no SDK is compiled in. The
+    /// test overlay is a development tool, so it exists in debug builds and nowhere else.
+    private static bool TestAdAllowed => OS.IsDebugBuild();
 
-    public static bool InterstitialReady => AdsActive && !DebugSimulateNoFill;
+    /// Whether a rewarded ad could be shown right now. With the SDK in, this is answered by the
+    /// preloaded ad, which is why the backend keeps one warm: the bust-rescue prompt asks this
+    /// question mid-round and cannot afford to wait for a load.
+    public static bool RewardedReady => AdsActive && !DebugSimulateNoFill
+        && (AdMobBackend.Available ? AdMobBackend.RewardedReady : TestAdAllowed);
+
+    public static bool InterstitialReady => AdsActive && !DebugSimulateNoFill
+        && (AdMobBackend.Available ? AdMobBackend.InterstitialReady : TestAdAllowed);
 
     /// The short ad the player can close, between local co-op matches (spec §2). Always calls
     /// onDone exactly once - immediately if there is nothing to show, so the next match is
@@ -55,6 +78,11 @@ public static class AdService
             onDone?.Invoke();
             return;
         }
+        if (AdMobBackend.Available)
+        {
+            AdMobBackend.ShowInterstitial(onDone);
+            return;
+        }
         ShowTestAd(host, rewarded: false, result => onDone?.Invoke());
     }
 
@@ -64,6 +92,15 @@ public static class AdService
         if (!RewardedReady || host == null)
         {
             onResult?.Invoke(RewardResult.Failed);
+            return;
+        }
+        if (AdMobBackend.Available)
+        {
+            // AdMob reports one bit - did the player watch far enough to earn it. Closing early
+            // is the spec's "No thanks", which is Skipped rather than Failed: the offer WAS made
+            // and the player turned it down, and the rescue's own fallback handles the rest.
+            AdMobBackend.ShowRewarded(earned =>
+                onResult?.Invoke(earned ? RewardResult.Completed : RewardResult.Skipped));
             return;
         }
         ShowTestAd(host, rewarded: true, onResult);
@@ -135,13 +172,24 @@ public static class AdService
 }
 
 /// <summary>
-/// The $0.99 No Ads non-consumable (spec §4). Ownership is profile level and lives in its own file,
-/// not in run.json, so neither a lost run nor the debug "Wipe Save" can take a purchase away.
+/// The No Ads non-consumable (spec §4), backed by Google Play Billing in pass 28.
+///
+/// Ownership is profile level and lives in its own file, not in run.json, so neither a lost run
+/// nor the debug "Wipe Save" can take a purchase away. That file is now a CACHE of what Play said
+/// rather than the record itself: Play is asked at every launch, and what it says is written here
+/// so the game knows the answer while offline.
+///
+/// The cache is only ever written TRUE. Play not answering - no network, no Play Services, the
+/// query timing out - is not evidence that a purchase was revoked, and switching a paid feature
+/// off for someone on a plane is a far worse failure than leaving it on through a rare refund.
 /// </summary>
 public static class PurchaseService
 {
-    public const string NoAdsProductId = "no_ads";
-    public const string NoAdsPriceLabel = "$0.99"; // the real SDK supplies the local price string
+    public const string NoAdsProductId = BillingBackend.NoAdsProductId;
+
+    /// Play's own localised price, so the button reads the right currency in the right format.
+    /// The fallback is only ever seen before the store has answered, or by the debug stub.
+    public static string NoAdsPriceLabel => BillingBackend.PriceLabel ?? "$0.99";
 
     private const string SavePath = "user://purchases.cfg";
     private const string Section = "owned";
@@ -154,18 +202,42 @@ public static class PurchaseService
         get
         {
             EnsureLoaded();
-            return _ownsNoAds;
+            return _ownsNoAds || BillingBackend.Owned;
         }
     }
 
-    /// Whether a purchase can be made on this build. The stub store only exists in debug builds,
-    /// so a release export never shows a Remove Ads button that would hand the purchase out free.
-    public static bool StoreAvailable => AdService.PlatformHasAds && OS.IsDebugBuild();
+    /// Whether a purchase can be made on this build.
+    ///
+    /// With Play present, both halves have to be true: connected, and the product actually
+    /// fetched. Launching a purchase for a product whose details were never queried is a
+    /// DEVELOPER_ERROR, and a Remove Ads button that cannot say a price is not one to show.
+    ///
+    /// Without Play - desktop, the editor, or before the first upload to a Play track - the old
+    /// stub store stands in, and only in debug builds, so a release export can never show a button
+    /// that hands the purchase out free.
+    public static bool StoreAvailable => BillingBackend.Available
+        ? (BillingBackend.Connected && BillingBackend.ProductReady)
+        : (AdService.PlatformHasAds && OS.IsDebugBuild());
 
     /// Apple requires a Restore button for non-consumables. Shown wherever the store is.
     public static bool ShowRestoreButton => StoreAvailable;
 
+    /// Starts Play's connection and asks what this account already owns. Safe to call once, from
+    /// Monetization.Initialize; everything else here works whether or not it ever succeeded.
+    public static void Initialize(Node host)
+    {
+        BillingBackend.Initialize(host, () =>
+        {
+            // Play answered. Cache a yes so the next launch knows it before the network does.
+            if (BillingBackend.Owned) SetOwned(true);
+        });
+    }
+
     /// Always calls onDone exactly once, with whether the player now owns No Ads.
+    ///
+    /// "Exactly once" is load-bearing: the options screen redraws itself in this callback, and the
+    /// real flow can be cancelled, can fail, or can simply never come back if Play's sheet is
+    /// dismissed by the system. BillingBackend holds a clock on it for that last case.
     public static void BuyNoAds(Action<bool> onDone)
     {
         if (!StoreAvailable)
@@ -174,16 +246,41 @@ public static class PurchaseService
             return;
         }
 
-        // Stub: the store "succeeds" at once. The real flow is asynchronous and can be cancelled.
+        if (BillingBackend.Available)
+        {
+            BillingBackend.Purchase(owned =>
+            {
+                if (owned) SetOwned(true);
+                onDone?.Invoke(OwnsNoAds);
+            });
+            return;
+        }
+
+        // Stub: the store "succeeds" at once, in debug builds only.
         GD.Print("PurchaseService (stub): granting No Ads");
         SetOwned(true);
         onDone?.Invoke(true);
     }
 
     /// Always calls onDone exactly once, with whether the player owns No Ads after the restore.
+    ///
+    /// There is no restore call as such on Play: a non-consumable that was never consumed comes
+    /// back in the purchases query on any device signed into the same account. Apple requires the
+    /// button, and it costs nothing to honour it here too - someone who reinstalled and is staring
+    /// at ads they paid to remove will press it before they write a review.
     public static void RestorePurchases(Action<bool> onDone)
     {
-        // Stub: the file IS the store. The real flow asks Play / StoreKit and writes the answer here.
+        if (BillingBackend.Available)
+        {
+            BillingBackend.Restore(owned =>
+            {
+                if (owned) SetOwned(true);
+                onDone?.Invoke(OwnsNoAds);
+            });
+            return;
+        }
+
+        // Stub: the file IS the store.
         _loaded = false;
         onDone?.Invoke(OwnsNoAds);
     }

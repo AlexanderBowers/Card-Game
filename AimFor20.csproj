@@ -4,4 +4,17 @@
     <TargetFramework Condition=" '$(GodotTargetPlatform)' == 'android' ">net9.0</TargetFramework>
     <EnableDynamicLoading>true</EnableDynamicLoading>
   </PropertyGroup>
+  <!--
+    AdMobBackend.cs is written against the poingstudios AdMob plugin, whose C# types only exist
+    once the plugin has been installed into addons/admob. Rather than break a fresh checkout, the
+    real implementation sits behind GODOT_ADMOB and this switches it on by the presence of the
+    addon: install the plugin and ads are live, delete it and the project still builds and falls
+    back to the test-ad overlay. Set AdMobInstalled explicitly to force it either way.
+  -->
+  <PropertyGroup>
+    <AdMobInstalled Condition=" '$(AdMobInstalled)' == '' AND Exists('addons/admob') ">true</AdMobInstalled>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(AdMobInstalled)' == 'true' ">
+    <DefineConstants>$(DefineConstants);GODOT_ADMOB</DefineConstants>
+  </PropertyGroup>
 </Project>

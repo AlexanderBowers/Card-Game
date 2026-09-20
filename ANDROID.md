@@ -75,3 +75,61 @@ Progress: GitHub → *Actions*. The first run is slower (downloads Godot, ~1 GB)
 - Display settings in `project.godot` were set to `canvas_items` stretch / `expand` aspect / sensor orientation: the 2-player table (vertical layout) reads best in portrait, the vs-bot table (side-by-side) in landscape — rotate the phone.
 - The Android back gesture and the in-game **Exit** button both quit the app; **Restart** reloads the current scene (fresh match, same mode).
 - C# on Android is still flagged "experimental" by Godot; if an export fails, the error log in *Actions* (or the editor Output panel) is the first place to look.
+
+## 4. Ads and the store (pass 28)
+
+Both AdMob and Google Play Billing are Android **plugins**, which only work through a Gradle
+build. The export preset now has `gradle_build/use_gradle_build=true` and `permissions/internet=true`,
+and neither an editor export nor CI will succeed until the steps below are done once.
+
+### 4a. The Android build template — do this first
+
+Godot editor → **Project → Install Android Build Template**. It unzips the engine's
+`android_source.zip` into `res://android/build`.
+
+**Commit the `android/` folder.** There is no headless way to generate it
+([godotengine/godot#38327](https://github.com/godotengine/godot/issues/38327)), so CI checks that
+it is there and fails with one clear line if it is not. Regenerate and re-commit it whenever the
+Godot version moves.
+
+### 4b. The two plugins
+
+| | Plugin | Install |
+|---|---|---|
+| Ads | **AdMob** by Poing Studios, v5.1.0 | Editor → Asset Store → search `AdMob` → install → enable in *Project Settings → Plugins* |
+| Store | **Godot Google Play Billing** (Godot Foundation), v3.3.0 | Editor → AssetLib → search `Godot Google Play Billing` → **untick "Ignore asset root"** → install → enable in *Project Settings → Plugins* |
+
+Installing the AdMob plugin is all that is needed to switch the ad code on: `AimFor20.csproj`
+defines `GODOT_ADMOB` when `addons/admob` exists, and `AdMobBackend.cs` compiles itself out
+otherwise. The billing plugin is reached by name at runtime, so it needs no build flag at all.
+
+`minSdk` is set to 24 in the preset — AdMob's floor. Billing needs 23, so 24 covers both.
+
+### 4c. AdMob
+
+- The **app id** (the one with a `~`) goes in *Project Settings → General → Admob → General →
+  Android → App Id*. The plugin writes it into the manifest; do not hand-edit the manifest.
+- The **ad unit ids** (the ones with a `/`) are in `AdMobBackend.cs`, at the top. They are
+  currently Google's public test units, which serve real creatives and are safe on a dev build.
+  Put the real ones in the `Live*` constants when the AdMob account exists — debug builds keep
+  using the test units either way.
+- Never run live units on your own phone: that is how an AdMob account gets flagged for invalid
+  traffic.
+
+### 4d. Play Billing — what has to exist before a purchase can be tested
+
+None of this works from a sideloaded APK alone. In order:
+
+1. Play Console → create the app under `com.alexbowers.aimfor20`.
+2. Create a **one-time product** with product id exactly `no_ads`, and set it **Active**.
+3. Build a signed **AAB** (`gradle_build/export_format=1`, release export) that already contains
+   the billing plugin, and upload it once to **Internal testing**. This is what switches billing
+   on for the package.
+4. Play Console → *Settings → License testing* → add the Google account that is the **primary**
+   account on the test device.
+
+After that first upload, a licence tester can sideload debug builds and iterate normally — the CI
+APK loop keeps working. Allow a few hours after publishing before the track is live for testers.
+
+Until all four are true, `PurchaseService.StoreAvailable` is false on the phone and the Remove Ads
+button simply does not appear. That is correct behaviour, not a bug to chase.
