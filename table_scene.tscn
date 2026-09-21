@@ -1,8 +1,7 @@
-[gd_scene load_steps=4 format=3 uid="uid://b7qn5xyxoj23q"]
+[gd_scene format=3 uid="uid://b7qn5xyxoj23q"]
 
 [ext_resource type="Script" uid="uid://cdrp0i3hpccul" path="res://GameManager.cs" id="1_u7gne"]
-
-[ext_resource type="Texture2D" path="res://assets/kenney/cards.png" id="2_cards"]
+[ext_resource type="Texture2D" uid="uid://b2c27smdqv8r4" path="res://assets/kenney/cards.png" id="2_cards"]
 
 [sub_resource type="AtlasTexture" id="AtlasTexture_deck"]
 atlas = ExtResource("2_cards")
@@ -69,7 +68,7 @@ layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 3
 
-[node name="P2Holder" type="Control" parent="GameUI/MainLayout/Player2Side"]
+[node name="P2Holder" type="Control" parent="GameUI/MainLayout/Player2Side" unique_id=2054387746]
 layout_mode = 2
 
 [node name="P2Rotator" type="Control" parent="GameUI/MainLayout/Player2Side/P2Holder" unique_id=23345930]
@@ -96,7 +95,7 @@ layout_mode = 2
 theme_override_constants/separation = 0
 alignment = 1
 
-[node name="Row1" type="HBoxContainer" parent="GameUI/MainLayout/Player2Side/P2Holder/P2Rotator/Layout/Stats"]
+[node name="Row1" type="HBoxContainer" parent="GameUI/MainLayout/Player2Side/P2Holder/P2Rotator/Layout/Stats" unique_id=1139611699]
 layout_mode = 2
 theme_override_constants/separation = 8
 alignment = 1
@@ -125,17 +124,17 @@ layout_mode = 2
 theme_override_constants/separation = 10
 alignment = 1
 
-[node name="ActionButtons" type="BoxContainer" parent="GameUI/MainLayout/Player2Side/P2Holder/P2Rotator/Layout"]
+[node name="ActionButtons" type="BoxContainer" parent="GameUI/MainLayout/Player2Side/P2Holder/P2Rotator/Layout" unique_id=1165380275]
 layout_mode = 2
 theme_override_constants/separation = 10
 alignment = 1
 
-[node name="DrawCardButton" type="Button" parent="GameUI/MainLayout/Player2Side/P2Holder/P2Rotator/Layout/ActionButtons"]
+[node name="DrawCardButton" type="Button" parent="GameUI/MainLayout/Player2Side/P2Holder/P2Rotator/Layout/ActionButtons" unique_id=408562984]
 layout_mode = 2
 size_flags_horizontal = 3
 text = "Draw Card"
 
-[node name="HoldButton" type="Button" parent="GameUI/MainLayout/Player2Side/P2Holder/P2Rotator/Layout/ActionButtons"]
+[node name="HoldButton" type="Button" parent="GameUI/MainLayout/Player2Side/P2Holder/P2Rotator/Layout/ActionButtons" unique_id=1402462056]
 layout_mode = 2
 size_flags_horizontal = 3
 text = "Hold"
@@ -155,7 +154,7 @@ horizontal_alignment = 1
 [node name="GameModeButton" type="OptionButton" parent="GameUI/MainLayout/SharedControlPanel/VBoxContainer" unique_id=1779882157]
 layout_mode = 2
 
-[node name="MirrorToggle" type="CheckButton" parent="GameUI/MainLayout/SharedControlPanel/VBoxContainer"]
+[node name="MirrorToggle" type="CheckButton" parent="GameUI/MainLayout/SharedControlPanel/VBoxContainer" unique_id=523595024]
 visible = false
 layout_mode = 2
 text = "Mirror for Player 2"
@@ -164,12 +163,12 @@ text = "Mirror for Player 2"
 layout_mode = 2
 text = "Start Game"
 
-[node name="TableRow" type="HBoxContainer" parent="GameUI/MainLayout/SharedControlPanel/VBoxContainer"]
+[node name="TableRow" type="HBoxContainer" parent="GameUI/MainLayout/SharedControlPanel/VBoxContainer" unique_id=814764117]
 layout_mode = 2
 theme_override_constants/separation = 16
 alignment = 1
 
-[node name="MainDeck" type="TextureRect" parent="GameUI/MainLayout/SharedControlPanel/VBoxContainer/TableRow"]
+[node name="MainDeck" type="TextureRect" parent="GameUI/MainLayout/SharedControlPanel/VBoxContainer/TableRow" unique_id=14477606]
 custom_minimum_size = Vector2(84, 114)
 layout_mode = 2
 size_flags_vertical = 4
@@ -177,7 +176,7 @@ texture = SubResource("AtlasTexture_deck")
 expand_mode = 1
 stretch_mode = 5
 
-[node name="ButtonColumn" type="VBoxContainer" parent="GameUI/MainLayout/SharedControlPanel/VBoxContainer/TableRow"]
+[node name="ButtonColumn" type="VBoxContainer" parent="GameUI/MainLayout/SharedControlPanel/VBoxContainer/TableRow" unique_id=1535395930]
 layout_mode = 2
 theme_override_constants/separation = 10
 alignment = 1
@@ -211,7 +210,7 @@ layout_mode = 2
 theme_override_constants/separation = 0
 alignment = 1
 
-[node name="Row1" type="HBoxContainer" parent="GameUI/MainLayout/Player1Side/Layout/Stats"]
+[node name="Row1" type="HBoxContainer" parent="GameUI/MainLayout/Player1Side/Layout/Stats" unique_id=2015509135]
 layout_mode = 2
 theme_override_constants/separation = 8
 alignment = 1
@@ -240,17 +239,17 @@ layout_mode = 2
 theme_override_constants/separation = 10
 alignment = 1
 
-[node name="ActionButtons" type="BoxContainer" parent="GameUI/MainLayout/Player1Side/Layout"]
+[node name="ActionButtons" type="BoxContainer" parent="GameUI/MainLayout/Player1Side/Layout" unique_id=1676182333]
 layout_mode = 2
 theme_override_constants/separation = 10
 alignment = 1
 
-[node name="DrawCardButton" type="Button" parent="GameUI/MainLayout/Player1Side/Layout/ActionButtons"]
+[node name="DrawCardButton" type="Button" parent="GameUI/MainLayout/Player1Side/Layout/ActionButtons" unique_id=1213137835]
 layout_mode = 2
 size_flags_horizontal = 3
 text = "Draw Card"
 
-[node name="HoldButton" type="Button" parent="GameUI/MainLayout/Player1Side/Layout/ActionButtons"]
+[node name="HoldButton" type="Button" parent="GameUI/MainLayout/Player1Side/Layout/ActionButtons" unique_id=493120665]
 layout_mode = 2
 size_flags_horizontal = 3
 text = "Hold"
