@@ -408,16 +408,32 @@ public sealed class TableUi
 
     private const int MaxFitAttempts = 6;
 
-    // Portrait GROWS the UI into spare room as well as shrinking it to fit (Alexander, 2026-09-16:
+    // GROWS the UI into spare room as well as shrinking it to fit (Alexander, 2026-09-16:
     // "text is too small for how much space is now available"). The Need* tally is sized for the
     // 2-player table, so the solo table - one side, not two - was drawn at 2-player scale on a
-    // phone with half the screen empty. Landscape is left alone: playtesters said it feels right.
+    // phone with half the screen empty.
+    //
+    // Landscape was left alone at first (playtesters said it felt right on the sizes it was
+    // tried on), but Alexander, 2026-09-21, screenshots off the S25 Ultra in landscape (2340x1080):
+    // "3x3 grid isn't big enough. Score isn't big enough" - NeedLandscape is far smaller than that
+    // window, and with growth gated to portrait only, that slack just sat there as green table felt
+    // rather than being spent on the board and the score beside it. Both orientations now grow
+    // into spare room the same way; only the ceiling differs (MaxLandscapeZoom below).
     private bool _fitPortrait;
 
     private float _fitBaseK = 1f; // k before _fitScale is applied, so the grow can respect the cap
 
     /// How far the UI may be enlarged past the 720px base (1 / this is the smallest _fitScale).
-    private const float MaxPortraitZoom = 2.2f; // was 1.8; the portrait side now fills the width
+    /// Was 1.8, then 2.2; the S25 Ultra screenshots Alexander sent (2026-09-21) still showed real
+    /// gaps above/below the board+score block at 2.2 on that phone's tall aspect - another guess
+    /// to check against a real device, same as NeedPortrait above.
+    private const float MaxPortraitZoom = 2.6f;
+
+    /// Landscape's own ceiling (see the note above _fitPortrait). A first guess, the same way
+    /// NeedLandscape is - worth raising further if a real phone still shows spare room at this
+    /// cap. Kept a little under the portrait one for now since landscape has two boards side by
+    /// side, so the same zoom reads as more growth across the whole table.
+    private const float MaxLandscapeZoom = 1.8f;
 
     /// Spare room below this fraction is not worth a re-layout.
     private const float GrowThreshold = 0.95f;
@@ -468,7 +484,8 @@ public sealed class TableUi
         Vector2 need = portrait ? NeedPortrait : NeedLandscape;
         float k = Mathf.Max(1f, Mathf.Max(need.X / baseViewport.X, need.Y / baseViewport.Y)) * _fitScale;
         _fitBaseK = k / Mathf.Max(_fitScale, 0.001f);
-        k = Mathf.Max(k, 1f / MaxPortraitZoom);
+        float maxZoom = portrait ? MaxPortraitZoom : MaxLandscapeZoom;
+        k = Mathf.Max(k, 1f / maxZoom);
         Vector2I contentSize = (Vector2I)(new Vector2(BaseSide, BaseSide) * k).Round();
         if (root.ContentScaleSize != contentSize) root.ContentScaleSize = contentSize; // re-fires SizeChanged once
 
@@ -806,15 +823,16 @@ public sealed class TableUi
 
             if (overflow <= 1.002f)
             {
-                // It fits. In portrait, also use the room that is left over - unless the UI is
-                // already as large as it is allowed to get. The target is 98% so the next pass
-                // lands inside the dead band (0.95..1.002) and stops rather than bouncing off the
-                // shrink branch below.
+                // It fits. Also use the room that is left over - unless the UI is already as
+                // large as it is allowed to get. The target is 98% so the next pass lands inside
+                // the dead band (0.95..1.002) and stops rather than bouncing off the shrink branch
+                // below.
                 // Measured against the HIGH-WATER mark, not this frame: the hand gets narrower
                 // every time a card is played, and growing into that would zoom the table mid-match.
                 float room = Mathf.Max(_fitLastNeeded.X / vp.X, _fitLastNeeded.Y / vp.Y);
-                float minFit = (1f / MaxPortraitZoom) / Mathf.Max(_fitBaseK, 0.001f);
-                if (!_fitPortrait || room >= GrowThreshold || _fitScale <= minFit + 0.001f) return;
+                float maxZoom = _fitPortrait ? MaxPortraitZoom : MaxLandscapeZoom;
+                float minFit = (1f / maxZoom) / Mathf.Max(_fitBaseK, 0.001f);
+                if (room >= GrowThreshold || _fitScale <= minFit + 0.001f) return;
 
                 _fitAttempts++;
                 _fitScale = Mathf.Max(minFit, _fitScale * room / 0.98f);
