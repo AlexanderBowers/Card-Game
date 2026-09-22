@@ -110,10 +110,23 @@ jobs:
 
       - name: Check Android build template is committed
         run: |
+          set -euo pipefail
+
           if [ ! -f android/build/build.gradle ]; then
             echo "::error::android/build is missing. In the editor: Project > Install Android Build Template, then commit android/."
             exit 1
           fi
+
+          if [ ! -f android/build/gradlew ]; then
+            echo "::error::android/build/gradlew is missing."
+            exit 1
+          fi
+
+          # git doesn't reliably carry the executable bit through every checkout path
+          # (Windows editors, some clone/rebase flows), so re-assert it every run
+          # rather than relying solely on the bit committed in the tree.
+          chmod +x android/build/gradlew
+          test -x android/build/gradlew
 
       - name: Restore Godot engine .aar files into the build template (too big for git)
         run: |
@@ -127,8 +140,23 @@ jobs:
         run: |
           yes | "${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
 
+      - name: Compile C# project for Android
+        # The earlier sanity-check step only queries the resolved TargetFramework; it does
+        # not actually compile the game scripts. Do that here, loudly, so a real C# error
+        # (e.g. a script that fails to compile) is caught with a clear log instead of
+        # surfacing later as a vague "script is not compiling" failure during import/export.
+        run: |
+          set -o pipefail
+          dotnet build AimFor20.csproj \
+            --configuration Debug \
+            /p:GodotTargetPlatform=android \
+            -v:minimal \
+            2>&1 | tee build/csharp-build.log
+
       - name: Import project (generates .godot cache)
-        run: godot --headless --path . --import 2>&1 | tee build/import.log || true
+        run: |
+          set -o pipefail
+          godot --headless --path . --import 2>&1 | tee build/import.log
 
       - name: Export Android APK
         env:
