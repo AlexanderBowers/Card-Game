@@ -7,3 +7,7 @@
 /android/build/build/
 /android/build/.gradle/
 /android/build/local.properties
+
+/android/build/libs/debug/*.aar
+/android/build/libs/release/*.aar
+/android/build/libs/dev/*.aar
