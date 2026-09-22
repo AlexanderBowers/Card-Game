@@ -108,6 +108,25 @@ jobs:
             exit 1
           fi
 
+      - name: Check Android build template is committed
+        run: |
+          if [ ! -f android/build/build.gradle ]; then
+            echo "::error::android/build is missing. In the editor: Project > Install Android Build Template, then commit android/."
+            exit 1
+          fi
+
+      - name: Restore Godot engine .aar files into the build template (too big for git)
+        run: |
+          set -euo pipefail
+          SRC=~/.local/share/godot/export_templates/${GODOT_VERSION}.stable.mono/android_source.zip
+          unzip -o -q "$SRC" 'libs/*' -d android/build
+          ls -la android/build/libs/debug android/build/libs/release
+          test -s android/build/libs/debug/godot-lib.template_debug.aar
+
+      - name: Accept Android SDK licences (Gradle pulls plugin dependencies)
+        run: |
+          yes | "${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
+
       - name: Import project (generates .godot cache)
         run: godot --headless --path . --import 2>&1 | tee build/import.log || true
 
