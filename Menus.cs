@@ -199,8 +199,17 @@ public sealed class Menus
 
     private bool _endlessArmed; // ...and so does Endless
 
-    /// Opaque, and a deeper shade of the table's own felt so the menu still reads as this game.
-    private static readonly Color MenuBackdrop = new Color(0.04f, 0.10f, 0.07f);
+    /// Behind the playmat, in case it fails to load: the mat's own edge colour.
+    private static readonly Color MenuBackdrop = new Color(0.1f, 0.14f, 0.16f);
+
+    // Pass 31: the start menu is the game's front door, so it gets the Pocket treatment - the
+    // playmat, a slanted accent banner across it, and the logo above the buttons (portrait).
+    private static readonly Texture2D MenuMatLandscape = GD.Load<Texture2D>("res://assets/aimfor20_art/playmat_landscape.png");
+    private static readonly Texture2D MenuMatPortrait = GD.Load<Texture2D>("res://assets/aimfor20_art/playmat_portrait.png");
+    private static readonly Texture2D MenuLogo = GD.Load<Texture2D>("res://assets/aimfor20_art/ui/menu_logo.png");
+
+    private const float MenuBannerAngle = -9f;   // degrees; the Pocket "Battle" / "VS." slant
+    private const float MenuLogoSize = 170f;
 
     public void BuildStartMenu()
     {
@@ -216,11 +225,51 @@ public sealed class Menus
         _startMenuOverlay.AddChild(backdrop);
         backdrop.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
 
+        // Still opaque - the mat covers the table completely, it just is not a flat colour now.
+        TextureRect mat = new TextureRect
+        {
+            ExpandMode = TextureRect.ExpandModeEnum.IgnoreSize,
+            StretchMode = TextureRect.StretchModeEnum.KeepAspectCovered,
+            MouseFilter = Control.MouseFilterEnum.Ignore,
+            Texture = MenuMatLandscape,
+        };
+        _startMenuOverlay.AddChild(mat);
+        mat.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
+
+        // Two slanted bands behind the panel: a wide pale one and a narrower accent one inside it.
+        ColorRect bandWide = new ColorRect { Color = new Color(0.55f, 0.82f, 1f, 0.22f), MouseFilter = Control.MouseFilterEnum.Ignore };
+        ColorRect band = new ColorRect { Color = new Color(OverlayUi.Accent, 0.75f), MouseFilter = Control.MouseFilterEnum.Ignore };
+        _startMenuOverlay.AddChild(bandWide);
+        _startMenuOverlay.AddChild(band);
+
+        void Relayout()
+        {
+            Vector2 size = _startMenuOverlay.Size;
+            if (size.X <= 0 || size.Y <= 0) return;
+            mat.Texture = size.Y > size.X ? MenuMatPortrait : MenuMatLandscape;
+
+            // Longer than the diagonal, so the ends never show whatever the aspect.
+            float length = size.Length() * 1.2f;
+            float centreY = size.Y * 0.5f;
+            PlaceBand(bandWide, length, size.Y * 0.42f, size.X / 2f, centreY);
+            PlaceBand(band, length, size.Y * 0.2f, size.X / 2f, centreY);
+        }
+        _startMenuOverlay.Resized += Relayout;
+        Relayout();
+
         _startMenuBox = OverlayUi.AddPanel(_startMenuOverlay, contentMargin: 32, separation: 12);
 
         _collectionOverlay = new CollectionOverlay();
         _root.AddChild(_collectionOverlay);
         _collectionOverlay.Setup(_ui.CreateCardView);
+    }
+
+    private static void PlaceBand(ColorRect band, float length, float thickness, float cx, float cy)
+    {
+        band.Size = new Vector2(length, thickness);
+        band.Position = new Vector2(cx - length / 2f, cy - thickness / 2f);
+        band.PivotOffset = band.Size / 2f;
+        band.RotationDegrees = MenuBannerAngle;
     }
 
     public void ShowStartMenu()
@@ -252,6 +301,21 @@ public sealed class Menus
         // copy of the title to go stale.
         string title = ProjectSettings.GetSetting("application/config/name").AsString();
         if (string.IsNullOrWhiteSpace(title)) title = "Card Game";
+        // The logo only where there is height to spare: a phone held upright. Landscape spends
+        // every pixel of its 720 base on the buttons.
+        Vector2 view = _root.GetViewport().GetVisibleRect().Size;
+        if (MenuLogo != null && view.Y > view.X)
+        {
+            _startMenuBox.AddChild(new TextureRect
+            {
+                Texture = MenuLogo,
+                CustomMinimumSize = new Vector2(MenuLogoSize, MenuLogoSize),
+                ExpandMode = TextureRect.ExpandModeEnum.IgnoreSize,
+                StretchMode = TextureRect.StretchModeEnum.KeepAspectCentered,
+                SizeFlagsHorizontal = Control.SizeFlags.ShrinkCenter,
+                MouseFilter = Control.MouseFilterEnum.Ignore,
+            });
+        }
         _startMenuBox.AddChild(OverlayUi.MakeLabel(title, MenuTitleFont));
 
         RunData run = RunData.Instance;
@@ -267,15 +331,16 @@ public sealed class Menus
 
         // First, and named with the rung, because a player who left mid-ladder came back for this
         // one thing and should not have to guess which button keeps their climb.
+        Button continueButton = null;
         if (runInProgress && run.Endless)
         {
-            AddMenuButton($"Continue - Endless, streak {run.EndlessStreak}",
+            continueButton = AddMenuButton($"Continue - Endless, streak {run.EndlessStreak}",
                           $"target {run.CurrentTarget}{_host.FinaleRulesLine(run, "   -   ")}",
                           () => MenuStartRun(fresh: false));
         }
         else if (runInProgress)
         {
-            AddMenuButton($"Continue - Match {run.MatchNumber} of {RunData.LadderLength}",
+            continueButton = AddMenuButton($"Continue - Match {run.MatchNumber} of {RunData.LadderLength}",
                           $"{run.CurrentOpponent}   -   target {run.CurrentTarget}",
                           () => MenuStartRun(fresh: false));
         }
@@ -295,6 +360,9 @@ public sealed class Menus
                 }
                 MenuStartRun(fresh: true);
             });
+
+        // One accent per screen: the button a returning player came for.
+        OverlayUi.StyleButton(continueButton ?? _newRunButton, primary: true);
 
         // No explanatory line under either of the two plain modes (Alexander, 2026-09-13): a menu
         // that describes its own buttons is a menu that does not trust them. The one note that
@@ -533,7 +601,7 @@ public sealed class Menus
             place.HorizontalAlignment = HorizontalAlignment.Right;
             row.AddChild(place);
 
-            Label streak = OverlayUi.MakeLabel($"{score.Streak}", 34, best ? OverlayUi.MedalGold : Colors.White);
+            Label streak = OverlayUi.MakeLabel($"{score.Streak}", 34, best ? OverlayUi.MedalGold : OverlayUi.Ink);
             streak.CustomMinimumSize = new Vector2(72, 0);
             streak.HorizontalAlignment = HorizontalAlignment.Left;
             row.AddChild(streak);
@@ -753,20 +821,12 @@ public sealed class Menus
         _root.AddChild(_howToPlayOverlay);
         _howToPlayOverlay.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
 
-        ColorRect dim = new ColorRect { Color = new Color(0, 0, 0, 0.6f), MouseFilter = Control.MouseFilterEnum.Ignore };
+        ColorRect dim = new ColorRect { Color = OverlayUi.DimColor, MouseFilter = Control.MouseFilterEnum.Ignore };
         _howToPlayOverlay.AddChild(dim);
         dim.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
 
         _howToPlayPanel = new PanelContainer();
-        StyleBoxFlat style = new StyleBoxFlat
-        {
-            BgColor = new Color(0.1f, 0.14f, 0.2f, 0.98f),
-            BorderColor = new Color(0.55f, 0.65f, 0.8f),
-        };
-        style.SetBorderWidthAll(2);
-        style.SetCornerRadiusAll(12);
-        style.SetContentMarginAll(20);
-        _howToPlayPanel.AddThemeStyleboxOverride("panel", style);
+        OverlayUi.StylePanel(_howToPlayPanel, 20);
         _howToPlayOverlay.AddChild(_howToPlayPanel);
         // Fill the screen with a margin so the rules get as much room as the device has.
         _howToPlayPanel.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);

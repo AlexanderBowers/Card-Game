@@ -157,6 +157,10 @@ public sealed class TableUi
 
         _mainLayout = nodes.MainLayout;
 
+        // Pass 31: Draw Card is the table's one accent - the thing you do next, most turns.
+        foreach (Button draw in new[] { _p1DrawCardButton, _p2DrawCardButton, _drawCardButton })
+            if (draw != null) OverlayUi.StyleButton(draw, primary: true);
+
         _faceMain = GD.Load<Texture2D>(ArtDir + "card_main.png");
         _facePlus = GD.Load<Texture2D>(ArtDir + "card_plus.png");
         _faceMinus = GD.Load<Texture2D>(ArtDir + "card_minus.png");
@@ -174,7 +178,8 @@ public sealed class TableUi
             _playmat.StretchMode = TextureRect.StretchModeEnum.KeepAspectCovered;
             _playmat.MouseFilter = Control.MouseFilterEnum.Ignore;
         }
-        _chipSheet = GD.Load<Texture2D>("res://assets/kenney/chips.png");
+        _chipWon = GD.Load<Texture2D>(ArtDir + "ui/chip_won.png");
+        _chipEmpty = GD.Load<Texture2D>(ArtDir + "ui/chip_empty.png");
         _sfxSlide = CreateSfx("res://assets/kenney/sfx/cardSlide1.ogg");
         _sfxPlace = CreateSfx("res://assets/kenney/sfx/cardPlace1.ogg");
 
@@ -307,7 +312,15 @@ public sealed class TableUi
     private Texture2D _faceEffect;   // foil   - effect cards (Copy, Shave, Veto, ...)
     private Texture2D _cardBack;     // the face-down deck, and the card that flies from it
 
-    private Texture2D _chipSheet;
+    // Win markers: an empty ring, and a gold coin carrying the card back's diamond (pass 31 -
+    // replaces the Kenney poker chips).
+    private Texture2D _chipWon;
+
+    private Texture2D _chipEmpty;
+
+    /// The target on the table: gold on the dark mat. (OverlayUi.MedalGold is the darker gold
+    /// INK that reads on the pale panels.)
+    private static readonly Color TableGold = new Color(1f, 0.85f, 0.35f);
 
     // The collection log's reward. There is one back now, so the reward is the gilding alone.
     private static readonly Color CollectorBackTint = new Color(1.45f, 1.2f, 0.45f);
@@ -337,9 +350,7 @@ public sealed class TableUi
     /// and the mat keeps its vignette and border instead of going flat.
     private static readonly Color PlaymatAverage = new Color(0.114f, 0.227f, 0.243f);
 
-    private static readonly Rect2 RegionChipWon = new Rect2(0, 194, 68, 68);    // chipGreen_border
 
-    private static readonly Rect2 RegionChipEmpty = new Rect2(68, 0, 68, 68);   // chipWhite_border
 
     private const float ChipSize = 33f; // pass 23: was 28
 
@@ -1136,7 +1147,7 @@ public sealed class TableUi
         {
             string heading = run.Endless ? "ENDLESS" : "FINAL";
             _targetLabel.Text = $"{heading}  -  TARGET {State.TargetScore}{_host.FinaleRulesLine(run, "\n")}";
-            _targetLabel.AddThemeColorOverride("font_color", OverlayUi.MedalGold);
+            _targetLabel.AddThemeColorOverride("font_color", TableGold);
             return;
         }
 
@@ -1150,7 +1161,7 @@ public sealed class TableUi
         // A target that changes quietly is the game changing its own rules behind the player's back.
         string direction = run.CurrentTarget > run.PreviousTarget ? "up" : "down";
         _targetLabel.Text = $"TARGET  {State.TargetScore}   ({direction} from {run.PreviousTarget})";
-        _targetLabel.AddThemeColorOverride("font_color", OverlayUi.MedalGold);
+        _targetLabel.AddThemeColorOverride("font_color", TableGold);
     }
 
 
@@ -1348,16 +1359,16 @@ public sealed class TableUi
         // Play and Put back sit where Draw Card and Hold sit, and Flip Value goes last - so the
         // two buttons every card has never move, and a card without Flip Value leaves its space
         // empty at the end rather than closing the gap (pass 21).
-        Button play = MakeConfirmButton("Play", new Color(0.24f, 0.62f, 0.31f));
+        Button play = MakeConfirmButton("Play", primary: true);
         play.Pressed += () => _host.PlayPressed(player);
         row.AddChild(play);
         playButton = play;
 
-        Button cancel = MakeConfirmButton("Put back", new Color(0.38f, 0.38f, 0.42f));
+        Button cancel = MakeConfirmButton("Put back");
         cancel.Pressed += () => { _host.PutBackPressed(player); Refresh(); };
         row.AddChild(cancel);
 
-        flipValueButton = MakeConfirmButton("Flip Value", new Color(0.22f, 0.44f, 0.78f));
+        flipValueButton = MakeConfirmButton("Flip Value", ring: InkFlip);
         flipValueButton.Pressed += () => _host.FlipValuePressed(player);
         row.AddChild(flipValueButton);
 
@@ -1406,32 +1417,12 @@ public sealed class TableUi
     private static Vector2 Bigger(Vector2 a, Vector2 b) =>
         new Vector2(Mathf.Max(a.X, b.X), Mathf.Max(a.Y, b.Y));
 
-    private static Button MakeConfirmButton(string text, Color tint)
+    /// Play / Put back / Flip Value. Pass 31: the house pill (OverlayUi.StyleButton) - Play is
+    /// the accent, Put back is plain, and Flip Value is ringed in the violet of a +/- card.
+    private static Button MakeConfirmButton(string text, bool primary = false, Color? ring = null)
     {
         Button button = new Button { Text = text, FocusMode = Control.FocusModeEnum.None };
-        button.AddThemeColorOverride("font_color", Colors.White);
-        button.AddThemeColorOverride("font_hover_color", Colors.White);
-        button.AddThemeColorOverride("font_pressed_color", Colors.White);
-
-        StyleBoxFlat box = new StyleBoxFlat
-        {
-            BgColor = tint,
-            CornerRadiusTopLeft = 8,
-            CornerRadiusTopRight = 8,
-            CornerRadiusBottomLeft = 8,
-            CornerRadiusBottomRight = 8,
-            ContentMarginLeft = 20,
-            ContentMarginRight = 20,
-            ContentMarginTop = 14,
-            ContentMarginBottom = 14,
-        };
-        StyleBoxFlat pressed = (StyleBoxFlat)box.Duplicate();
-        pressed.BgColor = tint.Lightened(0.15f);
-
-        button.AddThemeStyleboxOverride("normal", box);
-        button.AddThemeStyleboxOverride("hover", pressed);
-        button.AddThemeStyleboxOverride("pressed", pressed);
-        button.AddThemeStyleboxOverride("focus", box);
+        OverlayUi.StyleButton(button, primary, ring);
         return button;
     }
 
@@ -1527,16 +1518,17 @@ public sealed class TableUi
             view.PivotOffset = ModifierCardSize / 2f;
             view.Scale = new Vector2(1.18f, 1.18f);
 
+            // Pass 31: an accent ring just outside the card, the colour every "do this next"
+            // thing on screen shares, instead of a yellow box drawn over the art.
             StyleBoxFlat outline = new StyleBoxFlat
             {
-                BgColor = new Color(0, 0, 0, 0),
-                BorderColor = new Color(1f, 0.92f, 0.4f),
-                CornerRadiusTopLeft = 6,
-                CornerRadiusTopRight = 6,
-                CornerRadiusBottomLeft = 6,
-                CornerRadiusBottomRight = 6,
+                DrawCenter = false,
+                BorderColor = new Color(0.45f, 0.8f, 1f),
+                AntiAliasingSize = 1.2f,
             };
+            outline.SetCornerRadiusAll(12);
             outline.SetBorderWidthAll(4);
+            outline.SetExpandMarginAll(3);
 
             Panel highlight = new Panel { MouseFilter = Control.MouseFilterEnum.Ignore };
             highlight.AddThemeStyleboxOverride("panel", outline);
@@ -1572,11 +1564,13 @@ public sealed class TableUi
             Panel slot = new Panel { CustomMinimumSize = BoardCardSize, MouseFilter = Control.MouseFilterEnum.Ignore };
             StyleBoxFlat style = new StyleBoxFlat
             {
-                BgColor = new Color(0, 0, 0, 0.18f),
-                BorderColor = new Color(1, 1, 1, 0.12f),
+                // Pass 31: Pocket's board - a faint white wash inside a thin white ring.
+                BgColor = new Color(1, 1, 1, 0.05f),
+                BorderColor = new Color(1, 1, 1, 0.3f),
+                AntiAliasingSize = 1.2f,
             };
             style.SetBorderWidthAll(2);
-            style.SetCornerRadiusAll(8);
+            style.SetCornerRadiusAll(10);
             slot.AddThemeStyleboxOverride("panel", style);
             board.AddChild(slot);
         }
@@ -1641,10 +1635,6 @@ public sealed class TableUi
             Mathf.Min(table.B / PlaymatAverage.B, 3f));
     }
 
-    private AtlasTexture MakeAtlas(Texture2D sheet, Rect2 region)
-    {
-        return new AtlasTexture { Atlas = sheet, Region = region };
-    }
 
     /// Pips in the middle of a main-deck card, or the plain big number. Flip this and look at it
     /// on the phone: at 84x114 ten dots may read as texture rather than as a number, and that is a
@@ -2401,7 +2391,7 @@ public sealed class TableUi
     /// Adds a row of poker chips right after the "Wins" label (one per set needed to win the match).
     private HBoxContainer EnsureWinChips(Label winsLabel)
     {
-        if (winsLabel == null || _chipSheet == null) return null;
+        if (winsLabel == null || _chipEmpty == null) return null;
         Node parent = winsLabel.GetParent();
         if (parent == null) return null;
 
@@ -2411,7 +2401,7 @@ public sealed class TableUi
         {
             chips.AddChild(new TextureRect
             {
-                Texture = MakeAtlas(_chipSheet, RegionChipEmpty),
+                Texture = _chipEmpty,
                 CustomMinimumSize = new Vector2(ChipSize, ChipSize),
                 ExpandMode = TextureRect.ExpandModeEnum.IgnoreSize,
                 StretchMode = TextureRect.StretchModeEnum.KeepAspectCentered,
@@ -2435,10 +2425,7 @@ public sealed class TableUi
         int i = 0;
         foreach (Node child in chips.GetChildren())
         {
-            if (child is TextureRect chip && chip.Texture is AtlasTexture atlas)
-            {
-                atlas.Region = i < wins ? RegionChipWon : RegionChipEmpty;
-            }
+            if (child is TextureRect chip) chip.Texture = i < wins ? _chipWon : _chipEmpty;
             i++;
         }
     }

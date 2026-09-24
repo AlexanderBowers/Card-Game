@@ -354,20 +354,12 @@ public sealed class Prompts
         _root.AddChild(_setEndOverlay); // on the scene root, after GameUI, so it draws (and gets input) on top
         _setEndOverlay.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
 
-        ColorRect dim = new ColorRect { Color = new Color(0, 0, 0, 0.5f), MouseFilter = Control.MouseFilterEnum.Ignore };
+        ColorRect dim = new ColorRect { Color = OverlayUi.DimColor, MouseFilter = Control.MouseFilterEnum.Ignore };
         _setEndOverlay.AddChild(dim);
         dim.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
 
         PanelContainer panel = new PanelContainer();
-        StyleBoxFlat style = new StyleBoxFlat
-        {
-            BgColor = new Color(0.1f, 0.14f, 0.2f, 0.98f),
-            BorderColor = new Color(0.55f, 0.65f, 0.8f),
-        };
-        style.SetBorderWidthAll(2);
-        style.SetCornerRadiusAll(12);
-        style.SetContentMarginAll(28);
-        panel.AddThemeStyleboxOverride("panel", style);
+        OverlayUi.StylePanel(panel, 28);
         _setEndOverlay.AddChild(panel);
         // Anchored to the centre with zero offsets: a Control grows to its minimum size, and with
         // grow "both" it stays centred, so the panel always hugs its content.

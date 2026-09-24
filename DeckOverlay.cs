@@ -151,7 +151,7 @@ public partial class DeckOverlay : Control
 
             int captured = index;
             Control view = _cardFactory(run.Inventory[index].ToCard(), _cardSize);
-            if (deckFull) view.Modulate = new Color(0.45f, 0.45f, 0.5f); // no room until one comes out
+            if (deckFull) view.Modulate = new Color(1f, 1f, 1f, 0.4f); // no room until one comes out
             Button button = OverlayUi.CardButton(view, _cardSize, () => AddToDeck(captured));
             button.Disabled = deckFull;
             _collectionGrid.AddChild(button);
@@ -180,7 +180,7 @@ public partial class DeckOverlay : Control
         int required = Math.Min(RunData.SideDeckSize, run.Inventory.Count);
         bool ready = _deck.Count == required;
         _countLabel.Text = $"{_deck.Count} / {required} chosen";
-        _countLabel.AddThemeColorOverride("font_color", ready ? OverlayUi.MedalGold : new Color(0.95f, 0.5f, 0.45f));
+        _countLabel.AddThemeColorOverride("font_color", ready ? OverlayUi.MedalGold : OverlayUi.Warning);
         _continueButton.Disabled = !ready;
     }
 

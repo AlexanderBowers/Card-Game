@@ -141,7 +141,7 @@ public sealed class Teaching
         _root.AddChild(_spotlightOverlay);
         _spotlightOverlay.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
 
-        Color shade = new Color(0, 0, 0, 0.72f);
+        Color shade = new Color(0.02f, 0.05f, 0.1f, 0.72f);
         _spotlightShades = new ColorRect[4];
         for (int i = 0; i < _spotlightShades.Length; i++)
         {
@@ -159,11 +159,7 @@ public sealed class Teaching
         _spotlightOverlay.AddChild(_spotlightHoleBlock);
 
         _spotlightCaption = new PanelContainer();
-        StyleBoxFlat style = new StyleBoxFlat { BgColor = OverlayUi.PanelBg, BorderColor = OverlayUi.PanelBorder };
-        style.SetBorderWidthAll(2);
-        style.SetCornerRadiusAll(12);
-        style.SetContentMarginAll(18);
-        _spotlightCaption.AddThemeStyleboxOverride("panel", style);
+        OverlayUi.StylePanel(_spotlightCaption, 18, bubble: true);
         _spotlightOverlay.AddChild(_spotlightCaption);
 
         VBoxContainer box = new VBoxContainer();

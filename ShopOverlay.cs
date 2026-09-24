@@ -286,7 +286,7 @@ public partial class ShopOverlay : Control
             _offerRow.AddChild(column);
 
             Control view = _cardFactory(offer.Def.ToCard(), _cardSize);
-            if (offer.Sold) view.Modulate = new Color(0.45f, 0.45f, 0.5f);
+            if (offer.Sold) view.Modulate = new Color(1f, 1f, 1f, 0.4f);
             column.AddChild(OverlayUi.CardButton(view, _cardSize, null));
 
             column.AddChild(OverlayUi.MakeLabel(

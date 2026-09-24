@@ -126,7 +126,7 @@ public partial class CollectionOverlay : Control
     private Control UnknownSlot()
     {
         Panel slot = OverlayUi.EmptySlot(_cardSize);
-        Label mark = OverlayUi.MakeLabel("?", Mathf.RoundToInt(_cardSize.Y * 0.4f), new Color(1f, 1f, 1f, 0.3f));
+        Label mark = OverlayUi.MakeLabel("?", Mathf.RoundToInt(_cardSize.Y * 0.4f), new Color(0.17f, 0.21f, 0.29f, 0.3f));
         mark.VerticalAlignment = VerticalAlignment.Center;
         mark.MouseFilter = Control.MouseFilterEnum.Ignore;
         slot.AddChild(mark);

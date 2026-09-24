@@ -1,0 +1,24 @@
+[gd_resource type="Theme" load_steps=2 format=3]
+
+[sub_resource type="StyleBoxFlat" id="btn_disabled_panel"]
+content_margin_left = 24.0
+content_margin_top = 14.0
+content_margin_right = 24.0
+content_margin_bottom = 14.0
+bg_color = Color(0.86, 0.88, 0.92, 1)
+corner_radius_top_left = 20
+corner_radius_top_right = 20
+corner_radius_bottom_right = 20
+corner_radius_bottom_left = 20
+anti_aliasing_size = 1.2
+
+[resource]
+Button/colors/font_disabled_color = Color(0.56, 0.6, 0.67, 1)
+Button/styles/disabled = SubResource("btn_disabled_panel")
+CheckButton/colors/font_disabled_color = Color(0.56, 0.6, 0.67, 1)
+CheckButton/styles/disabled = SubResource("btn_disabled_panel")
+Label/colors/font_color = Color(0.17, 0.21, 0.29, 1)
+Label/colors/font_outline_color = Color(0, 0, 0, 0)
+Label/colors/font_shadow_color = Color(0, 0, 0, 0)
+Label/constants/outline_size = 0
+Label/constants/shadow_outline_size = 0
