@@ -17,7 +17,7 @@ compatibility/default_parent_skeleton_in_mesh_instance_3d=true
 config/name="Aim for 20"
 run/main_scene="uid://b7qn5xyxoj23q"
 config/features=PackedStringArray("4.7", "C#", "Mobile")
-config/icon="res://assets/icon/icon_256.png"
+config/icon="res://assets/aimfor20_art/icon_1024.png"
 
 [autoload]
 
@@ -45,4 +45,4 @@ theme/custom="res://ui_theme.tres"
 
 renderer/rendering_method="mobile"
 textures/vram_compression/import_etc2_astc=true
-environment/defaults/default_clear_color=Color(0.07, 0.24, 0.13, 1)
+environment/defaults/default_clear_color=Color(0.1, 0.14, 0.16, 1)

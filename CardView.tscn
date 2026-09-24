@@ -1,14 +1,10 @@
-[gd_scene load_steps=3 format=3 uid="uid://ccpmles2ma35a"]
+[gd_scene load_steps=2 format=3 uid="uid://ccpmles2ma35a"]
 
-[ext_resource type="Texture2D" path="res://assets/kenney/cards.png" id="1_cards"]
-
-[sub_resource type="AtlasTexture" id="AtlasTexture_face"]
-atlas = ExtResource("1_cards")
-region = Rect2(280, 760, 140, 190)
+[ext_resource type="Texture2D" path="res://assets/aimfor20_art/card_main.png" id="1_face"]
 
 [node name="CardView" type="TextureRect"]
 custom_minimum_size = Vector2(84, 114)
-texture = SubResource("AtlasTexture_face")
+texture = ExtResource("1_face")
 expand_mode = 1
 stretch_mode = 5
 
@@ -20,9 +16,7 @@ anchor_bottom = 0.5
 grow_horizontal = 2
 grow_vertical = 2
 mouse_filter = 2
-theme_override_colors/font_color = Color(1, 1, 1, 1)
-theme_override_colors/font_outline_color = Color(0, 0, 0, 0.65)
-theme_override_constants/outline_size = 8
+theme_override_colors/font_color = Color(0.12, 0.42, 0.27, 1)
 theme_override_font_sizes/font_size = 38
 text = "10"
 horizontal_alignment = 1
@@ -37,9 +31,7 @@ anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
 mouse_filter = 2
-theme_override_colors/font_color = Color(1, 1, 1, 1)
-theme_override_colors/font_outline_color = Color(0, 0, 0, 0.65)
-theme_override_constants/outline_size = 8
+theme_override_colors/font_color = Color(0.12, 0.42, 0.27, 1)
 theme_override_font_sizes/font_size = 38
 text = "10"
 horizontal_alignment = 1
@@ -55,9 +47,7 @@ offset_top = 2.0
 grow_horizontal = 2
 grow_vertical = 2
 mouse_filter = 2
-theme_override_colors/font_color = Color(1, 1, 1, 1)
-theme_override_colors/font_outline_color = Color(0, 0, 0, 0.7)
-theme_override_constants/outline_size = 6
+theme_override_colors/font_color = Color(0.12, 0.42, 0.27, 1)
 theme_override_font_sizes/font_size = 22
 text = "10"
 horizontal_alignment = 0
@@ -75,9 +65,7 @@ offset_bottom = -2.0
 grow_horizontal = 2
 grow_vertical = 2
 mouse_filter = 2
-theme_override_colors/font_color = Color(1, 1, 1, 1)
-theme_override_colors/font_outline_color = Color(0, 0, 0, 0.7)
-theme_override_constants/outline_size = 6
+theme_override_colors/font_color = Color(0.12, 0.42, 0.27, 1)
 theme_override_font_sizes/font_size = 22
 text = "10"
 horizontal_alignment = 0

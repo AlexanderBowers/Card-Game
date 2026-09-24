@@ -157,7 +157,23 @@ public sealed class TableUi
 
         _mainLayout = nodes.MainLayout;
 
-        _cardSheet = GD.Load<Texture2D>("res://assets/kenney/cards.png");
+        _faceMain = GD.Load<Texture2D>(ArtDir + "card_main.png");
+        _facePlus = GD.Load<Texture2D>(ArtDir + "card_plus.png");
+        _faceMinus = GD.Load<Texture2D>(ArtDir + "card_minus.png");
+        _faceFlip = GD.Load<Texture2D>(ArtDir + "card_flip.png");
+        _faceEffect = GD.Load<Texture2D>(ArtDir + "card_foil.png");
+        _cardBack = GD.Load<Texture2D>(ArtDir + "card_back.png");
+        _playmatLandscape = GD.Load<Texture2D>(ArtDir + "playmat_landscape.png");
+        _playmatPortrait = GD.Load<Texture2D>(ArtDir + "playmat_portrait.png");
+        _playmat = _root.GetNodeOrNull<TextureRect>("Background");
+        if (_playmat != null)
+        {
+            // Cover, not fit: the mat is cropped at the edges rather than letterboxed, whatever
+            // the phone's aspect. Its border line sits well inside the image for exactly this.
+            _playmat.ExpandMode = TextureRect.ExpandModeEnum.IgnoreSize;
+            _playmat.StretchMode = TextureRect.StretchModeEnum.KeepAspectCovered;
+            _playmat.MouseFilter = Control.MouseFilterEnum.Ignore;
+        }
         _chipSheet = GD.Load<Texture2D>("res://assets/kenney/chips.png");
         _sfxSlide = CreateSfx("res://assets/kenney/sfx/cardSlide1.ogg");
         _sfxPlace = CreateSfx("res://assets/kenney/sfx/cardPlace1.ogg");
@@ -278,33 +294,48 @@ public sealed class TableUi
         BaseCardSize * _cardScale * (_portraitLayout ? ModifierCardScalePortrait : ModifierCardScale);
 
     // ------------------------------------------------------------------
-    // Art (Kenney Boardgame Pack, CC0 - see assets/kenney/LICENSE.txt)
-    // Regions are taken from the pack's playingCardBacks.xml / chips.xml atlases.
+    // Art. Card faces, the back and the playmat are the game's own (assets/aimfor20_art/, one
+    // 560x760 PNG per face - the same 140:190 shape the Kenney cards had, so every size in this
+    // file still holds). The win chips are still Kenney (CC0 - see assets/kenney/LICENSE.txt).
     // ------------------------------------------------------------------
-    private Texture2D _cardSheet;
+    private const string ArtDir = "res://assets/aimfor20_art/";
+
+    private Texture2D _faceMain;     // green  - main-deck cards
+    private Texture2D _facePlus;     // blue   - positive modifiers
+    private Texture2D _faceMinus;    // red    - negative modifiers
+    private Texture2D _faceFlip;     // violet - "+/-" (Flip Value) modifiers
+    private Texture2D _faceEffect;   // foil   - effect cards (Copy, Shave, Veto, ...)
+    private Texture2D _cardBack;     // the face-down deck, and the card that flies from it
 
     private Texture2D _chipSheet;
 
-    private static readonly Rect2 RegionMain = new Rect2(280, 760, 140, 190);   // cardBack_green3 - main deck cards
-
-    private static readonly Rect2 RegionPlus = new Rect2(280, 380, 140, 190);   // cardBack_blue3  - positive modifiers
-
-    private static readonly Rect2 RegionMinus = new Rect2(0, 380, 140, 190);    // cardBack_red3   - negative modifiers
-
-    private static readonly Rect2 RegionDeckBack = new Rect2(140, 190, 140, 190); // cardBack_green4 - face-down deck
-
-    // The collection log's reward: a different back pattern, gilded. Cosmetic only.
-    private static readonly Rect2 RegionCollectorBack = new Rect2(140, 570, 140, 190); // cardBack_green5
-
+    // The collection log's reward. There is one back now, so the reward is the gilding alone.
     private static readonly Color CollectorBackTint = new Color(1.45f, 1.2f, 0.45f);
 
-    // The Kenney sheet has three hues and red/green/blue are already minus/main/plus, so there is
-    // no fourth back to give an effect card: it takes a plain green one and wears EffectTint, or
-    // a Shave landing in the opponent's grid would read as a card they just drew. A later pass
-    // draws the real effect face in code, the way BuildFlipValueFace draws the blue-over-red one.
-    private static readonly Rect2 RegionEffect = new Rect2(140, 0, 140, 190);     // cardBack_green1
+    /// A "+/-" card wears its own violet face, split into a +n half and a -n half. False goes back
+    /// to the pass-7 look: the blue face on top, the red face clipped under it.
+    private const bool FlipCardsUseOwnFace = true;
 
-    private static readonly Color EffectTint = new Color(1.15f, 0.85f, 1.35f);    // violet wash
+    // The faces are pale, so the numbers and pips are drawn in a dark ink of the face's own hue
+    // rather than white-with-an-outline, the way the icon draws its "20".
+    private static readonly Color InkMain = new Color(0.12f, 0.42f, 0.27f);
+    private static readonly Color InkPlus = new Color(0.13f, 0.33f, 0.66f);
+    private static readonly Color InkMinus = new Color(0.68f, 0.17f, 0.22f);
+    private static readonly Color InkFlip = new Color(0.37f, 0.24f, 0.62f);
+    private static readonly Color InkEffect = new Color(0.45f, 0.29f, 0.05f);
+
+    /// Effect cards used to wear a violet wash over a green back; the foil face replaces it.
+    private static readonly Color EffectTint = Colors.White;
+
+    // The playmat behind the whole table: one image per orientation, swapped with the layout.
+    private Texture2D _playmatLandscape;
+    private Texture2D _playmatPortrait;
+    private TextureRect _playmat;
+
+    /// The mat's average colour. A rank's table colour divided by this is the tint that turns the
+    /// teal mat into that rank's felt - so the ladder still repaints the table every two rungs,
+    /// and the mat keeps its vignette and border instead of going flat.
+    private static readonly Color PlaymatAverage = new Color(0.114f, 0.227f, 0.243f);
 
     private static readonly Rect2 RegionChipWon = new Rect2(0, 194, 68, 68);    // chipGreen_border
 
@@ -325,7 +356,6 @@ public sealed class TableUi
     /// The face-down deck: the rank's own back, or the collection reward when it is switched on.
     private bool GildedDeck => RunData.Instance != null && RunData.Instance.UseCollectorBack;
 
-    private Rect2 DeckBackRegion => GildedDeck ? RegionCollectorBack : RegionDeckBack;
 
     private Color DeckBackTint => GildedDeck ? CollectorBackTint : _rankCardTint;
 
@@ -459,6 +489,7 @@ public sealed class TableUi
         bool portrait = win.Y > win.X;
         _fitPortrait = portrait;
         _portraitLayout = portrait;
+        UpdatePlaymat(portrait);
 
         // A genuine resize, rotation, mirror toggle or mode change: start the correction over, so
         // the UI can find the right size for the table it is actually showing. Re-running
@@ -1564,14 +1595,50 @@ public sealed class TableUi
     // ------------------------------------------------------------------
     // Card views
     // ------------------------------------------------------------------
-    private Rect2 RegionFor(Card card)
+    private Texture2D FaceFor(Card card)
     {
-        if (card.Type == CardType.Main) return RegionMain;
+        if (card.Type == CardType.Main) return _faceMain;
         // Before the sign test: a Shave carries Value 1 and would otherwise wear the blue "plus"
-        // back, which is the opposite of what it does.
-        if (card.Effect != CardEffect.None) return RegionEffect;
-        if (card.Value < 0) return RegionMinus;
-        return RegionPlus;
+        // face, which is the opposite of what it does.
+        if (card.Effect != CardEffect.None) return _faceEffect;
+        if (card.Value < 0) return _faceMinus;
+        return _facePlus;
+    }
+
+    private static Color InkFor(Card card)
+    {
+        if (card.Type == CardType.Main) return InkMain;
+        if (card.Effect != CardEffect.None) return InkEffect;
+        return card.Value < 0 ? InkMinus : InkPlus;
+    }
+
+    /// Colours every number on a card view, and remembers the ink so BuildPips can match it.
+    private static void ApplyInk(TextureRect view, Color ink)
+    {
+        view.SetMeta("ink", ink);
+        foreach (string name in CardLabelNames)
+        {
+            Label label = view.GetNodeOrNull<Label>(name);
+            if (label != null) label.AddThemeColorOverride("font_color", ink);
+        }
+    }
+
+    /// Sets the mat for the orientation, and tints it for the rank in play.
+    private void UpdatePlaymat(bool portrait)
+    {
+        if (_playmat == null || !GodotObject.IsInstanceValid(_playmat)) return;
+        Texture2D mat = portrait ? _playmatPortrait : _playmatLandscape;
+        if (mat != null && _playmat.Texture != mat) _playmat.Texture = mat;
+    }
+
+    private static Color PlaymatTintFor(Color table)
+    {
+        // The plain table (2-player, and the first rank) is the mat exactly as it was painted.
+        if (table.IsEqualApprox(DefaultTableColor)) return Colors.White;
+        return new Color(
+            Mathf.Min(table.R / PlaymatAverage.R, 3f),
+            Mathf.Min(table.G / PlaymatAverage.G, 3f),
+            Mathf.Min(table.B / PlaymatAverage.B, 3f));
     }
 
     private AtlasTexture MakeAtlas(Texture2D sheet, Rect2 region)
@@ -1693,7 +1760,8 @@ public sealed class TableUi
         host.AddChild(rows);
         rows.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
 
-        StyleBoxFlat pip = new StyleBoxFlat { BgColor = Colors.White };
+        Color ink = view.HasMeta("ink") ? view.GetMeta("ink").AsColor() : InkMain;
+        StyleBoxFlat pip = new StyleBoxFlat { BgColor = ink };
         pip.SetCornerRadiusAll(Mathf.Max(2, Mathf.RoundToInt(dot / 2f)));
 
         for (int remaining = count; remaining > 0; )
@@ -1733,7 +1801,8 @@ public sealed class TableUi
     /// flat rectangle, so the border and the rounded corners still line up.
     private void BuildFlipValueFace(TextureRect view, Card card, Vector2 size)
     {
-        view.Texture = MakeAtlas(_cardSheet, RegionPlus); // blue, and the top half is what shows
+        // The top half is what shows of this one: violet, or blue in the pass-7 look.
+        view.Texture = FlipCardsUseOwnFace ? _faceFlip : _facePlus;
 
         Control bottom = new Control
         {
@@ -1750,7 +1819,7 @@ public sealed class TableUi
         TextureRect red = new TextureRect
         {
             Name = "FlipValueBottomArt",
-            Texture = MakeAtlas(_cardSheet, RegionMinus),
+            Texture = FlipCardsUseOwnFace ? _faceFlip : _faceMinus,
             ExpandMode = view.ExpandMode,
             StretchMode = view.StretchMode,
             MouseFilter = Control.MouseFilterEnum.Ignore,
@@ -1771,6 +1840,7 @@ public sealed class TableUi
         if (top != null)
         {
             top.Text = "+" + magnitude;
+            top.AddThemeColorOverride("font_color", InkPlus);
             top.AnchorBottom = 0.5f;
             top.AddThemeFontSizeOverride("font_size", fontSize);
             top.Modulate = plusChosen ? Colors.White : DimmedHalf;
@@ -1780,6 +1850,7 @@ public sealed class TableUi
         if (under != null)
         {
             under.Text = "-" + magnitude;
+            under.AddThemeColorOverride("font_color", InkMinus);
             under.Visible = true;
             under.AddThemeFontSizeOverride("font_size", fontSize);
             under.Modulate = plusChosen ? DimmedHalf : Colors.White;
@@ -2054,11 +2125,17 @@ public sealed class TableUi
         Color table = (run == null) ? DefaultTableColor : run.CurrentRank.Table;
         _rankCardTint = (run == null) ? Colors.White : run.CurrentRank.CardTint;
 
+        // The clear colour only shows if the mat is missing; the mat is the table now.
         RenderingServer.SetDefaultClearColor(table);
+        if (_playmat != null && GodotObject.IsInstanceValid(_playmat))
+        {
+            UpdatePlaymat(_portraitLayout);
+            _playmat.SelfModulate = PlaymatTintFor(table);
+        }
         if (_mainDeckPosition is TextureRect deck)
         {
             // The gilded back is a profile reward, so it shows in local 2-player too.
-            if (_cardSheet != null) deck.Texture = MakeAtlas(_cardSheet, DeckBackRegion);
+            if (_cardBack != null) deck.Texture = _cardBack;
             deck.SelfModulate = DeckBackTint;
         }
     }
@@ -2066,7 +2143,7 @@ public sealed class TableUi
     public TextureRect CreateCardView(Card card, Vector2 size)
     {
         TextureRect view = (TextureRect)_cardViewScene.Instantiate();
-        view.Texture = MakeAtlas(_cardSheet, RegionFor(card));
+        view.Texture = FaceFor(card);
         view.SetMeta("cardId", card.Id); // so RefreshCardFace can find this view again
         ApplyCardSize(view, size);
 
@@ -2076,6 +2153,7 @@ public sealed class TableUi
             Label label = view.GetNodeOrNull<Label>(name);
             if (label != null) label.Text = text;
         }
+        ApplyInk(view, InkFor(card));
 
         // Standard cards carry the rank's tint, so the deck you are playing with visibly changes
         // as you climb. SelfModulate, not Modulate: the number on top stays white.
@@ -2133,7 +2211,8 @@ public sealed class TableUi
         TextureRect view = FindCardView(card, board);
         if (view == null) return;
 
-        view.Texture = MakeAtlas(_cardSheet, RegionFor(card));
+        // A flip card keeps its own face - only an ordinary card's face follows its sign.
+        if (!view.HasNode("FlipValueBottom")) view.Texture = FaceFor(card);
 
         string text = card.DisplayText; // computed from Value, so the new number is already in it
         foreach (string name in CardLabelNames)
@@ -2141,6 +2220,7 @@ public sealed class TableUi
             Label label = view.GetNodeOrNull<Label>(name);
             if (label != null) label.Text = text;
         }
+        if (!view.HasNode("FlipValueBottom")) ApplyInk(view, InkFor(card));
 
         // Copy rewrites a drawn main card's value, so its pips have to be re-counted - otherwise
         // the number in the corners and the dots in the middle disagree about the same card.
@@ -2254,7 +2334,7 @@ public sealed class TableUi
         // 1. A face-down card that flies from the deck to the slot
         TextureRect fakeCard = new TextureRect
         {
-            Texture = MakeAtlas(_cardSheet, DeckBackRegion),
+            Texture = _cardBack,
             ExpandMode = TextureRect.ExpandModeEnum.IgnoreSize,
             StretchMode = TextureRect.StretchModeEnum.KeepAspectCentered,
             Size = BoardCardSize,
