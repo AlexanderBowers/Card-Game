@@ -44,6 +44,17 @@ public partial class TableLayout : Control
     /// landscape default, because its ConfirmRow also has Flip Value to fit in).
     [Export] public bool ConfirmCopiesAction = true;
 
+    /// How far a picked-up hand card rises (pass 40). Portrait crops the hand off the bottom of
+    /// the screen, Pocket-style; a picked-up card lifts by about the cropped part, so the whole
+    /// card shows while you decide. 0 = no lift.
+    [Export] public float HandLiftOnPick;
+
+    /// Pass 40: each side's score is a badge beside its own board instead of a "You  11/20" box
+    /// (portrait). In face-to-face play the badge grows a second end, turned round, so the player
+    /// across the table reads it the right way up too - a playing card's two corner indices,
+    /// worked the same way. Uses ScoreValue / ScoreTarget and the ScoreFar* nodes below.
+    [Export] public bool ScoreBadges;
+
     /// The design canvas every element is placed on (720x1560 portrait, 1560x720 landscape). The
     /// whole canvas is scaled to fit the screen and centred on it; the Background fills the rest.
     /// Keep everything inside it, or it can end up off the edge of a phone.
@@ -56,6 +67,14 @@ public partial class TableLayout : Control
     [Export] public Label P1ScorePrefix;
     [Export] public Label P1ScoreValue;
     [Export] public Label P1ScoreThem;
+    /// Score badge (ScoreBadges): the small "/20" under the number.
+    [Export] public Label P1ScoreTarget;
+    /// Score badge, face to face only: the end turned round for the player across the table,
+    /// and the line between the two ends.
+    [Export] public Control P1ScoreFarEnd;
+    [Export] public Label P1ScoreFarValue;
+    [Export] public Label P1ScoreFarTarget;
+    [Export] public Control P1ScoreDivider;
     /// The OTHER player's score, beside this player's own ("Them  14"). Pass 36: this spot used to
     /// hold the status line; its messages now float as a toast.
     [Export] public Label P1OpponentScore;
@@ -78,12 +97,22 @@ public partial class TableLayout : Control
     [ExportGroup("Player 2 (top / right)")]
     /// Player 2's whole side. Turned 180 degrees about its centre for face-to-face play; in
     /// landscape its children are also mirrored left-to-right, so that once turned the score still
-    /// faces the middle of the table.
+    /// faces the middle of the table. In portrait without the mirror (against the bot) it is not
+    /// turned but mirrored top-to-bottom instead (pass 40), so author it exactly like Player 1's
+    /// side - as its own player sees it - and every mode comes out right.
     [Export] public Control P2Side;
     [Export] public Control P2ScoreBox;
     [Export] public Label P2ScorePrefix;
     [Export] public Label P2ScoreValue;
     [Export] public Label P2ScoreThem;
+    /// Score badge (ScoreBadges): the small "/20" under the number.
+    [Export] public Label P2ScoreTarget;
+    /// Score badge, face to face only: the end turned round for the player across the table,
+    /// and the line between the two ends.
+    [Export] public Control P2ScoreFarEnd;
+    [Export] public Label P2ScoreFarValue;
+    [Export] public Label P2ScoreFarTarget;
+    [Export] public Control P2ScoreDivider;
     /// The OTHER player's score, beside this player's own ("Them  14"). Pass 36: this spot used to
     /// hold the status line; its messages now float as a toast.
     [Export] public Label P2OpponentScore;

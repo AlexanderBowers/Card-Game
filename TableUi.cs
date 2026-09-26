@@ -374,6 +374,8 @@ public sealed class TableUi
 
         // Whatever is already on the table - a rotation mid-set - drawn straight in, no flight.
         BuildStatusToasts();
+        TurnRound(L.P1ScoreFarEnd);
+        TurnRound(L.P2ScoreFarEnd);
         if (L.P1ScoreThem != null) L.P1ScoreThem.Visible = false; // the box is one line now
         if (L.P2ScoreThem != null) L.P2ScoreThem.Visible = false;
         RestoreBoard(L.P1Board, P1);
@@ -441,52 +443,66 @@ public sealed class TableUi
     /// it is also mirrored left-to-right first, so that once the side is turned its score column
     /// still stands on the side facing the middle (turning alone would put it on the outer edge).
     ///
-    /// The mirrored positions are worked out from the edges you placed in the editor - left and
-    /// right swap ends, and so does the direction a box grows - and put back exactly when the
-    /// mirror goes off. Nothing is touched while the mirror is off, so a box that grows leftward
-    /// from its right edge (portrait's opponent score) keeps doing so.
+    /// Portrait, mirror off (against the bot, or local play without the mirror): Player 2's side is
+    /// NOT turned - its cards and score stay the right way up for the one person reading them - but
+    /// every element is mirrored top-to-bottom instead (pass 40), so the side still faces the
+    /// middle the way Pokemon TCG Pocket's opponent does: board by the middle, hand cropped off the
+    /// top edge. So Player 2's side is authored exactly like Player 1's, as if seen by its own
+    /// player, and one arrangement serves every mode.
+    ///
+    /// The mirrored positions are worked out from the edges you placed in the editor - the two
+    /// edges swap ends, and so does the direction a box grows - and put back exactly when the
+    /// mirror goes off.
     private void ApplyMirror()
     {
         Control side = L?.P2Side;
         if (side == null) return;
         bool mirrored = IsMirrored;
-        bool flipX = mirrored && !L.Portrait;
-        float width = side.Size.X;
+        int flip = L.Portrait ? (mirrored ? FlipNone : FlipY) : (mirrored ? FlipX : FlipNone);
+        Vector2 extent = side.Size;
 
         foreach (Node node in side.GetChildren())
         {
             if (node is not Control child) continue;
-            bool isFlipped = child.HasMeta(FlippedMeta) && child.GetMeta(FlippedMeta).AsBool();
-            if (isFlipped == flipX) continue;
+            int current = child.HasMeta(FlippedMeta) ? child.GetMeta(FlippedMeta).AsInt32() : FlipNone;
+            if (current == flip) continue;
 
             if (!child.HasMeta(AuthoredLeftMeta))
             {
                 child.SetMeta(AuthoredLeftMeta, child.OffsetLeft);
                 child.SetMeta(AuthoredRightMeta, child.OffsetRight);
+                child.SetMeta(AuthoredTopMeta, child.OffsetTop);
+                child.SetMeta(AuthoredBottomMeta, child.OffsetBottom);
                 child.SetMeta(AuthoredGrowMeta, (int)child.GrowHorizontal);
+                child.SetMeta(AuthoredGrowVMeta, (int)child.GrowVertical);
             }
             float left = child.GetMeta(AuthoredLeftMeta).AsSingle();
             float right = child.GetMeta(AuthoredRightMeta).AsSingle();
+            float top = child.GetMeta(AuthoredTopMeta).AsSingle();
+            float bottom = child.GetMeta(AuthoredBottomMeta).AsSingle();
             var grow = (Control.GrowDirection)child.GetMeta(AuthoredGrowMeta).AsInt32();
+            var growV = (Control.GrowDirection)child.GetMeta(AuthoredGrowVMeta).AsInt32();
 
-            if (flipX)
+            // Back to the authored rect first, then mirrored along one axis if called for.
+            child.OffsetLeft = left;
+            child.OffsetRight = right;
+            child.OffsetTop = top;
+            child.OffsetBottom = bottom;
+            child.GrowHorizontal = grow;
+            child.GrowVertical = growV;
+            if (flip == FlipX)
             {
-                child.OffsetLeft = width - right;
-                child.OffsetRight = width - left;
-                child.GrowHorizontal = grow switch
-                {
-                    Control.GrowDirection.Begin => Control.GrowDirection.End,
-                    Control.GrowDirection.End => Control.GrowDirection.Begin,
-                    _ => grow,
-                };
+                child.OffsetLeft = extent.X - right;
+                child.OffsetRight = extent.X - left;
+                child.GrowHorizontal = Opposite(grow);
             }
-            else
+            else if (flip == FlipY)
             {
-                child.OffsetLeft = left;
-                child.OffsetRight = right;
-                child.GrowHorizontal = grow;
+                child.OffsetTop = extent.Y - bottom;
+                child.OffsetBottom = extent.Y - top;
+                child.GrowVertical = Opposite(growV);
             }
-            child.SetMeta(FlippedMeta, flipX);
+            child.SetMeta(FlippedMeta, flip);
         }
 
         side.PivotOffset = side.Size / 2f;
@@ -495,12 +511,27 @@ public sealed class TableUi
         // Face to face, Player 2 sits at the top of the screen, so their board recedes toward the
         // middle of the table rather than toward the top edge (pass 39).
         if (L.P2Board is PerspectiveBoard p2Board) p2Board.FarAtTop = !mirrored;
+
+        ApplyScoreBadgeEnds(mirrored);
     }
 
-    private const string FlippedMeta = "mirrorFlipped";
+    private static Control.GrowDirection Opposite(Control.GrowDirection grow) => grow switch
+    {
+        Control.GrowDirection.Begin => Control.GrowDirection.End,
+        Control.GrowDirection.End => Control.GrowDirection.Begin,
+        _ => grow,
+    };
+
+    private const int FlipNone = 0;
+    private const int FlipX = 1;
+    private const int FlipY = 2;
+    private const string FlippedMeta = "mirrorFlip";
     private const string AuthoredLeftMeta = "authoredLeft";
     private const string AuthoredRightMeta = "authoredRight";
+    private const string AuthoredTopMeta = "authoredTop";
+    private const string AuthoredBottomMeta = "authoredBottom";
     private const string AuthoredGrowMeta = "authoredGrow";
+    private const string AuthoredGrowVMeta = "authoredGrowV";
 
     /// Scales the whole UI so the layout's design canvas exactly fits the screen: whichever axis
     /// is tighter decides, and the canvas is centred along the other (the playmat fills the rest).
@@ -730,6 +761,12 @@ public sealed class TableUi
     /// own player's point of view ("You: 13/20").
     private void RefreshScoreLines()
     {
+        if (L.ScoreBadges)
+        {
+            RefreshScoreBadges();
+            return;
+        }
+
         ScoreLines p1 = new ScoreLines { YouPrefix = L.P1ScorePrefix, YouValue = L.P1ScoreValue, Them = L.P1ScoreThem };
         ScoreLines p2 = new ScoreLines { YouPrefix = L.P2ScorePrefix, YouValue = L.P2ScoreValue, Them = L.P2ScoreThem };
 
@@ -998,19 +1035,41 @@ public sealed class TableUi
         Card p1Picked = _host.SelectedFor(P1);
         Card p2Picked = _host.SelectedFor(P2);
 
+        Vector2 p1Size = ModifierSizeFor(L.P1Hand, P1.Modifiers.Count);
+        Vector2 p2Size = ModifierSizeFor(L.P2Hand, P2.Modifiers.Count);
+        // Which way a picked-up card rises: toward the table. Only Player 2's side in portrait
+        // without the mirror has its hand at the TOP of the screen (mirrored top-to-bottom, not
+        // turned round - see ApplyMirror), so there "toward the table" is down.
+        float p1Lift = -L.HandLiftOnPick;
+        float p2Lift = (L.Portrait && !IsMirrored) ? L.HandLiftOnPick : -L.HandLiftOnPick;
+
         foreach (Card card in P1.Modifiers)
         {
             L.P1Hand.AddChild(CreateModifierButton(
                 card, !p1Can, card == p1Picked, p1Picked != null,
-                () => _host.ModifierPressed(P1, card)));
+                () => _host.ModifierPressed(P1, card), p1Size, p1Lift));
         }
 
         foreach (Card card in P2.Modifiers)
         {
             L.P2Hand.AddChild(CreateModifierButton(
                 card, !p2Can, card == p2Picked, p2Picked != null,
-                () => _host.ModifierPressed(P2, card)));
+                () => _host.ModifierPressed(P2, card), p2Size, p2Lift));
         }
+    }
+
+    /// The layout's hand card size, made smaller only if this many cards would not fit across the
+    /// hand's rect (a fifth card - a rescue - in a hand sized for four).
+    private Vector2 ModifierSizeFor(Container hand, int count)
+    {
+        Vector2 size = ModifierCardSize;
+        if (hand == null || count <= 0) return size;
+        float gap = hand.GetThemeConstant("separation");
+        float width = hand.Size.X;
+        float needed = count * size.X + (count - 1) * gap;
+        if (width <= 1f || needed <= width) return size;
+        float k = Mathf.Max(0.5f, (width - (count - 1) * gap) / (count * size.X));
+        return (size * k).Floor();
     }
 
     private void SetChips(Container chips, int wins)
@@ -1051,6 +1110,102 @@ public sealed class TableUi
     private static readonly Color PreviewUnderColor = new Color(0.45f, 0.72f, 1.00f);
 
     private static readonly Color PreviewOverColor = new Color(1.00f, 0.55f, 0.30f);
+
+    // ------------------------------------------------------------------
+    // Score badges (pass 40, portrait)
+    //
+    // Each side's score sits in a badge beside its own board, Pokemon TCG Pocket-style, rather
+    // than in a "You  11/20" box in a row of its own. The badge sits on the board it counts,
+    // so it needs no "You" or "Them".
+    //
+    // Face to face, both players read both badges from opposite ends of the phone, so each badge
+    // grows a second end turned round (a playing card's two corner indices): its owner reads the
+    // near end, the player across the table reads the far end. The badge is then the same both
+    // ways up, so it looks like one object rather than a label with an upside-down copy. The far
+    // end shows the real score, never the preview of a card the owner has only picked up.
+    // ------------------------------------------------------------------
+    private void RefreshScoreBadges()
+    {
+        bool bothRead = !_host.VsBot; // the bot's badge has no reader of its own: no target on it
+        SetScoreBadge(P1, L.P1ScoreValue, L.P1ScoreTarget, L.P1ScoreFarValue, L.P1ScoreFarTarget, true, true);
+        SetScoreBadge(P2, L.P2ScoreValue, L.P2ScoreTarget, L.P2ScoreFarValue, L.P2ScoreFarTarget, bothRead, bothRead);
+    }
+
+    private void SetScoreBadge(Player player, Label value, Label target, Label farValue, Label farTarget,
+                               bool preview, bool withTarget)
+    {
+        if (player == null) return;
+        bool started = _host.GameStarted;
+        string targetText = started && withTarget ? $"/{State.TargetScore}" : string.Empty;
+        string scoreText = started ? player.CurrentScore.ToString() : "-";
+
+        if (value != null)
+        {
+            int? previewed = preview ? PreviewedScore(player) : null;
+            if (previewed.HasValue && started)
+            {
+                value.Text = previewed.Value.ToString();
+                value.AddThemeColorOverride("font_color",
+                    previewed.Value > State.TargetScore ? PreviewOverColor : PreviewUnderColor);
+            }
+            else
+            {
+                value.Text = scoreText;
+                value.RemoveThemeColorOverride("font_color");
+            }
+        }
+        if (target != null)
+        {
+            target.Text = targetText;
+            target.Visible = targetText.Length > 0;
+        }
+        if (farValue != null) farValue.Text = scoreText;
+        if (farTarget != null)
+        {
+            farTarget.Text = targetText;
+            farTarget.Visible = targetText.Length > 0;
+        }
+    }
+
+    /// The far end shows only face to face. The badge hugs its content from its anchored edge -
+    /// the edge nearest its board's player - so the far end grows away from that player and the
+    /// near end never moves.
+    private void ApplyScoreBadgeEnds(bool faceToFace)
+    {
+        if (!L.ScoreBadges) return;
+        foreach ((Control far, Control divider, Control box) in new[]
+                 { (L.P1ScoreFarEnd, L.P1ScoreDivider, L.P1ScoreBox), (L.P2ScoreFarEnd, L.P2ScoreDivider, L.P2ScoreBox) })
+        {
+            if (far != null) far.Visible = faceToFace;
+            if (divider != null) divider.Visible = faceToFace;
+            HugContent(box);
+        }
+    }
+
+    /// Shrinks a free-standing box to its content, keeping the edge it grows away from.
+    private static void HugContent(Control box)
+    {
+        if (box == null) return;
+        if (box.GrowVertical == Control.GrowDirection.Begin) box.OffsetTop = box.OffsetBottom - 1f;
+        else if (box.GrowVertical == Control.GrowDirection.End) box.OffsetBottom = box.OffsetTop + 1f;
+    }
+
+    /// The far end is turned round about its own centre. A container resets the rotation of its
+    /// own children, so the far end is a plain Control holding the turned content, and takes that
+    /// content's size as its minimum so the badge's column still makes room for it.
+    private static void TurnRound(Control end)
+    {
+        if (end == null || end.GetChildCount() == 0 || end.GetChild(0) is not Control turned) return;
+        void Fit()
+        {
+            end.CustomMinimumSize = turned.GetCombinedMinimumSize();
+            turned.PivotOffset = turned.Size / 2f;
+            turned.RotationDegrees = 180f;
+        }
+        turned.MinimumSizeChanged += Fit;
+        turned.Resized += Fit;
+        Fit();
+    }
 
     private void SetScoreLines(ScoreLines lines, string prefix, Player player,
                                string themLine, bool preview = true, bool withTarget = true)
@@ -1254,12 +1409,13 @@ public sealed class TableUi
     /// A tappable modifier card: an invisible Button (so the theme's touch-friendly hit area
     /// and focus handling still apply) with the card art drawn on top. A picked-up card is lifted
     /// and the rest of the hand dims, so which card is in play is obvious without reading anything.
-    private Button CreateModifierButton(Card card, bool disabled, bool selected, bool anySelected, Action onPressed)
+    private Button CreateModifierButton(Card card, bool disabled, bool selected, bool anySelected, Action onPressed,
+                                        Vector2 size, float lift)
     {
         Button button = new Button
         {
             Flat = true,
-            CustomMinimumSize = ModifierCardSize,
+            CustomMinimumSize = size,
             Disabled = disabled,
             FocusMode = Control.FocusModeEnum.None,
         };
@@ -1268,7 +1424,7 @@ public sealed class TableUi
             button.AddThemeStyleboxOverride(state, empty);
         button.Pressed += onPressed;
 
-        TextureRect view = CreateCardView(card, ModifierCardSize);
+        TextureRect view = CreateCardView(card, size);
         view.MouseFilter = Control.MouseFilterEnum.Ignore;
 
         if (disabled) view.Modulate = new Color(0.55f, 0.55f, 0.55f);
@@ -1282,8 +1438,11 @@ public sealed class TableUi
         {
             // Scale the art, not the Button: the Button is a container child and would have its
             // scale reset on the next layout pass, and growing it would shove the whole hand about.
-            view.PivotOffset = ModifierCardSize / 2f;
+            view.PivotOffset = size / 2f;
             view.Scale = new Vector2(1.18f, 1.18f);
+            // Pass 40: and it rises out of the cropped hand, so the whole card shows while you decide.
+            view.OffsetTop += lift;
+            view.OffsetBottom += lift;
 
             // Pass 31: an accent ring just outside the card, the colour every "do this next"
             // thing on screen shares, instead of a yellow box drawn over the art.

@@ -29,6 +29,39 @@ shadow_size = 8
 shadow_offset = Vector2(0, 3)
 anti_aliasing_size = 1.2
 
+[sub_resource type="StyleBoxFlat" id="score_badge"]
+content_margin_left = 6.0
+content_margin_top = 4.0
+content_margin_right = 6.0
+content_margin_bottom = 6.0
+bg_color = Color(0.02, 0.07, 0.09, 0.78)
+border_width_left = 2
+border_width_top = 2
+border_width_right = 2
+border_width_bottom = 2
+border_color = Color(0.62, 0.86, 0.96, 0.55)
+corner_radius_top_left = 22
+corner_radius_top_right = 22
+corner_radius_bottom_right = 22
+corner_radius_bottom_left = 22
+shadow_color = Color(0.01, 0.04, 0.1, 0.35)
+shadow_size = 8
+shadow_offset = Vector2(0, 3)
+anti_aliasing_size = 1.2
+
+[sub_resource type="StyleBoxFlat" id="centre_ring"]
+bg_color = Color(1, 1, 1, 0.025)
+border_width_left = 2
+border_width_top = 2
+border_width_right = 2
+border_width_bottom = 2
+border_color = Color(0.62, 0.86, 0.96, 0.16)
+corner_radius_top_left = 90
+corner_radius_top_right = 90
+corner_radius_bottom_right = 90
+corner_radius_bottom_left = 90
+anti_aliasing_size = 1.2
+
 [sub_resource type="StyleBoxFlat" id="slot_style"]
 bg_color = Color(1, 1, 1, 0.05)
 border_width_left = 2
@@ -112,25 +145,30 @@ shadow_size = 10
 shadow_offset = Vector2(0, 4)
 anti_aliasing_size = 1.2
 
-[node name="TablePortrait" type="Control" unique_id=507457187 node_paths=PackedStringArray("Canvas", "Background", "P1ScoreBox", "P1ScorePrefix", "P1ScoreValue", "P1ScoreThem", "P1OpponentScore", "P1OpponentBox", "P1WinsRow", "P1WinsLabel", "P1Chips", "P1Board", "P1Hand", "P1ButtonSlot", "P1ActionRow", "P1DrawCard", "P1Hold", "P1ConfirmRow", "P1Play", "P1PutBack", "P1FlipValue", "P2Side", "P2ScoreBox", "P2ScorePrefix", "P2ScoreValue", "P2ScoreThem", "P2OpponentScore", "P2OpponentBox", "P2WinsRow", "P2WinsLabel", "P2Chips", "P2Board", "P2Hand", "P2ButtonSlot", "P2ActionRow", "P2DrawCard", "P2Hold", "P2ConfirmRow", "P2Play", "P2PutBack", "P2FlipValue", "SetInfoLabel", "TargetLabel", "Deck", "DeckFootprint", "MenuButton", "EffectToast", "EffectLabel")]
+[node name="TablePortrait" type="Control" unique_id=507457187 node_paths=PackedStringArray("Canvas", "Background", "P1ScoreBox", "P1ScoreValue", "P1ScoreTarget", "P1ScoreFarEnd", "P1ScoreFarValue", "P1ScoreFarTarget", "P1ScoreDivider", "P1OpponentScore", "P1OpponentBox", "P1WinsRow", "P1WinsLabel", "P1Chips", "P1Board", "P1Hand", "P1ButtonSlot", "P1ActionRow", "P1DrawCard", "P1Hold", "P1ConfirmRow", "P1Play", "P1PutBack", "P1FlipValue", "P2Side", "P2ScoreBox", "P2ScoreValue", "P2ScoreTarget", "P2ScoreFarEnd", "P2ScoreFarValue", "P2ScoreFarTarget", "P2ScoreDivider", "P2OpponentScore", "P2OpponentBox", "P2WinsRow", "P2WinsLabel", "P2Chips", "P2Board", "P2Hand", "P2ButtonSlot", "P2ActionRow", "P2DrawCard", "P2Hold", "P2ConfirmRow", "P2Play", "P2PutBack", "P2FlipValue", "SetInfoLabel", "TargetLabel", "Deck", "DeckFootprint", "MenuButton", "EffectToast", "EffectLabel")]
 layout_mode = 3
 anchors_preset = 0
 offset_right = 720.0
 offset_bottom = 1560.0
 script = ExtResource("script_layout")
 Portrait = true
-HandCardSize = Vector2(98, 133)
+HandCardSize = Vector2(158, 214)
+HandLiftOnPick = 36.0
+ScoreBadges = true
 Canvas = NodePath("Canvas")
 Background = NodePath("Background")
 P1ScoreBox = NodePath("Canvas/P1Side/ScoreBox")
-P1ScorePrefix = NodePath("Canvas/P1Side/ScoreBox/ScoreLines/YouRow/YouPrefix")
-P1ScoreValue = NodePath("Canvas/P1Side/ScoreBox/ScoreLines/YouRow/YouValue")
-P1ScoreThem = NodePath("Canvas/P1Side/ScoreBox/ScoreLines/Them")
+P1ScoreValue = NodePath("Canvas/P1Side/ScoreBox/ScoreLines/NearEnd/Score")
+P1ScoreTarget = NodePath("Canvas/P1Side/ScoreBox/ScoreLines/NearEnd/Target")
+P1ScoreFarEnd = NodePath("Canvas/P1Side/ScoreBox/ScoreLines/FarEnd")
+P1ScoreFarValue = NodePath("Canvas/P1Side/ScoreBox/ScoreLines/FarEnd/Turned/Score")
+P1ScoreFarTarget = NodePath("Canvas/P1Side/ScoreBox/ScoreLines/FarEnd/Turned/Target")
+P1ScoreDivider = NodePath("Canvas/P1Side/ScoreBox/ScoreLines/Divider")
 P1OpponentScore = NodePath("Canvas/P1Side/OpponentBox/OpponentScore")
 P1OpponentBox = NodePath("Canvas/P1Side/OpponentBox")
-P1WinsRow = NodePath("Canvas/P1Side/BarLeft/WinsRow")
-P1WinsLabel = NodePath("Canvas/P1Side/BarLeft/WinsRow/WinsLabel")
-P1Chips = NodePath("Canvas/P1Side/BarLeft/WinsRow/Chips")
+P1WinsRow = NodePath("Canvas/P1Side/WinsRow")
+P1WinsLabel = NodePath("Canvas/P1Side/WinsRow/WinsLabel")
+P1Chips = NodePath("Canvas/P1Side/WinsRow/Chips")
 P1Board = NodePath("Canvas/P1Side/Board")
 P1Hand = NodePath("Canvas/P1Side/Hand")
 P1ButtonSlot = NodePath("Canvas/P1Side/ButtonSlot")
@@ -140,17 +178,20 @@ P1Hold = NodePath("Canvas/P1Side/ButtonSlot/ActionRow/Hold")
 P1ConfirmRow = NodePath("Canvas/P1Side/ButtonSlot/ConfirmRow")
 P1Play = NodePath("Canvas/P1Side/ButtonSlot/ConfirmRow/Play")
 P1PutBack = NodePath("Canvas/P1Side/ButtonSlot/ConfirmRow/PutBack")
-P1FlipValue = NodePath("Canvas/P1Side/BarLeft/FlipValue")
+P1FlipValue = NodePath("Canvas/P1Side/FlipValue")
 P2Side = NodePath("Canvas/P2Side")
 P2ScoreBox = NodePath("Canvas/P2Side/ScoreBox")
-P2ScorePrefix = NodePath("Canvas/P2Side/ScoreBox/ScoreLines/YouRow/YouPrefix")
-P2ScoreValue = NodePath("Canvas/P2Side/ScoreBox/ScoreLines/YouRow/YouValue")
-P2ScoreThem = NodePath("Canvas/P2Side/ScoreBox/ScoreLines/Them")
+P2ScoreValue = NodePath("Canvas/P2Side/ScoreBox/ScoreLines/NearEnd/Score")
+P2ScoreTarget = NodePath("Canvas/P2Side/ScoreBox/ScoreLines/NearEnd/Target")
+P2ScoreFarEnd = NodePath("Canvas/P2Side/ScoreBox/ScoreLines/FarEnd")
+P2ScoreFarValue = NodePath("Canvas/P2Side/ScoreBox/ScoreLines/FarEnd/Turned/Score")
+P2ScoreFarTarget = NodePath("Canvas/P2Side/ScoreBox/ScoreLines/FarEnd/Turned/Target")
+P2ScoreDivider = NodePath("Canvas/P2Side/ScoreBox/ScoreLines/Divider")
 P2OpponentScore = NodePath("Canvas/P2Side/OpponentBox/OpponentScore")
 P2OpponentBox = NodePath("Canvas/P2Side/OpponentBox")
-P2WinsRow = NodePath("Canvas/P2Side/BarLeft/WinsRow")
-P2WinsLabel = NodePath("Canvas/P2Side/BarLeft/WinsRow/WinsLabel")
-P2Chips = NodePath("Canvas/P2Side/BarLeft/WinsRow/Chips")
+P2WinsRow = NodePath("Canvas/P2Side/WinsRow")
+P2WinsLabel = NodePath("Canvas/P2Side/WinsRow/WinsLabel")
+P2Chips = NodePath("Canvas/P2Side/WinsRow/Chips")
 P2Board = NodePath("Canvas/P2Side/Board")
 P2Hand = NodePath("Canvas/P2Side/Hand")
 P2ButtonSlot = NodePath("Canvas/P2Side/ButtonSlot")
@@ -160,7 +201,7 @@ P2Hold = NodePath("Canvas/P2Side/ButtonSlot/ActionRow/Hold")
 P2ConfirmRow = NodePath("Canvas/P2Side/ButtonSlot/ConfirmRow")
 P2Play = NodePath("Canvas/P2Side/ButtonSlot/ConfirmRow/Play")
 P2PutBack = NodePath("Canvas/P2Side/ButtonSlot/ConfirmRow/PutBack")
-P2FlipValue = NodePath("Canvas/P2Side/BarLeft/FlipValue")
+P2FlipValue = NodePath("Canvas/P2Side/FlipValue")
 SetInfoLabel = NodePath("Canvas/InfoColumn/SetInfoLabel")
 TargetLabel = NodePath("Canvas/InfoColumn/TargetLabel")
 Deck = NodePath("Canvas/DeckHolder/Deck")
@@ -196,75 +237,145 @@ grow_horizontal = 2
 grow_vertical = 2
 mouse_filter = 2
 
+[node name="CentreLineLeft" type="ColorRect" parent="Canvas"]
+layout_mode = 0
+offset_left = 0.0
+offset_top = 779.0
+offset_right = 190.0
+offset_bottom = 781.0
+mouse_filter = 2
+color = Color(0.62, 0.86, 0.96, 0.12)
+
+[node name="CentreLineRight" type="ColorRect" parent="Canvas"]
+layout_mode = 0
+offset_left = 530.0
+offset_top = 779.0
+offset_right = 720.0
+offset_bottom = 781.0
+mouse_filter = 2
+color = Color(0.62, 0.86, 0.96, 0.12)
+
+[node name="CentreRing" type="Panel" parent="Canvas"]
+layout_mode = 0
+offset_left = 190.0
+offset_top = 690.0
+offset_right = 530.0
+offset_bottom = 870.0
+mouse_filter = 2
+theme_override_styles/panel = SubResource("centre_ring")
+
 [node name="P2Side" type="Control" parent="Canvas" unique_id=1232779464]
 anchors_preset = 0
-offset_left = 20.0
-offset_top = 20.0
-offset_right = 700.0
-offset_bottom = 711.0
+offset_left = 0.0
+offset_top = 0.0
+offset_right = 720.0
+offset_bottom = 780.0
 mouse_filter = 2
 
 [node name="ScoreBox" type="PanelContainer" parent="Canvas/P2Side" unique_id=731681445]
 layout_mode = 0
+offset_left = 16.0
+offset_top = 461.0
+offset_right = 120.0
+offset_bottom = 462.0
+grow_vertical = 0
+mouse_filter = 2
+theme_override_styles/panel = SubResource("score_badge")
+
+[node name="ScoreLines" type="VBoxContainer" parent="Canvas/P2Side/ScoreBox" unique_id=452742555]
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/separation = 4
+
+[node name="FarEnd" type="Control" parent="Canvas/P2Side/ScoreBox/ScoreLines"]
+visible = false
+custom_minimum_size = Vector2(0, 106)
+layout_mode = 2
+mouse_filter = 2
+
+[node name="Turned" type="VBoxContainer" parent="Canvas/P2Side/ScoreBox/ScoreLines/FarEnd"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+rotation = 3.1415927
+pivot_offset = Vector2(46, 53)
+mouse_filter = 2
+theme_override_constants/separation = -14
+
+[node name="Score" type="Label" parent="Canvas/P2Side/ScoreBox/ScoreLines/FarEnd/Turned"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 60
+text = "14"
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="Target" type="Label" parent="Canvas/P2Side/ScoreBox/ScoreLines/FarEnd/Turned"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.72, 0.84, 0.9, 0.85)
+theme_override_font_sizes/font_size = 24
+text = "/20"
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="Divider" type="ColorRect" parent="Canvas/P2Side/ScoreBox/ScoreLines"]
+visible = false
+custom_minimum_size = Vector2(0, 2)
+layout_mode = 2
+mouse_filter = 2
+color = Color(0.62, 0.86, 0.96, 0.4)
+
+[node name="NearEnd" type="VBoxContainer" parent="Canvas/P2Side/ScoreBox/ScoreLines"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/separation = -14
+
+[node name="Score" type="Label" parent="Canvas/P2Side/ScoreBox/ScoreLines/NearEnd"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 60
+text = "14"
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="Target" type="Label" parent="Canvas/P2Side/ScoreBox/ScoreLines/NearEnd"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.72, 0.84, 0.9, 0.85)
+theme_override_font_sizes/font_size = 24
+text = "/20"
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="OpponentBox" type="PanelContainer" parent="Canvas/P2Side" unique_id=2105272542]
+visible = false
+layout_mode = 0
+offset_left = 0.0
+offset_top = 0.0
 offset_right = 10.0
 offset_bottom = 10.0
 mouse_filter = 2
 theme_override_styles/panel = SubResource("score_box")
 
-[node name="ScoreLines" type="VBoxContainer" parent="Canvas/P2Side/ScoreBox" unique_id=452742555]
-layout_mode = 2
-mouse_filter = 2
-theme_override_constants/separation = 0
-
-[node name="YouRow" type="HBoxContainer" parent="Canvas/P2Side/ScoreBox/ScoreLines" unique_id=453539559]
-layout_mode = 2
-mouse_filter = 2
-theme_override_constants/separation = 0
-
-[node name="YouPrefix" type="Label" parent="Canvas/P2Side/ScoreBox/ScoreLines/YouRow" unique_id=613455419]
-layout_mode = 2
-theme_override_font_sizes/font_size = 54
-text = "Them  "
-
-[node name="YouValue" type="Label" parent="Canvas/P2Side/ScoreBox/ScoreLines/YouRow" unique_id=1674465259]
-layout_mode = 2
-theme_override_font_sizes/font_size = 54
-text = "14"
-
-[node name="Them" type="Label" parent="Canvas/P2Side/ScoreBox/ScoreLines" unique_id=296517420]
-visible = false
-layout_mode = 2
-theme_override_font_sizes/font_size = 54
-text = "Them: 8"
-
-[node name="OpponentBox" type="PanelContainer" parent="Canvas/P2Side" unique_id=2105272542]
-layout_mode = 0
-offset_left = 670.0
-offset_right = 680.0
-offset_bottom = 10.0
-grow_horizontal = 0
-mouse_filter = 2
-theme_override_styles/panel = SubResource("score_box")
-
 [node name="OpponentScore" type="Label" parent="Canvas/P2Side/OpponentBox" unique_id=1631934456]
 layout_mode = 2
-theme_override_font_sizes/font_size = 54
-text = "P1  11"
+theme_override_font_sizes/font_size = 40
+text = "Them  14"
 
 [node name="Board" type="GridContainer" parent="Canvas/P2Side" unique_id=1525627917]
 script = ExtResource("script_persp")
 layout_mode = 0
-offset_left = 139.0
-offset_top = 98.0
-offset_right = 541.0
-offset_bottom = 456.0
+offset_left = 135.0
+offset_top = 60.0
+offset_right = 585.0
+offset_bottom = 462.0
 mouse_filter = 2
 theme_override_constants/h_separation = 6
 theme_override_constants/v_separation = 6
 columns = 3
 
 [node name="Slot1" type="Panel" parent="Canvas/P2Side/Board" unique_id=1169073420]
-custom_minimum_size = Vector2(130, 176)
+custom_minimum_size = Vector2(146, 198)
 layout_mode = 2
 mouse_filter = 2
 theme_override_styles/panel = SubResource("slot_style")
@@ -290,13 +401,13 @@ grow_horizontal = 2
 grow_vertical = 2
 theme_override_colors/font_color = Color(0.12, 0.42, 0.27, 1)
 theme_override_colors/font_shadow_color = Color(0, 0, 0, 0)
-theme_override_font_sizes/font_size = 77
+theme_override_font_sizes/font_size = 86
 text = "10"
 horizontal_alignment = 1
 vertical_alignment = 1
 
 [node name="Slot2" type="Panel" parent="Canvas/P2Side/Board" unique_id=943293233]
-custom_minimum_size = Vector2(130, 176)
+custom_minimum_size = Vector2(146, 198)
 layout_mode = 2
 mouse_filter = 2
 theme_override_styles/panel = SubResource("slot_style")
@@ -322,120 +433,120 @@ grow_horizontal = 2
 grow_vertical = 2
 theme_override_colors/font_color = Color(0.12, 0.42, 0.27, 1)
 theme_override_colors/font_shadow_color = Color(0, 0, 0, 0)
-theme_override_font_sizes/font_size = 77
+theme_override_font_sizes/font_size = 86
 text = "4"
 horizontal_alignment = 1
 vertical_alignment = 1
 
 [node name="Slot3" type="Panel" parent="Canvas/P2Side/Board" unique_id=614299105]
-custom_minimum_size = Vector2(130, 176)
+custom_minimum_size = Vector2(146, 198)
 layout_mode = 2
 mouse_filter = 2
 theme_override_styles/panel = SubResource("slot_style")
 
 [node name="Slot4" type="Panel" parent="Canvas/P2Side/Board" unique_id=1187819579]
-custom_minimum_size = Vector2(130, 176)
+custom_minimum_size = Vector2(146, 198)
 layout_mode = 2
 mouse_filter = 2
 theme_override_styles/panel = SubResource("slot_style")
 
 [node name="Slot5" type="Panel" parent="Canvas/P2Side/Board" unique_id=261034954]
-custom_minimum_size = Vector2(130, 176)
+custom_minimum_size = Vector2(146, 198)
 layout_mode = 2
 mouse_filter = 2
 theme_override_styles/panel = SubResource("slot_style")
 
 [node name="Slot6" type="Panel" parent="Canvas/P2Side/Board" unique_id=37255450]
-custom_minimum_size = Vector2(130, 176)
+custom_minimum_size = Vector2(146, 198)
 layout_mode = 2
 mouse_filter = 2
 theme_override_styles/panel = SubResource("slot_style")
 
 [node name="Slot7" type="Panel" parent="Canvas/P2Side/Board" unique_id=419479452]
 visible = false
-custom_minimum_size = Vector2(130, 176)
+custom_minimum_size = Vector2(146, 198)
 layout_mode = 2
 mouse_filter = 2
 theme_override_styles/panel = SubResource("slot_style")
 
 [node name="Slot8" type="Panel" parent="Canvas/P2Side/Board" unique_id=758343766]
 visible = false
-custom_minimum_size = Vector2(130, 176)
+custom_minimum_size = Vector2(146, 198)
 layout_mode = 2
 mouse_filter = 2
 theme_override_styles/panel = SubResource("slot_style")
 
 [node name="Slot9" type="Panel" parent="Canvas/P2Side/Board" unique_id=796402510]
 visible = false
-custom_minimum_size = Vector2(130, 176)
+custom_minimum_size = Vector2(146, 198)
 layout_mode = 2
 mouse_filter = 2
 theme_override_styles/panel = SubResource("slot_style")
 
-[node name="BarLeft" type="Control" parent="Canvas/P2Side" unique_id=1159404224]
-anchors_preset = 0
-offset_top = 464.0
-offset_right = 224.0
-offset_bottom = 550.0
-mouse_filter = 2
-
-[node name="WinsRow" type="HBoxContainer" parent="Canvas/P2Side/BarLeft" unique_id=1668705582]
+[node name="WinsRow" type="VBoxContainer" parent="Canvas/P2Side"]
 layout_mode = 0
-offset_top = 22.0
-offset_right = 224.0
-offset_bottom = 64.0
+offset_left = 16.0
+offset_top = 474.0
+offset_right = 120.0
+offset_bottom = 554.0
 mouse_filter = 2
-theme_override_constants/separation = 8
+theme_override_constants/separation = 2
+alignment = 1
 
-[node name="WinsLabel" type="Label" parent="Canvas/P2Side/BarLeft/WinsRow" unique_id=1808107117]
+[node name="WinsLabel" type="Label" parent="Canvas/P2Side/WinsRow"]
 layout_mode = 2
-theme_override_font_sizes/font_size = 30
-text = "Wins:"
+theme_override_colors/font_color = Color(0.72, 0.84, 0.9, 0.85)
+theme_override_font_sizes/font_size = 22
+text = "Wins"
+horizontal_alignment = 1
 vertical_alignment = 1
 
-[node name="Chips" type="HBoxContainer" parent="Canvas/P2Side/BarLeft/WinsRow" unique_id=727639225]
+[node name="Chips" type="HBoxContainer" parent="Canvas/P2Side/WinsRow"]
 layout_mode = 2
-theme_override_constants/separation = 4
+theme_override_constants/separation = 5
+alignment = 1
 
-[node name="Chip1" type="TextureRect" parent="Canvas/P2Side/BarLeft/WinsRow/Chips" unique_id=1824108019]
-custom_minimum_size = Vector2(40, 40)
-layout_mode = 2
-size_flags_vertical = 4
-texture = ExtResource("tex_chip")
-expand_mode = 1
-stretch_mode = 5
-
-[node name="Chip2" type="TextureRect" parent="Canvas/P2Side/BarLeft/WinsRow/Chips" unique_id=481890005]
-custom_minimum_size = Vector2(40, 40)
+[node name="Chip1" type="TextureRect" parent="Canvas/P2Side/WinsRow/Chips"]
+custom_minimum_size = Vector2(28, 28)
 layout_mode = 2
 size_flags_vertical = 4
 texture = ExtResource("tex_chip")
 expand_mode = 1
 stretch_mode = 5
 
-[node name="Chip3" type="TextureRect" parent="Canvas/P2Side/BarLeft/WinsRow/Chips" unique_id=33452638]
-custom_minimum_size = Vector2(40, 40)
+[node name="Chip2" type="TextureRect" parent="Canvas/P2Side/WinsRow/Chips"]
+custom_minimum_size = Vector2(28, 28)
 layout_mode = 2
 size_flags_vertical = 4
 texture = ExtResource("tex_chip")
 expand_mode = 1
 stretch_mode = 5
 
-[node name="FlipValue" type="Button" parent="Canvas/P2Side/BarLeft" unique_id=1205839388]
+[node name="Chip3" type="TextureRect" parent="Canvas/P2Side/WinsRow/Chips"]
+custom_minimum_size = Vector2(28, 28)
+layout_mode = 2
+size_flags_vertical = 4
+texture = ExtResource("tex_chip")
+expand_mode = 1
+stretch_mode = 5
+
+[node name="FlipValue" type="Button" parent="Canvas/P2Side"]
 visible = false
 layout_mode = 0
-offset_right = 224.0
-offset_bottom = 86.0
-theme_override_font_sizes/font_size = 28
+offset_left = 16.0
+offset_top = 474.0
+offset_right = 120.0
+offset_bottom = 554.0
+theme_override_font_sizes/font_size = 24
 text = "Flip Value"
+autowrap_mode = 3
 
 [node name="ButtonSlot" type="Control" parent="Canvas/P2Side" unique_id=1320909892]
-anchors_preset = 0
-offset_left = 232.0
-offset_top = 464.0
-offset_right = 680.0
-offset_bottom = 550.0
-grow_horizontal = 0
+layout_mode = 0
+offset_left = 135.0
+offset_top = 474.0
+offset_right = 585.0
+offset_bottom = 554.0
 mouse_filter = 2
 
 [node name="ActionRow" type="Control" parent="Canvas/P2Side/ButtonSlot" unique_id=1321831361]
@@ -449,16 +560,19 @@ mouse_filter = 2
 
 [node name="Hold" type="Button" parent="Canvas/P2Side/ButtonSlot/ActionRow" unique_id=1770740970]
 layout_mode = 0
-offset_right = 218.0
-offset_bottom = 86.0
+offset_left = 0.0
+offset_top = 0.0
+offset_right = 215.0
+offset_bottom = 80.0
 theme_override_font_sizes/font_size = 30
 text = "Hold"
 
 [node name="DrawCard" type="Button" parent="Canvas/P2Side/ButtonSlot/ActionRow" unique_id=820810282]
 layout_mode = 0
-offset_left = 230.0
-offset_right = 448.0
-offset_bottom = 86.0
+offset_left = 235.0
+offset_top = 0.0
+offset_right = 450.0
+offset_bottom = 80.0
 theme_override_font_sizes/font_size = 30
 text = "Draw Card"
 
@@ -474,30 +588,34 @@ mouse_filter = 2
 
 [node name="PutBack" type="Button" parent="Canvas/P2Side/ButtonSlot/ConfirmRow" unique_id=887443615]
 layout_mode = 0
-offset_right = 218.0
-offset_bottom = 86.0
+offset_left = 0.0
+offset_top = 0.0
+offset_right = 215.0
+offset_bottom = 80.0
 theme_override_font_sizes/font_size = 30
 text = "Put back"
 
 [node name="Play" type="Button" parent="Canvas/P2Side/ButtonSlot/ConfirmRow" unique_id=1249441286]
 layout_mode = 0
-offset_left = 230.0
-offset_right = 448.0
-offset_bottom = 86.0
+offset_left = 235.0
+offset_top = 0.0
+offset_right = 450.0
+offset_bottom = 80.0
 theme_override_font_sizes/font_size = 30
 text = "Play"
 
 [node name="Hand" type="HBoxContainer" parent="Canvas/P2Side" unique_id=1323538281]
 layout_mode = 0
-offset_top = 558.0
-offset_right = 680.0
-offset_bottom = 691.0
+offset_left = 0.0
+offset_top = 616.0
+offset_right = 720.0
+offset_bottom = 830.0
 mouse_filter = 2
-theme_override_constants/separation = 10
+theme_override_constants/separation = 8
 alignment = 1
 
 [node name="PreviewCard1" type="TextureRect" parent="Canvas/P2Side/Hand" unique_id=2008238257 groups=["editor_preview"]]
-custom_minimum_size = Vector2(98, 133)
+custom_minimum_size = Vector2(158, 214)
 layout_mode = 2
 mouse_filter = 2
 texture = ExtResource("tex_plus")
@@ -513,13 +631,13 @@ grow_horizontal = 2
 grow_vertical = 2
 theme_override_colors/font_color = Color(0.13, 0.33, 0.66, 1)
 theme_override_colors/font_shadow_color = Color(0, 0, 0, 0)
-theme_override_font_sizes/font_size = 82
+theme_override_font_sizes/font_size = 96
 text = "+2"
 horizontal_alignment = 1
 vertical_alignment = 1
 
 [node name="PreviewCard2" type="TextureRect" parent="Canvas/P2Side/Hand" unique_id=419284250 groups=["editor_preview"]]
-custom_minimum_size = Vector2(98, 133)
+custom_minimum_size = Vector2(158, 214)
 layout_mode = 2
 mouse_filter = 2
 texture = ExtResource("tex_minus")
@@ -535,13 +653,13 @@ grow_horizontal = 2
 grow_vertical = 2
 theme_override_colors/font_color = Color(0.68, 0.17, 0.22, 1)
 theme_override_colors/font_shadow_color = Color(0, 0, 0, 0)
-theme_override_font_sizes/font_size = 82
+theme_override_font_sizes/font_size = 96
 text = "-1"
 horizontal_alignment = 1
 vertical_alignment = 1
 
 [node name="PreviewCard3" type="TextureRect" parent="Canvas/P2Side/Hand" unique_id=672355641 groups=["editor_preview"]]
-custom_minimum_size = Vector2(98, 133)
+custom_minimum_size = Vector2(158, 214)
 layout_mode = 2
 mouse_filter = 2
 texture = ExtResource("tex_plus")
@@ -557,13 +675,13 @@ grow_horizontal = 2
 grow_vertical = 2
 theme_override_colors/font_color = Color(0.13, 0.33, 0.66, 1)
 theme_override_colors/font_shadow_color = Color(0, 0, 0, 0)
-theme_override_font_sizes/font_size = 82
+theme_override_font_sizes/font_size = 96
 text = "+3"
 horizontal_alignment = 1
 vertical_alignment = 1
 
 [node name="PreviewCard4" type="TextureRect" parent="Canvas/P2Side/Hand" unique_id=1279367872 groups=["editor_preview"]]
-custom_minimum_size = Vector2(98, 133)
+custom_minimum_size = Vector2(158, 214)
 layout_mode = 2
 mouse_filter = 2
 texture = ExtResource("tex_minus")
@@ -579,25 +697,25 @@ grow_horizontal = 2
 grow_vertical = 2
 theme_override_colors/font_color = Color(0.68, 0.17, 0.22, 1)
 theme_override_colors/font_shadow_color = Color(0, 0, 0, 0)
-theme_override_font_sizes/font_size = 82
+theme_override_font_sizes/font_size = 96
 text = "-4"
 horizontal_alignment = 1
 vertical_alignment = 1
 
 [node name="InfoColumn" type="VBoxContainer" parent="Canvas" unique_id=1267384908]
 layout_mode = 0
-offset_left = 20.0
-offset_top = 711.0
-offset_right = 700.0
-offset_bottom = 757.0
-grow_vertical = 0
+offset_left = 200.0
+offset_top = 740.0
+offset_right = 520.0
+offset_bottom = 820.0
+grow_vertical = 2
 mouse_filter = 2
 theme_override_constants/separation = 2
-alignment = 2
+alignment = 1
 
 [node name="SetInfoLabel" type="Label" parent="Canvas/InfoColumn" unique_id=1940808974]
 layout_mode = 2
-theme_override_font_sizes/font_size = 30
+theme_override_font_sizes/font_size = 28
 text = "Stage 3/10 - Silver"
 horizontal_alignment = 1
 autowrap_mode = 3
@@ -606,28 +724,26 @@ autowrap_mode = 3
 visible = false
 layout_mode = 2
 theme_override_colors/font_color = Color(1, 0.85, 0.35, 1)
-theme_override_font_sizes/font_size = 32
+theme_override_font_sizes/font_size = 26
 text = "TARGET  23   (up from 20)"
 horizontal_alignment = 1
 autowrap_mode = 3
 
 [node name="DeckHolder" type="Control" parent="Canvas" unique_id=860582617]
 anchors_preset = 0
-offset_left = 271.0
-offset_top = 766.0
-offset_right = 356.0
-offset_bottom = 829.0
+offset_left = 614.0
+offset_top = 673.0
+offset_right = 772.0
+offset_bottom = 887.0
 mouse_filter = 2
 
 [node name="Deck" type="TextureRect" parent="Canvas/DeckHolder" unique_id=744440185]
-layout_mode = 0
-offset_left = 344.00006
-offset_top = 32.0
-offset_right = 407.00006
-offset_bottom = 117.0
-rotation = 6.283823
-scale = Vector2(2.1953058, 2.2801955)
-pivot_offset = Vector2(31.5, 42.5)
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
 mouse_filter = 2
 texture = ExtResource("tex_back")
 expand_mode = 1
@@ -635,11 +751,10 @@ stretch_mode = 5
 
 [node name="MenuButton" type="Button" parent="Canvas" unique_id=1674397678]
 layout_mode = 0
-offset_left = 618.99994
-offset_top = 1026.0
-offset_right = 694.99994
-offset_bottom = 1102.0
-scale = Vector2(0.80713284, 0.8938852)
+offset_left = 608.0
+offset_top = 1256.0
+offset_right = 684.0
+offset_bottom = 1332.0
 tooltip_text = "Menu"
 focus_mode = 0
 theme_override_styles/normal = SubResource("menu_normal")
@@ -701,75 +816,116 @@ autowrap_mode = 3
 
 [node name="P1Side" type="Control" parent="Canvas" unique_id=1103937329]
 anchors_preset = 0
-offset_left = 20.0
-offset_top = 849.0
-offset_right = 700.0
-offset_bottom = 1540.0
+offset_left = 0.0
+offset_top = 780.0
+offset_right = 720.0
+offset_bottom = 1560.0
 mouse_filter = 2
 
 [node name="ScoreBox" type="PanelContainer" parent="Canvas/P1Side" unique_id=1823687287]
 layout_mode = 0
-offset_left = -26.0
-offset_top = 377.0
-offset_right = 286.0
-offset_bottom = 539.0
-scale = Vector2(0.9683043, 0.7856061)
+offset_left = 16.0
+offset_top = 461.0
+offset_right = 120.0
+offset_bottom = 462.0
+grow_vertical = 0
 mouse_filter = 2
-theme_override_styles/panel = SubResource("score_box")
+theme_override_styles/panel = SubResource("score_badge")
 
 [node name="ScoreLines" type="VBoxContainer" parent="Canvas/P1Side/ScoreBox" unique_id=1875154133]
 layout_mode = 2
 mouse_filter = 2
-theme_override_constants/separation = 0
+theme_override_constants/separation = 4
 
-[node name="YouRow" type="HBoxContainer" parent="Canvas/P1Side/ScoreBox/ScoreLines" unique_id=1034464400]
+[node name="FarEnd" type="Control" parent="Canvas/P1Side/ScoreBox/ScoreLines"]
+visible = false
+custom_minimum_size = Vector2(0, 106)
 layout_mode = 2
 mouse_filter = 2
-theme_override_constants/separation = 0
 
-[node name="YouPrefix" type="Label" parent="Canvas/P1Side/ScoreBox/ScoreLines/YouRow" unique_id=273005396]
-layout_mode = 2
-theme_override_font_sizes/font_size = 54
-text = "You  "
+[node name="Turned" type="VBoxContainer" parent="Canvas/P1Side/ScoreBox/ScoreLines/FarEnd"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+rotation = 3.1415927
+pivot_offset = Vector2(46, 53)
+mouse_filter = 2
+theme_override_constants/separation = -14
 
-[node name="YouValue" type="Label" parent="Canvas/P1Side/ScoreBox/ScoreLines/YouRow" unique_id=1593819075]
+[node name="Score" type="Label" parent="Canvas/P1Side/ScoreBox/ScoreLines/FarEnd/Turned"]
 layout_mode = 2
-theme_override_font_sizes/font_size = 54
-text = "11/20"
+theme_override_font_sizes/font_size = 60
+text = "11"
+horizontal_alignment = 1
+vertical_alignment = 1
 
-[node name="Them" type="Label" parent="Canvas/P1Side/ScoreBox/ScoreLines" unique_id=1860913164]
+[node name="Target" type="Label" parent="Canvas/P1Side/ScoreBox/ScoreLines/FarEnd/Turned"]
 layout_mode = 2
-theme_override_font_sizes/font_size = 54
-text = "Them: 8"
+theme_override_colors/font_color = Color(0.72, 0.84, 0.9, 0.85)
+theme_override_font_sizes/font_size = 24
+text = "/20"
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="Divider" type="ColorRect" parent="Canvas/P1Side/ScoreBox/ScoreLines"]
+visible = false
+custom_minimum_size = Vector2(0, 2)
+layout_mode = 2
+mouse_filter = 2
+color = Color(0.62, 0.86, 0.96, 0.4)
+
+[node name="NearEnd" type="VBoxContainer" parent="Canvas/P1Side/ScoreBox/ScoreLines"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/separation = -14
+
+[node name="Score" type="Label" parent="Canvas/P1Side/ScoreBox/ScoreLines/NearEnd"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 60
+text = "11"
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="Target" type="Label" parent="Canvas/P1Side/ScoreBox/ScoreLines/NearEnd"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.72, 0.84, 0.9, 0.85)
+theme_override_font_sizes/font_size = 24
+text = "/20"
+horizontal_alignment = 1
+vertical_alignment = 1
 
 [node name="OpponentBox" type="PanelContainer" parent="Canvas/P1Side" unique_id=1181125593]
 visible = false
 layout_mode = 0
-offset_top = 18.0
-offset_right = 277.0
-offset_bottom = 106.0
+offset_left = 0.0
+offset_top = 0.0
+offset_right = 10.0
+offset_bottom = 10.0
 mouse_filter = 2
 theme_override_styles/panel = SubResource("score_box")
 
 [node name="OpponentScore" type="Label" parent="Canvas/P1Side/OpponentBox" unique_id=335961484]
 layout_mode = 2
-theme_override_font_sizes/font_size = 54
+theme_override_font_sizes/font_size = 40
 text = "Them  14"
 
 [node name="Board" type="GridContainer" parent="Canvas/P1Side" unique_id=1345458710]
 script = ExtResource("script_persp")
 layout_mode = 0
-offset_left = 137.0
-offset_top = -90.0
-offset_right = 539.0
-offset_bottom = 268.0
+offset_left = 135.0
+offset_top = 60.0
+offset_right = 585.0
+offset_bottom = 462.0
 mouse_filter = 2
 theme_override_constants/h_separation = 6
 theme_override_constants/v_separation = 6
 columns = 3
 
 [node name="Slot1" type="Panel" parent="Canvas/P1Side/Board" unique_id=1123233364]
-custom_minimum_size = Vector2(130, 176)
+custom_minimum_size = Vector2(146, 198)
 layout_mode = 2
 mouse_filter = 2
 theme_override_styles/panel = SubResource("slot_style")
@@ -795,13 +951,13 @@ grow_horizontal = 2
 grow_vertical = 2
 theme_override_colors/font_color = Color(0.12, 0.42, 0.27, 1)
 theme_override_colors/font_shadow_color = Color(0, 0, 0, 0)
-theme_override_font_sizes/font_size = 77
+theme_override_font_sizes/font_size = 86
 text = "3"
 horizontal_alignment = 1
 vertical_alignment = 1
 
 [node name="Slot2" type="Panel" parent="Canvas/P1Side/Board" unique_id=199392984]
-custom_minimum_size = Vector2(130, 176)
+custom_minimum_size = Vector2(146, 198)
 layout_mode = 2
 mouse_filter = 2
 theme_override_styles/panel = SubResource("slot_style")
@@ -827,121 +983,120 @@ grow_horizontal = 2
 grow_vertical = 2
 theme_override_colors/font_color = Color(0.12, 0.42, 0.27, 1)
 theme_override_colors/font_shadow_color = Color(0, 0, 0, 0)
-theme_override_font_sizes/font_size = 77
+theme_override_font_sizes/font_size = 86
 text = "8"
 horizontal_alignment = 1
 vertical_alignment = 1
 
 [node name="Slot3" type="Panel" parent="Canvas/P1Side/Board" unique_id=1501224785]
-custom_minimum_size = Vector2(130, 176)
+custom_minimum_size = Vector2(146, 198)
 layout_mode = 2
 mouse_filter = 2
 theme_override_styles/panel = SubResource("slot_style")
 
 [node name="Slot4" type="Panel" parent="Canvas/P1Side/Board" unique_id=355312658]
-custom_minimum_size = Vector2(130, 176)
+custom_minimum_size = Vector2(146, 198)
 layout_mode = 2
 mouse_filter = 2
 theme_override_styles/panel = SubResource("slot_style")
 
 [node name="Slot5" type="Panel" parent="Canvas/P1Side/Board" unique_id=481413503]
-custom_minimum_size = Vector2(130, 176)
+custom_minimum_size = Vector2(146, 198)
 layout_mode = 2
 mouse_filter = 2
 theme_override_styles/panel = SubResource("slot_style")
 
 [node name="Slot6" type="Panel" parent="Canvas/P1Side/Board" unique_id=208310803]
-custom_minimum_size = Vector2(130, 176)
+custom_minimum_size = Vector2(146, 198)
 layout_mode = 2
 mouse_filter = 2
 theme_override_styles/panel = SubResource("slot_style")
 
 [node name="Slot7" type="Panel" parent="Canvas/P1Side/Board" unique_id=695224505]
 visible = false
-custom_minimum_size = Vector2(130, 176)
+custom_minimum_size = Vector2(146, 198)
 layout_mode = 2
 mouse_filter = 2
 theme_override_styles/panel = SubResource("slot_style")
 
 [node name="Slot8" type="Panel" parent="Canvas/P1Side/Board" unique_id=2111335512]
 visible = false
-custom_minimum_size = Vector2(130, 176)
+custom_minimum_size = Vector2(146, 198)
 layout_mode = 2
 mouse_filter = 2
 theme_override_styles/panel = SubResource("slot_style")
 
 [node name="Slot9" type="Panel" parent="Canvas/P1Side/Board" unique_id=632009122]
 visible = false
-custom_minimum_size = Vector2(130, 176)
+custom_minimum_size = Vector2(146, 198)
 layout_mode = 2
 mouse_filter = 2
 theme_override_styles/panel = SubResource("slot_style")
 
-[node name="BarLeft" type="Control" parent="Canvas/P1Side" unique_id=144592061]
-anchors_preset = 0
-offset_top = 464.0
-offset_right = 224.0
-offset_bottom = 550.0
-mouse_filter = 2
-
-[node name="WinsRow" type="HBoxContainer" parent="Canvas/P1Side/BarLeft" unique_id=186567604]
+[node name="WinsRow" type="VBoxContainer" parent="Canvas/P1Side"]
 layout_mode = 0
-offset_left = -11.0
-offset_top = -130.0
-offset_right = 213.0
-offset_bottom = -88.0
+offset_left = 16.0
+offset_top = 474.0
+offset_right = 120.0
+offset_bottom = 554.0
 mouse_filter = 2
-theme_override_constants/separation = 8
+theme_override_constants/separation = 2
+alignment = 1
 
-[node name="WinsLabel" type="Label" parent="Canvas/P1Side/BarLeft/WinsRow" unique_id=377804915]
+[node name="WinsLabel" type="Label" parent="Canvas/P1Side/WinsRow"]
 layout_mode = 2
-theme_override_font_sizes/font_size = 30
-text = "Wins:"
+theme_override_colors/font_color = Color(0.72, 0.84, 0.9, 0.85)
+theme_override_font_sizes/font_size = 22
+text = "Wins"
+horizontal_alignment = 1
 vertical_alignment = 1
 
-[node name="Chips" type="HBoxContainer" parent="Canvas/P1Side/BarLeft/WinsRow" unique_id=1273062074]
+[node name="Chips" type="HBoxContainer" parent="Canvas/P1Side/WinsRow"]
 layout_mode = 2
-theme_override_constants/separation = 4
+theme_override_constants/separation = 5
+alignment = 1
 
-[node name="Chip1" type="TextureRect" parent="Canvas/P1Side/BarLeft/WinsRow/Chips" unique_id=2028834635]
-custom_minimum_size = Vector2(40, 40)
-layout_mode = 2
-size_flags_vertical = 4
-texture = ExtResource("tex_chip")
-expand_mode = 1
-stretch_mode = 5
-
-[node name="Chip2" type="TextureRect" parent="Canvas/P1Side/BarLeft/WinsRow/Chips" unique_id=2130520025]
-custom_minimum_size = Vector2(40, 40)
+[node name="Chip1" type="TextureRect" parent="Canvas/P1Side/WinsRow/Chips"]
+custom_minimum_size = Vector2(28, 28)
 layout_mode = 2
 size_flags_vertical = 4
 texture = ExtResource("tex_chip")
 expand_mode = 1
 stretch_mode = 5
 
-[node name="Chip3" type="TextureRect" parent="Canvas/P1Side/BarLeft/WinsRow/Chips" unique_id=1665023163]
-custom_minimum_size = Vector2(40, 40)
+[node name="Chip2" type="TextureRect" parent="Canvas/P1Side/WinsRow/Chips"]
+custom_minimum_size = Vector2(28, 28)
 layout_mode = 2
 size_flags_vertical = 4
 texture = ExtResource("tex_chip")
 expand_mode = 1
 stretch_mode = 5
 
-[node name="FlipValue" type="Button" parent="Canvas/P1Side/BarLeft" unique_id=444647221]
+[node name="Chip3" type="TextureRect" parent="Canvas/P1Side/WinsRow/Chips"]
+custom_minimum_size = Vector2(28, 28)
+layout_mode = 2
+size_flags_vertical = 4
+texture = ExtResource("tex_chip")
+expand_mode = 1
+stretch_mode = 5
+
+[node name="FlipValue" type="Button" parent="Canvas/P1Side"]
 visible = false
 layout_mode = 0
-offset_right = 224.0
-offset_bottom = 86.0
-theme_override_font_sizes/font_size = 28
+offset_left = 16.0
+offset_top = 474.0
+offset_right = 120.0
+offset_bottom = 554.0
+theme_override_font_sizes/font_size = 24
 text = "Flip Value"
+autowrap_mode = 3
 
 [node name="ButtonSlot" type="Control" parent="Canvas/P1Side" unique_id=594460604]
-anchors_preset = 0
-offset_left = 232.0
-offset_top = 464.0
-offset_right = 680.0
-offset_bottom = 550.0
-grow_horizontal = 0
+layout_mode = 0
+offset_left = 135.0
+offset_top = 474.0
+offset_right = 585.0
+offset_bottom = 554.0
 mouse_filter = 2
 
 [node name="ActionRow" type="Control" parent="Canvas/P1Side/ButtonSlot" unique_id=91578095]
@@ -955,21 +1110,19 @@ mouse_filter = 2
 
 [node name="Hold" type="Button" parent="Canvas/P1Side/ButtonSlot/ActionRow" unique_id=2098947777]
 layout_mode = 0
-offset_left = 152.0
-offset_top = -42.999985
-offset_right = 370.0
-offset_bottom = 43.000015
-scale = Vector2(1.4522613, 1.014961)
+offset_left = 0.0
+offset_top = 0.0
+offset_right = 215.0
+offset_bottom = 80.0
 theme_override_font_sizes/font_size = 30
 text = "Hold"
 
 [node name="DrawCard" type="Button" parent="Canvas/P1Side/ButtonSlot/ActionRow" unique_id=1069000057]
 layout_mode = 0
-offset_left = 150.0
-offset_top = -155.0
-offset_right = 368.0
-offset_bottom = -69.0
-scale = Vector2(1.4215267, 1.0827574)
+offset_left = 235.0
+offset_top = 0.0
+offset_right = 450.0
+offset_bottom = 80.0
 theme_override_font_sizes/font_size = 30
 text = "Draw Card"
 
@@ -985,32 +1138,34 @@ mouse_filter = 2
 
 [node name="PutBack" type="Button" parent="Canvas/P1Side/ButtonSlot/ConfirmRow" unique_id=1714199611]
 layout_mode = 0
-offset_right = 218.0
-offset_bottom = 86.0
+offset_left = 0.0
+offset_top = 0.0
+offset_right = 215.0
+offset_bottom = 80.0
 theme_override_font_sizes/font_size = 30
 text = "Put back"
 
 [node name="Play" type="Button" parent="Canvas/P1Side/ButtonSlot/ConfirmRow" unique_id=225247609]
 layout_mode = 0
-offset_left = 230.0
-offset_right = 448.0
-offset_bottom = 86.0
+offset_left = 235.0
+offset_top = 0.0
+offset_right = 450.0
+offset_bottom = 80.0
 theme_override_font_sizes/font_size = 30
 text = "Play"
 
 [node name="Hand" type="HBoxContainer" parent="Canvas/P1Side" unique_id=334150062]
 layout_mode = 0
-offset_left = -130.0
-offset_top = 520.0
-offset_right = 550.0
-offset_bottom = 653.0
-scale = Vector2(1.3453538, 1.3462453)
+offset_left = 0.0
+offset_top = 616.0
+offset_right = 720.0
+offset_bottom = 830.0
 mouse_filter = 2
-theme_override_constants/separation = 10
+theme_override_constants/separation = 8
 alignment = 1
 
 [node name="PreviewCard1" type="TextureRect" parent="Canvas/P1Side/Hand" unique_id=1346627149 groups=["editor_preview"]]
-custom_minimum_size = Vector2(98, 133)
+custom_minimum_size = Vector2(158, 214)
 layout_mode = 2
 mouse_filter = 2
 texture = ExtResource("tex_minus")
@@ -1026,13 +1181,13 @@ grow_horizontal = 2
 grow_vertical = 2
 theme_override_colors/font_color = Color(0.68, 0.17, 0.22, 1)
 theme_override_colors/font_shadow_color = Color(0, 0, 0, 0)
-theme_override_font_sizes/font_size = 82
+theme_override_font_sizes/font_size = 96
 text = "-3"
 horizontal_alignment = 1
 vertical_alignment = 1
 
 [node name="PreviewCard2" type="TextureRect" parent="Canvas/P1Side/Hand" unique_id=988786285 groups=["editor_preview"]]
-custom_minimum_size = Vector2(98, 133)
+custom_minimum_size = Vector2(158, 214)
 layout_mode = 2
 mouse_filter = 2
 texture = ExtResource("tex_plus")
@@ -1048,13 +1203,13 @@ grow_horizontal = 2
 grow_vertical = 2
 theme_override_colors/font_color = Color(0.13, 0.33, 0.66, 1)
 theme_override_colors/font_shadow_color = Color(0, 0, 0, 0)
-theme_override_font_sizes/font_size = 82
+theme_override_font_sizes/font_size = 96
 text = "+4"
 horizontal_alignment = 1
 vertical_alignment = 1
 
 [node name="PreviewCard3" type="TextureRect" parent="Canvas/P1Side/Hand" unique_id=2059415068 groups=["editor_preview"]]
-custom_minimum_size = Vector2(98, 133)
+custom_minimum_size = Vector2(158, 214)
 layout_mode = 2
 mouse_filter = 2
 texture = ExtResource("tex_plus")
@@ -1070,13 +1225,13 @@ grow_horizontal = 2
 grow_vertical = 2
 theme_override_colors/font_color = Color(0.13, 0.33, 0.66, 1)
 theme_override_colors/font_shadow_color = Color(0, 0, 0, 0)
-theme_override_font_sizes/font_size = 82
+theme_override_font_sizes/font_size = 96
 text = "+1"
 horizontal_alignment = 1
 vertical_alignment = 1
 
 [node name="PreviewCard4" type="TextureRect" parent="Canvas/P1Side/Hand" unique_id=1515502793 groups=["editor_preview"]]
-custom_minimum_size = Vector2(98, 133)
+custom_minimum_size = Vector2(158, 214)
 layout_mode = 2
 mouse_filter = 2
 texture = ExtResource("tex_minus")
@@ -1092,7 +1247,7 @@ grow_horizontal = 2
 grow_vertical = 2
 theme_override_colors/font_color = Color(0.68, 0.17, 0.22, 1)
 theme_override_colors/font_shadow_color = Color(0, 0, 0, 0)
-theme_override_font_sizes/font_size = 82
+theme_override_font_sizes/font_size = 96
 text = "-2"
 horizontal_alignment = 1
 vertical_alignment = 1
