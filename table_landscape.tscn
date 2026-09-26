@@ -1,0 +1,1099 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://TableLayout.cs" id="script_layout"]
+
+[ext_resource type="Texture2D" path="res://assets/aimfor20_art/playmat_landscape.png" id="tex_mat"]
+
+[ext_resource type="Texture2D" path="res://assets/aimfor20_art/card_back.png" id="tex_back"]
+
+[ext_resource type="Texture2D" path="res://assets/aimfor20_art/ui/chip_empty.png" id="tex_chip"]
+
+[ext_resource type="Texture2D" path="res://assets/aimfor20_art/card_main.png" id="tex_main"]
+
+[ext_resource type="Texture2D" path="res://assets/aimfor20_art/card_plus.png" id="tex_plus"]
+
+[ext_resource type="Texture2D" path="res://assets/aimfor20_art/card_minus.png" id="tex_minus"]
+[ext_resource type="Script" path="res://PerspectiveBoard.cs" id="script_persp"]
+
+[sub_resource type="StyleBoxFlat" id="slot_style"]
+bg_color = Color(1, 1, 1, 0.05)
+border_width_left = 2
+border_width_top = 2
+border_width_right = 2
+border_width_bottom = 2
+border_color = Color(1, 1, 1, 0.3)
+corner_radius_top_left = 10
+corner_radius_top_right = 10
+corner_radius_bottom_right = 10
+corner_radius_bottom_left = 10
+anti_aliasing_size = 1.2
+
+[sub_resource type="StyleBoxFlat" id="score_box"]
+content_margin_left = 20.0
+content_margin_top = 6.0
+content_margin_right = 20.0
+content_margin_bottom = 8.0
+bg_color = Color(0.02, 0.07, 0.09, 0.72)
+border_width_left = 2
+border_width_top = 2
+border_width_right = 2
+border_width_bottom = 2
+border_color = Color(0.62, 0.86, 0.96, 0.55)
+corner_radius_top_left = 18
+corner_radius_top_right = 18
+corner_radius_bottom_right = 18
+corner_radius_bottom_left = 18
+shadow_color = Color(0.01, 0.04, 0.1, 0.35)
+shadow_size = 8
+shadow_offset = Vector2(0, 3)
+anti_aliasing_size = 1.2
+
+[sub_resource type="StyleBoxFlat" id="toast_style"]
+content_margin_left = 20.0
+content_margin_top = 10.0
+content_margin_right = 20.0
+content_margin_bottom = 10.0
+bg_color = Color(0.03, 0.06, 0.1, 0.9)
+border_width_left = 2
+border_width_top = 2
+border_width_right = 2
+border_width_bottom = 2
+border_color = Color(0.86, 0.74, 1, 0.6)
+corner_radius_top_left = 18
+corner_radius_top_right = 18
+corner_radius_bottom_right = 18
+corner_radius_bottom_left = 18
+shadow_color = Color(0.01, 0.04, 0.1, 0.35)
+shadow_size = 10
+shadow_offset = Vector2(0, 4)
+anti_aliasing_size = 1.2
+
+[sub_resource type="StyleBoxFlat" id="menu_normal"]
+bg_color = Color(0.965, 0.972, 0.985, 1)
+border_width_left = 2
+border_width_top = 2
+border_width_right = 2
+border_width_bottom = 4
+border_color = Color(0.76, 0.8, 0.87, 1)
+corner_radius_top_left = 38
+corner_radius_top_right = 38
+corner_radius_bottom_right = 38
+corner_radius_bottom_left = 38
+shadow_color = Color(0.01, 0.04, 0.1, 0.35)
+shadow_size = 8
+shadow_offset = Vector2(0, 3)
+anti_aliasing_size = 1.2
+
+[sub_resource type="StyleBoxFlat" id="menu_hover"]
+bg_color = Color(1, 1, 1, 1)
+border_width_left = 2
+border_width_top = 2
+border_width_right = 2
+border_width_bottom = 4
+border_color = Color(0.76, 0.8, 0.87, 1)
+corner_radius_top_left = 38
+corner_radius_top_right = 38
+corner_radius_bottom_right = 38
+corner_radius_bottom_left = 38
+shadow_color = Color(0.01, 0.04, 0.1, 0.35)
+shadow_size = 8
+shadow_offset = Vector2(0, 3)
+anti_aliasing_size = 1.2
+
+[sub_resource type="StyleBoxFlat" id="menu_pressed"]
+bg_color = Color(0.87, 0.9, 0.94, 1)
+border_width_left = 2
+border_width_top = 2
+border_width_right = 2
+border_width_bottom = 2
+border_color = Color(0.76, 0.8, 0.87, 1)
+corner_radius_top_left = 38
+corner_radius_top_right = 38
+corner_radius_bottom_right = 38
+corner_radius_bottom_left = 38
+shadow_color = Color(0.01, 0.04, 0.1, 0.35)
+shadow_size = 8
+shadow_offset = Vector2(0, 3)
+anti_aliasing_size = 1.2
+
+[sub_resource type="StyleBoxEmpty" id="menu_focus"]
+
+
+[node name="TableLandscape" type="Control" node_paths=PackedStringArray("Canvas", "Background", "P2Side", "SetInfoLabel", "TargetLabel", "Deck", "DeckFootprint", "MenuButton", "EffectToast", "EffectLabel", "P1ScoreBox", "P1ScorePrefix", "P1ScoreValue", "P1ScoreThem", "P1OpponentBox", "P1OpponentScore", "P1WinsRow", "P1WinsLabel", "P1Chips", "P1Board", "P1Hand", "P1ButtonSlot", "P1ActionRow", "P1DrawCard", "P1Hold", "P1ConfirmRow", "P1Play", "P1PutBack", "P1FlipValue", "P2ScoreBox", "P2ScorePrefix", "P2ScoreValue", "P2ScoreThem", "P2OpponentBox", "P2OpponentScore", "P2WinsRow", "P2WinsLabel", "P2Chips", "P2Board", "P2Hand", "P2ButtonSlot", "P2ActionRow", "P2DrawCard", "P2Hold", "P2ConfirmRow", "P2Play", "P2PutBack", "P2FlipValue")]
+layout_mode = 3
+anchors_preset = 0
+offset_right = 1560.0
+offset_bottom = 720.0
+script = ExtResource("script_layout")
+Portrait = false
+CardSize = Vector2(84, 114)
+HandCardSize = Vector2(91, 124)
+ConfirmCopiesAction = false
+Canvas = NodePath("Canvas")
+Background = NodePath("Background")
+P2Side = NodePath("Canvas/P2Side")
+SetInfoLabel = NodePath("Canvas/InfoColumn/SetInfoLabel")
+TargetLabel = NodePath("Canvas/InfoColumn/TargetLabel")
+Deck = NodePath("Canvas/Deck")
+DeckFootprint = NodePath("Canvas/Deck")
+MenuButton = NodePath("Canvas/MenuButton")
+EffectToast = NodePath("Canvas/EffectToast")
+EffectLabel = NodePath("Canvas/EffectToast/EffectLabel")
+P1ScoreBox = NodePath("Canvas/P1Side/ScoreBox")
+P1ScorePrefix = NodePath("Canvas/P1Side/ScoreBox/ScoreLines/YouRow/YouPrefix")
+P1ScoreValue = NodePath("Canvas/P1Side/ScoreBox/ScoreLines/YouRow/YouValue")
+P1ScoreThem = NodePath("Canvas/P1Side/ScoreBox/ScoreLines/Them")
+P1OpponentBox = NodePath("Canvas/P1Side/OpponentBox")
+P1OpponentScore = NodePath("Canvas/P1Side/OpponentBox/OpponentScore")
+P1WinsRow = NodePath("Canvas/P1Side/WinsRow")
+P1WinsLabel = NodePath("Canvas/P1Side/WinsRow/WinsLabel")
+P1Chips = NodePath("Canvas/P1Side/WinsRow/Chips")
+P1Board = NodePath("Canvas/P1Side/Board")
+P1Hand = NodePath("Canvas/P1Side/Hand")
+P1ButtonSlot = NodePath("Canvas/P1Side/ButtonSlot")
+P1ActionRow = NodePath("Canvas/P1Side/ButtonSlot/ActionRow")
+P1DrawCard = NodePath("Canvas/P1Side/ButtonSlot/ActionRow/DrawCard")
+P1Hold = NodePath("Canvas/P1Side/ButtonSlot/ActionRow/Hold")
+P1ConfirmRow = NodePath("Canvas/P1Side/ButtonSlot/ConfirmRow")
+P1Play = NodePath("Canvas/P1Side/ButtonSlot/ConfirmRow/Play")
+P1PutBack = NodePath("Canvas/P1Side/ButtonSlot/ConfirmRow/PutBack")
+P1FlipValue = NodePath("Canvas/P1Side/ButtonSlot/ConfirmRow/FlipValue")
+P2ScoreBox = NodePath("Canvas/P2Side/ScoreBox")
+P2ScorePrefix = NodePath("Canvas/P2Side/ScoreBox/ScoreLines/YouRow/YouPrefix")
+P2ScoreValue = NodePath("Canvas/P2Side/ScoreBox/ScoreLines/YouRow/YouValue")
+P2ScoreThem = NodePath("Canvas/P2Side/ScoreBox/ScoreLines/Them")
+P2OpponentBox = NodePath("Canvas/P2Side/OpponentBox")
+P2OpponentScore = NodePath("Canvas/P2Side/OpponentBox/OpponentScore")
+P2WinsRow = NodePath("Canvas/P2Side/WinsRow")
+P2WinsLabel = NodePath("Canvas/P2Side/WinsRow/WinsLabel")
+P2Chips = NodePath("Canvas/P2Side/WinsRow/Chips")
+P2Board = NodePath("Canvas/P2Side/Board")
+P2Hand = NodePath("Canvas/P2Side/Hand")
+P2ButtonSlot = NodePath("Canvas/P2Side/ButtonSlot")
+P2ActionRow = NodePath("Canvas/P2Side/ButtonSlot/ActionRow")
+P2DrawCard = NodePath("Canvas/P2Side/ButtonSlot/ActionRow/DrawCard")
+P2Hold = NodePath("Canvas/P2Side/ButtonSlot/ActionRow/Hold")
+P2ConfirmRow = NodePath("Canvas/P2Side/ButtonSlot/ConfirmRow")
+P2Play = NodePath("Canvas/P2Side/ButtonSlot/ConfirmRow/Play")
+P2PutBack = NodePath("Canvas/P2Side/ButtonSlot/ConfirmRow/PutBack")
+P2FlipValue = NodePath("Canvas/P2Side/ButtonSlot/ConfirmRow/FlipValue")
+
+[node name="Background" type="TextureRect" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+texture = ExtResource("tex_mat")
+expand_mode = 1
+stretch_mode = 6
+
+[node name="Canvas" type="Control" parent="."]
+layout_mode = 1
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -780.0
+offset_top = -360.0
+offset_right = 780.0
+offset_bottom = 360.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+
+[node name="P1Side" type="Control" parent="Canvas"]
+layout_mode = 0
+offset_left = 20.0
+offset_top = 46.0
+offset_right = 668.0
+offset_bottom = 674.0
+mouse_filter = 2
+
+[node name="Board" type="GridContainer" parent="Canvas/P1Side"]
+script = ExtResource("script_persp")
+layout_mode = 0
+offset_left = 50.0
+offset_top = 0.0
+offset_right = 343.0
+offset_bottom = 392.0
+mouse_filter = 2
+theme_override_constants/h_separation = 10
+theme_override_constants/v_separation = 10
+columns = 3
+
+[node name="Slot1" type="Panel" parent="Canvas/P1Side/Board"]
+layout_mode = 2
+custom_minimum_size = Vector2(91, 124)
+mouse_filter = 2
+theme_override_styles/panel = SubResource("slot_style")
+
+[node name="PreviewCard" type="TextureRect" parent="Canvas/P1Side/Board/Slot1" groups=["editor_preview"]]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+texture = ExtResource("tex_main")
+expand_mode = 1
+stretch_mode = 5
+
+[node name="Label" type="Label" parent="Canvas/P1Side/Board/Slot1/PreviewCard"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+theme_override_colors/font_color = Color(0.12, 0.42, 0.27, 1)
+theme_override_colors/font_shadow_color = Color(0, 0, 0, 0)
+theme_override_font_sizes/font_size = 54
+text = "3"
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="Slot2" type="Panel" parent="Canvas/P1Side/Board"]
+layout_mode = 2
+custom_minimum_size = Vector2(91, 124)
+mouse_filter = 2
+theme_override_styles/panel = SubResource("slot_style")
+
+[node name="PreviewCard" type="TextureRect" parent="Canvas/P1Side/Board/Slot2" groups=["editor_preview"]]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+texture = ExtResource("tex_main")
+expand_mode = 1
+stretch_mode = 5
+
+[node name="Label" type="Label" parent="Canvas/P1Side/Board/Slot2/PreviewCard"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+theme_override_colors/font_color = Color(0.12, 0.42, 0.27, 1)
+theme_override_colors/font_shadow_color = Color(0, 0, 0, 0)
+theme_override_font_sizes/font_size = 54
+text = "8"
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="Slot3" type="Panel" parent="Canvas/P1Side/Board"]
+layout_mode = 2
+custom_minimum_size = Vector2(91, 124)
+mouse_filter = 2
+theme_override_styles/panel = SubResource("slot_style")
+
+[node name="Slot4" type="Panel" parent="Canvas/P1Side/Board"]
+layout_mode = 2
+custom_minimum_size = Vector2(91, 124)
+mouse_filter = 2
+theme_override_styles/panel = SubResource("slot_style")
+
+[node name="Slot5" type="Panel" parent="Canvas/P1Side/Board"]
+layout_mode = 2
+custom_minimum_size = Vector2(91, 124)
+mouse_filter = 2
+theme_override_styles/panel = SubResource("slot_style")
+
+[node name="Slot6" type="Panel" parent="Canvas/P1Side/Board"]
+layout_mode = 2
+custom_minimum_size = Vector2(91, 124)
+mouse_filter = 2
+theme_override_styles/panel = SubResource("slot_style")
+
+[node name="Slot7" type="Panel" parent="Canvas/P1Side/Board"]
+layout_mode = 2
+custom_minimum_size = Vector2(91, 124)
+mouse_filter = 2
+theme_override_styles/panel = SubResource("slot_style")
+
+[node name="Slot8" type="Panel" parent="Canvas/P1Side/Board"]
+layout_mode = 2
+custom_minimum_size = Vector2(91, 124)
+mouse_filter = 2
+theme_override_styles/panel = SubResource("slot_style")
+
+[node name="Slot9" type="Panel" parent="Canvas/P1Side/Board"]
+layout_mode = 2
+custom_minimum_size = Vector2(91, 124)
+mouse_filter = 2
+theme_override_styles/panel = SubResource("slot_style")
+
+[node name="Hand" type="HBoxContainer" parent="Canvas/P1Side"]
+layout_mode = 0
+offset_left = 0.0
+offset_top = 406.0
+offset_right = 394.0
+offset_bottom = 530.0
+mouse_filter = 2
+theme_override_constants/separation = 10
+alignment = 1
+
+[node name="PreviewCard1" type="TextureRect" parent="Canvas/P1Side/Hand" groups=["editor_preview"]]
+layout_mode = 2
+custom_minimum_size = Vector2(91, 124)
+mouse_filter = 2
+texture = ExtResource("tex_minus")
+expand_mode = 1
+stretch_mode = 5
+
+[node name="Label" type="Label" parent="Canvas/P1Side/Hand/PreviewCard1"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+theme_override_colors/font_color = Color(0.68, 0.17, 0.22, 1)
+theme_override_colors/font_shadow_color = Color(0, 0, 0, 0)
+theme_override_font_sizes/font_size = 76
+text = "-3"
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="PreviewCard2" type="TextureRect" parent="Canvas/P1Side/Hand" groups=["editor_preview"]]
+layout_mode = 2
+custom_minimum_size = Vector2(91, 124)
+mouse_filter = 2
+texture = ExtResource("tex_plus")
+expand_mode = 1
+stretch_mode = 5
+
+[node name="Label" type="Label" parent="Canvas/P1Side/Hand/PreviewCard2"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+theme_override_colors/font_color = Color(0.13, 0.33, 0.66, 1)
+theme_override_colors/font_shadow_color = Color(0, 0, 0, 0)
+theme_override_font_sizes/font_size = 76
+text = "+4"
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="PreviewCard3" type="TextureRect" parent="Canvas/P1Side/Hand" groups=["editor_preview"]]
+layout_mode = 2
+custom_minimum_size = Vector2(91, 124)
+mouse_filter = 2
+texture = ExtResource("tex_plus")
+expand_mode = 1
+stretch_mode = 5
+
+[node name="Label" type="Label" parent="Canvas/P1Side/Hand/PreviewCard3"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+theme_override_colors/font_color = Color(0.13, 0.33, 0.66, 1)
+theme_override_colors/font_shadow_color = Color(0, 0, 0, 0)
+theme_override_font_sizes/font_size = 76
+text = "+1"
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="PreviewCard4" type="TextureRect" parent="Canvas/P1Side/Hand" groups=["editor_preview"]]
+layout_mode = 2
+custom_minimum_size = Vector2(91, 124)
+mouse_filter = 2
+texture = ExtResource("tex_minus")
+expand_mode = 1
+stretch_mode = 5
+
+[node name="Label" type="Label" parent="Canvas/P1Side/Hand/PreviewCard4"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+theme_override_colors/font_color = Color(0.68, 0.17, 0.22, 1)
+theme_override_colors/font_shadow_color = Color(0, 0, 0, 0)
+theme_override_font_sizes/font_size = 76
+text = "-2"
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="WinsRow" type="HBoxContainer" parent="Canvas/P1Side"]
+layout_mode = 0
+offset_left = 408.0
+offset_top = 0.0
+offset_right = 648.0
+offset_bottom = 40.0
+mouse_filter = 2
+theme_override_constants/separation = 8
+
+[node name="WinsLabel" type="Label" parent="Canvas/P1Side/WinsRow"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 22
+text = "Wins:"
+vertical_alignment = 1
+
+[node name="Chips" type="HBoxContainer" parent="Canvas/P1Side/WinsRow"]
+layout_mode = 2
+theme_override_constants/separation = 4
+
+[node name="Chip1" type="TextureRect" parent="Canvas/P1Side/WinsRow/Chips"]
+layout_mode = 2
+custom_minimum_size = Vector2(33, 33)
+size_flags_vertical = 4
+texture = ExtResource("tex_chip")
+expand_mode = 1
+stretch_mode = 5
+
+[node name="Chip2" type="TextureRect" parent="Canvas/P1Side/WinsRow/Chips"]
+layout_mode = 2
+custom_minimum_size = Vector2(33, 33)
+size_flags_vertical = 4
+texture = ExtResource("tex_chip")
+expand_mode = 1
+stretch_mode = 5
+
+[node name="Chip3" type="TextureRect" parent="Canvas/P1Side/WinsRow/Chips"]
+layout_mode = 2
+custom_minimum_size = Vector2(33, 33)
+size_flags_vertical = 4
+texture = ExtResource("tex_chip")
+expand_mode = 1
+stretch_mode = 5
+
+[node name="ScoreBox" type="PanelContainer" parent="Canvas/P1Side"]
+layout_mode = 0
+offset_left = 408.0
+offset_top = 54.0
+offset_right = 418.0
+offset_bottom = 64.0
+mouse_filter = 2
+theme_override_styles/panel = SubResource("score_box")
+
+[node name="ScoreLines" type="VBoxContainer" parent="Canvas/P1Side/ScoreBox"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/separation = 0
+
+[node name="YouRow" type="HBoxContainer" parent="Canvas/P1Side/ScoreBox/ScoreLines"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/separation = 0
+
+[node name="YouPrefix" type="Label" parent="Canvas/P1Side/ScoreBox/ScoreLines/YouRow"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 40
+text = "You  "
+
+[node name="YouValue" type="Label" parent="Canvas/P1Side/ScoreBox/ScoreLines/YouRow"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 40
+text = "11/20"
+
+[node name="Them" type="Label" parent="Canvas/P1Side/ScoreBox/ScoreLines"]
+layout_mode = 2
+visible = false
+theme_override_font_sizes/font_size = 40
+text = "Them: 8"
+
+[node name="OpponentBox" type="PanelContainer" parent="Canvas/P1Side"]
+layout_mode = 0
+offset_left = 408.0
+offset_top = 136.0
+offset_right = 418.0
+offset_bottom = 146.0
+mouse_filter = 2
+theme_override_styles/panel = SubResource("score_box")
+
+[node name="OpponentScore" type="Label" parent="Canvas/P1Side/OpponentBox"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 40
+text = "Them  14"
+
+[node name="ButtonSlot" type="Control" parent="Canvas/P1Side"]
+layout_mode = 0
+offset_left = 0.0
+offset_top = 542.0
+offset_right = 648.0
+offset_bottom = 628.0
+mouse_filter = 2
+
+[node name="ActionRow" type="Control" parent="Canvas/P1Side/ButtonSlot"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+
+[node name="ConfirmRow" type="Control" parent="Canvas/P1Side/ButtonSlot"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+visible = false
+mouse_filter = 2
+
+[node name="DrawCard" type="Button" parent="Canvas/P1Side/ButtonSlot/ActionRow"]
+layout_mode = 0
+offset_left = 0.0
+offset_top = 0.0
+offset_right = 318.0
+offset_bottom = 86.0
+theme_override_font_sizes/font_size = 30
+text = "Draw Card"
+
+[node name="Hold" type="Button" parent="Canvas/P1Side/ButtonSlot/ActionRow"]
+layout_mode = 0
+offset_left = 330.0
+offset_top = 0.0
+offset_right = 648.0
+offset_bottom = 86.0
+theme_override_font_sizes/font_size = 30
+text = "Hold"
+
+[node name="Play" type="Button" parent="Canvas/P1Side/ButtonSlot/ConfirmRow"]
+layout_mode = 0
+offset_left = 0.0
+offset_top = 0.0
+offset_right = 208.0
+offset_bottom = 86.0
+theme_override_font_sizes/font_size = 30
+text = "Play"
+
+[node name="PutBack" type="Button" parent="Canvas/P1Side/ButtonSlot/ConfirmRow"]
+layout_mode = 0
+offset_left = 220.0
+offset_top = 0.0
+offset_right = 428.0
+offset_bottom = 86.0
+theme_override_font_sizes/font_size = 30
+text = "Put back"
+
+[node name="FlipValue" type="Button" parent="Canvas/P1Side/ButtonSlot/ConfirmRow"]
+layout_mode = 0
+offset_left = 440.0
+offset_top = 0.0
+offset_right = 648.0
+offset_bottom = 86.0
+theme_override_font_sizes/font_size = 30
+text = "Flip Value"
+
+[node name="InfoColumn" type="VBoxContainer" parent="Canvas"]
+layout_mode = 0
+offset_left = 688.0
+offset_top = 150.0
+offset_right = 872.0
+offset_bottom = 250.0
+grow_vertical = 0
+mouse_filter = 2
+theme_override_constants/separation = 2
+alignment = 2
+
+[node name="SetInfoLabel" type="Label" parent="Canvas/InfoColumn"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 24
+text = "Stage 3/10 - Silver"
+horizontal_alignment = 1
+autowrap_mode = 3
+
+[node name="TargetLabel" type="Label" parent="Canvas/InfoColumn"]
+layout_mode = 2
+visible = false
+theme_override_colors/font_color = Color(1, 0.85, 0.35, 1)
+theme_override_font_sizes/font_size = 32
+text = "TARGET  23   (up from 20)"
+horizontal_alignment = 1
+autowrap_mode = 3
+
+[node name="Deck" type="TextureRect" parent="Canvas"]
+layout_mode = 0
+offset_left = 735.0
+offset_top = 270.0
+offset_right = 826.0
+offset_bottom = 394.0
+mouse_filter = 2
+texture = ExtResource("tex_back")
+expand_mode = 1
+stretch_mode = 5
+
+[node name="MenuButton" type="Button" parent="Canvas"]
+layout_mode = 0
+offset_left = 742.0
+offset_top = 414.0
+offset_right = 818.0
+offset_bottom = 490.0
+tooltip_text = "Menu"
+focus_mode = 0
+theme_override_styles/normal = SubResource("menu_normal")
+theme_override_styles/hover = SubResource("menu_hover")
+theme_override_styles/pressed = SubResource("menu_pressed")
+theme_override_styles/hover_pressed = SubResource("menu_pressed")
+theme_override_styles/focus = SubResource("menu_focus")
+
+[node name="Center" type="CenterContainer" parent="Canvas/MenuButton"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+
+[node name="Bars" type="VBoxContainer" parent="Canvas/MenuButton/Center"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/separation = 7
+
+[node name="Bar1" type="ColorRect" parent="Canvas/MenuButton/Center/Bars"]
+layout_mode = 2
+custom_minimum_size = Vector2(34, 5)
+mouse_filter = 2
+color = Color(0.17, 0.21, 0.29, 1)
+
+[node name="Bar2" type="ColorRect" parent="Canvas/MenuButton/Center/Bars"]
+layout_mode = 2
+custom_minimum_size = Vector2(34, 5)
+mouse_filter = 2
+color = Color(0.17, 0.21, 0.29, 1)
+
+[node name="Bar3" type="ColorRect" parent="Canvas/MenuButton/Center/Bars"]
+layout_mode = 2
+custom_minimum_size = Vector2(34, 5)
+mouse_filter = 2
+color = Color(0.17, 0.21, 0.29, 1)
+
+[node name="EffectToast" type="PanelContainer" parent="Canvas"]
+layout_mode = 0
+offset_left = 0.0
+offset_top = 0.0
+offset_right = 560.0
+offset_bottom = 60.0
+visible = false
+top_level = true
+z_index = 20
+mouse_filter = 2
+theme_override_styles/panel = SubResource("toast_style")
+
+[node name="EffectLabel" type="Label" parent="Canvas/EffectToast"]
+layout_mode = 2
+custom_minimum_size = Vector2(520, 0)
+theme_override_colors/font_color = Color(0.86, 0.74, 1, 1)
+theme_override_font_sizes/font_size = 24
+text = "Copy: your drawn card became a 7."
+horizontal_alignment = 1
+autowrap_mode = 3
+
+[node name="P2Side" type="Control" parent="Canvas"]
+layout_mode = 0
+offset_left = 892.0
+offset_top = 46.0
+offset_right = 1540.0
+offset_bottom = 674.0
+mouse_filter = 2
+
+[node name="Board" type="GridContainer" parent="Canvas/P2Side"]
+script = ExtResource("script_persp")
+layout_mode = 0
+offset_left = 304.0
+offset_top = 0.0
+offset_right = 597.0
+offset_bottom = 392.0
+mouse_filter = 2
+theme_override_constants/h_separation = 10
+theme_override_constants/v_separation = 10
+columns = 3
+
+[node name="Slot1" type="Panel" parent="Canvas/P2Side/Board"]
+layout_mode = 2
+custom_minimum_size = Vector2(91, 124)
+mouse_filter = 2
+theme_override_styles/panel = SubResource("slot_style")
+
+[node name="PreviewCard" type="TextureRect" parent="Canvas/P2Side/Board/Slot1" groups=["editor_preview"]]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+texture = ExtResource("tex_main")
+expand_mode = 1
+stretch_mode = 5
+
+[node name="Label" type="Label" parent="Canvas/P2Side/Board/Slot1/PreviewCard"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+theme_override_colors/font_color = Color(0.12, 0.42, 0.27, 1)
+theme_override_colors/font_shadow_color = Color(0, 0, 0, 0)
+theme_override_font_sizes/font_size = 54
+text = "10"
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="Slot2" type="Panel" parent="Canvas/P2Side/Board"]
+layout_mode = 2
+custom_minimum_size = Vector2(91, 124)
+mouse_filter = 2
+theme_override_styles/panel = SubResource("slot_style")
+
+[node name="PreviewCard" type="TextureRect" parent="Canvas/P2Side/Board/Slot2" groups=["editor_preview"]]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+texture = ExtResource("tex_main")
+expand_mode = 1
+stretch_mode = 5
+
+[node name="Label" type="Label" parent="Canvas/P2Side/Board/Slot2/PreviewCard"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+theme_override_colors/font_color = Color(0.12, 0.42, 0.27, 1)
+theme_override_colors/font_shadow_color = Color(0, 0, 0, 0)
+theme_override_font_sizes/font_size = 54
+text = "4"
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="Slot3" type="Panel" parent="Canvas/P2Side/Board"]
+layout_mode = 2
+custom_minimum_size = Vector2(91, 124)
+mouse_filter = 2
+theme_override_styles/panel = SubResource("slot_style")
+
+[node name="Slot4" type="Panel" parent="Canvas/P2Side/Board"]
+layout_mode = 2
+custom_minimum_size = Vector2(91, 124)
+mouse_filter = 2
+theme_override_styles/panel = SubResource("slot_style")
+
+[node name="Slot5" type="Panel" parent="Canvas/P2Side/Board"]
+layout_mode = 2
+custom_minimum_size = Vector2(91, 124)
+mouse_filter = 2
+theme_override_styles/panel = SubResource("slot_style")
+
+[node name="Slot6" type="Panel" parent="Canvas/P2Side/Board"]
+layout_mode = 2
+custom_minimum_size = Vector2(91, 124)
+mouse_filter = 2
+theme_override_styles/panel = SubResource("slot_style")
+
+[node name="Slot7" type="Panel" parent="Canvas/P2Side/Board"]
+layout_mode = 2
+custom_minimum_size = Vector2(91, 124)
+mouse_filter = 2
+theme_override_styles/panel = SubResource("slot_style")
+
+[node name="Slot8" type="Panel" parent="Canvas/P2Side/Board"]
+layout_mode = 2
+custom_minimum_size = Vector2(91, 124)
+mouse_filter = 2
+theme_override_styles/panel = SubResource("slot_style")
+
+[node name="Slot9" type="Panel" parent="Canvas/P2Side/Board"]
+layout_mode = 2
+custom_minimum_size = Vector2(91, 124)
+mouse_filter = 2
+theme_override_styles/panel = SubResource("slot_style")
+
+[node name="Hand" type="HBoxContainer" parent="Canvas/P2Side"]
+layout_mode = 0
+offset_left = 254.0
+offset_top = 406.0
+offset_right = 648.0
+offset_bottom = 530.0
+mouse_filter = 2
+theme_override_constants/separation = 10
+alignment = 1
+
+[node name="PreviewCard1" type="TextureRect" parent="Canvas/P2Side/Hand" groups=["editor_preview"]]
+layout_mode = 2
+custom_minimum_size = Vector2(91, 124)
+mouse_filter = 2
+texture = ExtResource("tex_plus")
+expand_mode = 1
+stretch_mode = 5
+
+[node name="Label" type="Label" parent="Canvas/P2Side/Hand/PreviewCard1"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+theme_override_colors/font_color = Color(0.13, 0.33, 0.66, 1)
+theme_override_colors/font_shadow_color = Color(0, 0, 0, 0)
+theme_override_font_sizes/font_size = 76
+text = "+2"
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="PreviewCard2" type="TextureRect" parent="Canvas/P2Side/Hand" groups=["editor_preview"]]
+layout_mode = 2
+custom_minimum_size = Vector2(91, 124)
+mouse_filter = 2
+texture = ExtResource("tex_minus")
+expand_mode = 1
+stretch_mode = 5
+
+[node name="Label" type="Label" parent="Canvas/P2Side/Hand/PreviewCard2"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+theme_override_colors/font_color = Color(0.68, 0.17, 0.22, 1)
+theme_override_colors/font_shadow_color = Color(0, 0, 0, 0)
+theme_override_font_sizes/font_size = 76
+text = "-1"
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="PreviewCard3" type="TextureRect" parent="Canvas/P2Side/Hand" groups=["editor_preview"]]
+layout_mode = 2
+custom_minimum_size = Vector2(91, 124)
+mouse_filter = 2
+texture = ExtResource("tex_plus")
+expand_mode = 1
+stretch_mode = 5
+
+[node name="Label" type="Label" parent="Canvas/P2Side/Hand/PreviewCard3"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+theme_override_colors/font_color = Color(0.13, 0.33, 0.66, 1)
+theme_override_colors/font_shadow_color = Color(0, 0, 0, 0)
+theme_override_font_sizes/font_size = 76
+text = "+3"
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="PreviewCard4" type="TextureRect" parent="Canvas/P2Side/Hand" groups=["editor_preview"]]
+layout_mode = 2
+custom_minimum_size = Vector2(91, 124)
+mouse_filter = 2
+texture = ExtResource("tex_minus")
+expand_mode = 1
+stretch_mode = 5
+
+[node name="Label" type="Label" parent="Canvas/P2Side/Hand/PreviewCard4"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+theme_override_colors/font_color = Color(0.68, 0.17, 0.22, 1)
+theme_override_colors/font_shadow_color = Color(0, 0, 0, 0)
+theme_override_font_sizes/font_size = 76
+text = "-4"
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="WinsRow" type="HBoxContainer" parent="Canvas/P2Side"]
+layout_mode = 0
+offset_left = 0.0
+offset_top = 0.0
+offset_right = 240.0
+offset_bottom = 40.0
+mouse_filter = 2
+theme_override_constants/separation = 8
+
+[node name="WinsLabel" type="Label" parent="Canvas/P2Side/WinsRow"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 22
+text = "Wins:"
+vertical_alignment = 1
+
+[node name="Chips" type="HBoxContainer" parent="Canvas/P2Side/WinsRow"]
+layout_mode = 2
+theme_override_constants/separation = 4
+
+[node name="Chip1" type="TextureRect" parent="Canvas/P2Side/WinsRow/Chips"]
+layout_mode = 2
+custom_minimum_size = Vector2(33, 33)
+size_flags_vertical = 4
+texture = ExtResource("tex_chip")
+expand_mode = 1
+stretch_mode = 5
+
+[node name="Chip2" type="TextureRect" parent="Canvas/P2Side/WinsRow/Chips"]
+layout_mode = 2
+custom_minimum_size = Vector2(33, 33)
+size_flags_vertical = 4
+texture = ExtResource("tex_chip")
+expand_mode = 1
+stretch_mode = 5
+
+[node name="Chip3" type="TextureRect" parent="Canvas/P2Side/WinsRow/Chips"]
+layout_mode = 2
+custom_minimum_size = Vector2(33, 33)
+size_flags_vertical = 4
+texture = ExtResource("tex_chip")
+expand_mode = 1
+stretch_mode = 5
+
+[node name="ScoreBox" type="PanelContainer" parent="Canvas/P2Side"]
+layout_mode = 0
+offset_left = 0.0
+offset_top = 54.0
+offset_right = 10.0
+offset_bottom = 64.0
+mouse_filter = 2
+theme_override_styles/panel = SubResource("score_box")
+
+[node name="ScoreLines" type="VBoxContainer" parent="Canvas/P2Side/ScoreBox"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/separation = 0
+
+[node name="YouRow" type="HBoxContainer" parent="Canvas/P2Side/ScoreBox/ScoreLines"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/separation = 0
+
+[node name="YouPrefix" type="Label" parent="Canvas/P2Side/ScoreBox/ScoreLines/YouRow"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 40
+text = "Them  "
+
+[node name="YouValue" type="Label" parent="Canvas/P2Side/ScoreBox/ScoreLines/YouRow"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 40
+text = "14"
+
+[node name="Them" type="Label" parent="Canvas/P2Side/ScoreBox/ScoreLines"]
+layout_mode = 2
+visible = false
+theme_override_font_sizes/font_size = 40
+text = "Them: 8"
+
+[node name="OpponentBox" type="PanelContainer" parent="Canvas/P2Side"]
+layout_mode = 0
+offset_left = 0.0
+offset_top = 136.0
+offset_right = 10.0
+offset_bottom = 146.0
+mouse_filter = 2
+theme_override_styles/panel = SubResource("score_box")
+
+[node name="OpponentScore" type="Label" parent="Canvas/P2Side/OpponentBox"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 40
+text = "P1  11"
+
+[node name="ButtonSlot" type="Control" parent="Canvas/P2Side"]
+layout_mode = 0
+offset_left = 0.0
+offset_top = 542.0
+offset_right = 648.0
+offset_bottom = 628.0
+mouse_filter = 2
+
+[node name="ActionRow" type="Control" parent="Canvas/P2Side/ButtonSlot"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+
+[node name="ConfirmRow" type="Control" parent="Canvas/P2Side/ButtonSlot"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+visible = false
+mouse_filter = 2
+
+[node name="DrawCard" type="Button" parent="Canvas/P2Side/ButtonSlot/ActionRow"]
+layout_mode = 0
+offset_left = 0.0
+offset_top = 0.0
+offset_right = 318.0
+offset_bottom = 86.0
+theme_override_font_sizes/font_size = 30
+text = "Draw Card"
+
+[node name="Hold" type="Button" parent="Canvas/P2Side/ButtonSlot/ActionRow"]
+layout_mode = 0
+offset_left = 330.0
+offset_top = 0.0
+offset_right = 648.0
+offset_bottom = 86.0
+theme_override_font_sizes/font_size = 30
+text = "Hold"
+
+[node name="Play" type="Button" parent="Canvas/P2Side/ButtonSlot/ConfirmRow"]
+layout_mode = 0
+offset_left = 0.0
+offset_top = 0.0
+offset_right = 208.0
+offset_bottom = 86.0
+theme_override_font_sizes/font_size = 30
+text = "Play"
+
+[node name="PutBack" type="Button" parent="Canvas/P2Side/ButtonSlot/ConfirmRow"]
+layout_mode = 0
+offset_left = 220.0
+offset_top = 0.0
+offset_right = 428.0
+offset_bottom = 86.0
+theme_override_font_sizes/font_size = 30
+text = "Put back"
+
+[node name="FlipValue" type="Button" parent="Canvas/P2Side/ButtonSlot/ConfirmRow"]
+layout_mode = 0
+offset_left = 440.0
+offset_top = 0.0
+offset_right = 648.0
+offset_bottom = 86.0
+theme_override_font_sizes/font_size = 30
+text = "Flip Value"

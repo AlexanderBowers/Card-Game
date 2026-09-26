@@ -51,52 +51,38 @@ public interface ITableUiHost
     /// spotlight - has to be placed again.
     void LayoutChanged();
 
+    /// A new layout scene has just been put up (first load, or a rotation swapped it). Anything
+    /// the game hangs on the layout itself - the debug buttons - goes on again here.
+    void LayoutBound(TableLayout layout);
+
+    void DrawCardPressed(Player player);
+    void HoldPressed(Player player);
     void ModifierPressed(Player player, Card card);
     void PlayPressed(Player player);
     void PutBackPressed(Player player);
     void FlipValuePressed(Player player);
-
-    /// The Menu button on the table. Menus are their own concern; the table only makes room.
-    void BuildTableMenu();
+    void MenuPressed();
 }
 
-/// Everything the live table LOOKS like: the responsive layout and the fit that sizes it, the two
-/// 3x3 boards, the card art and faces, the flight a drawn card makes, the score lines, the chips,
-/// the typography and the one refresh that pushes the game's state onto all of it.
+/// Everything the live table LOOKS like - painted into a layout SCENE (pass 34).
+///
+/// Until pass 33 this class also BUILT the table: it took two plain scenes and re-arranged,
+/// re-parented, re-sized and re-styled their nodes in code for whichever orientation the phone was
+/// in, which is why neither scene looked like the game when opened in the editor. That is gone.
+/// There are now two layout scenes, table_landscape.tscn and table_portrait.tscn, each laid out
+/// by hand in the editor exactly as it appears (see TableLayout.cs). This class:
+///  - puts up the one that fits the screen, and swaps it on a rotation (the match carries on -
+///    the boards are redrawn from the players' cards, everything else from the next Refresh);
+///  - scales the whole UI so the layout fills the screen (FitToWindow);
+///  - and paints the game onto it: cards, scores, chips, which buttons are live.
 ///
 /// The line against Table.cs, in the other direction: Table knows where the cards are, TableUi
 /// knows what they look like. Nothing in here decides anything - no score changes, no card is
 /// spent, no turn ends. Presses go out through ITableUiHost and come back as new state to draw.
 public sealed class TableUi
 {
-    /// The scene nodes the table paints into. GameManager keeps the [Export]s - the scene wires
-    /// those - and hands them over once, here, so the 1,700 lines below can say _p1BoardContainer
-    /// rather than _host.P1BoardContainer fifty times over.
-    public sealed class Nodes
-    {
-        public BoxContainer MainLayout;
-        public Control P1BoardContainer;
-        public Control P2BoardContainer;
-        public Control P1ModifierContainer;
-        public Control P2ModifierContainer;
-        public Label P1ScoreLabel;
-        public Label P2ScoreLabel;
-        public Label P1StatusLabel;
-        public Label P2StatusLabel;
-        public Label P1WinsLabel;
-        public Label P2WinsLabel;
-        public Control P2Rotator;
-        public Button P1DrawCardButton;
-        public Button P1HoldButton;
-        public Button P2DrawCardButton;
-        public Button P2HoldButton;
-        public Button DrawCardButton;
-        public Button HoldButton;
-        public Label SetInfoLabel;
-        public Control MainDeckPosition;
-        public CheckButton MirrorToggle;
-        public OptionButton GameModeButton;
-    }
+    public const string LandscapeScenePath = "res://table_landscape.tscn";
+    public const string PortraitScenePath = "res://table_portrait.tscn";
 
     private readonly ITableUiHost _host;
 
@@ -105,61 +91,28 @@ public sealed class TableUi
     /// frame. It is never asked a question about the game - that is what _host is for.
     private readonly Node _root;
 
-    private readonly Control _p1BoardContainer;
-    private readonly Control _p2BoardContainer;
-    private readonly Control _p1ModifierContainer;
-    private readonly Control _p2ModifierContainer;
-    private readonly Label _p1ScoreLabel;
-    private readonly Label _p2ScoreLabel;
-    private readonly Label _p1StatusLabel;
-    private readonly Label _p2StatusLabel;
-    private readonly Label _p1WinsLabel;
-    private readonly Label _p2WinsLabel;
-    private readonly Control _p2Rotator;
-    private readonly Button _p1DrawCardButton;
-    private readonly Button _p1HoldButton;
-    private readonly Button _p2DrawCardButton;
-    private readonly Button _p2HoldButton;
-    private readonly Button _drawCardButton;
-    private readonly Button _holdButton;
-    private readonly Label _setInfoLabel;
-    private readonly Control _mainDeckPosition;
+    /// Where the layout scene is instanced (table_scene.tscn's LayoutHost).
+    private readonly Control _layoutHost;
+
+    /// The face-to-face toggle. It lives in the table menu; the layout only reads it.
     private readonly CheckButton _mirrorToggle;
-    private readonly OptionButton _gameModeButton;
 
     private readonly PackedScene _cardViewScene = GD.Load<PackedScene>("res://CardView.tscn");
 
-    public TableUi(ITableUiHost host, Node root, Nodes nodes)
+    private PackedScene _landscapeScene;
+    private PackedScene _portraitScene;
+
+    /// The layout on screen now. Null only before the first ApplyResponsiveLayout.
+    private TableLayout L;
+
+    public TableLayout Layout => L;
+
+    public TableUi(ITableUiHost host, Node root, Control layoutHost, CheckButton mirrorToggle)
     {
         _host = host;
         _root = root;
-        _p1BoardContainer = nodes.P1BoardContainer;
-        _p2BoardContainer = nodes.P2BoardContainer;
-        _p1ModifierContainer = nodes.P1ModifierContainer;
-        _p2ModifierContainer = nodes.P2ModifierContainer;
-        _p1ScoreLabel = nodes.P1ScoreLabel;
-        _p2ScoreLabel = nodes.P2ScoreLabel;
-        _p1StatusLabel = nodes.P1StatusLabel;
-        _p2StatusLabel = nodes.P2StatusLabel;
-        _p1WinsLabel = nodes.P1WinsLabel;
-        _p2WinsLabel = nodes.P2WinsLabel;
-        _p2Rotator = nodes.P2Rotator;
-        _p1DrawCardButton = nodes.P1DrawCardButton;
-        _p1HoldButton = nodes.P1HoldButton;
-        _p2DrawCardButton = nodes.P2DrawCardButton;
-        _p2HoldButton = nodes.P2HoldButton;
-        _drawCardButton = nodes.DrawCardButton;
-        _holdButton = nodes.HoldButton;
-        _setInfoLabel = nodes.SetInfoLabel;
-        _mainDeckPosition = nodes.MainDeckPosition;
-        _mirrorToggle = nodes.MirrorToggle;
-        _gameModeButton = nodes.GameModeButton;
-
-        _mainLayout = nodes.MainLayout;
-
-        // Pass 31: Draw Card is the table's one accent - the thing you do next, most turns.
-        foreach (Button draw in new[] { _p1DrawCardButton, _p2DrawCardButton, _drawCardButton })
-            if (draw != null) OverlayUi.StyleButton(draw, primary: true);
+        _layoutHost = layoutHost;
+        _mirrorToggle = mirrorToggle;
 
         _faceMain = GD.Load<Texture2D>(ArtDir + "card_main.png");
         _facePlus = GD.Load<Texture2D>(ArtDir + "card_plus.png");
@@ -167,141 +120,74 @@ public sealed class TableUi
         _faceFlip = GD.Load<Texture2D>(ArtDir + "card_flip.png");
         _faceEffect = GD.Load<Texture2D>(ArtDir + "card_foil.png");
         _cardBack = GD.Load<Texture2D>(ArtDir + "card_back.png");
-        _playmatLandscape = GD.Load<Texture2D>(ArtDir + "playmat_landscape.png");
-        _playmatPortrait = GD.Load<Texture2D>(ArtDir + "playmat_portrait.png");
-        _playmat = _root.GetNodeOrNull<TextureRect>("Background");
-        if (_playmat != null)
-        {
-            // Cover, not fit: the mat is cropped at the edges rather than letterboxed, whatever
-            // the phone's aspect. Its border line sits well inside the image for exactly this.
-            _playmat.ExpandMode = TextureRect.ExpandModeEnum.IgnoreSize;
-            _playmat.StretchMode = TextureRect.StretchModeEnum.KeepAspectCovered;
-            _playmat.MouseFilter = Control.MouseFilterEnum.Ignore;
-        }
         _chipWon = GD.Load<Texture2D>(ArtDir + "ui/chip_won.png");
         _chipEmpty = GD.Load<Texture2D>(ArtDir + "ui/chip_empty.png");
         _sfxSlide = CreateSfx("res://assets/kenney/sfx/cardSlide1.ogg");
         _sfxPlace = CreateSfx("res://assets/kenney/sfx/cardPlace1.ogg");
-
-        // Each side's Layout, cached NOW. ApplySideLayout moves the board into a row of its own in
-        // portrait, so "the board's parent" stops being the Layout after the first pass - reading
-        // it later would find the row and then reparent the row into itself.
-        _p1SideLayout = _p1BoardContainer?.GetParent() as Control;
-        _p2SideLayout = _p2BoardContainer?.GetParent() as Control;
-
-        // P2Rotator spins around its own centre, so keep the pivot there whatever size it ends up.
-        if (_p2Rotator != null) _p2Rotator.Resized += () => _p2Rotator.PivotOffset = _p2Rotator.Size / 2f;
     }
 
-    /// The two rows of poker chips, one per side. Their labels are the scene's; the chips are ours.
-    public void BuildWinChips()
-    {
-        _p1WinChips = EnsureWinChips(_p1WinsLabel);
-        _p2WinChips = EnsureWinChips(_p2WinsLabel);
-    }
-
-    /// Both status lines reserve their two lines up front, so a status appearing never moves the
-    /// board underneath it.
-    public void ConfigureStatusLabels()
-    {
-        ConfigureStatusLabel(_p1StatusLabel);
-        ConfigureStatusLabel(_p2StatusLabel);
-    }
-
-    /// The exported score Labels become the three-node ScoreLines each side actually shows.
-    /// After StyleTableForReadability, which is what moves the label into its final parent.
-    public void BuildScoreLines()
-    {
-        _p1Score = BuildScoreLines(_p1ScoreLabel);
-        _p2Score = BuildScoreLines(_p2ScoreLabel);
-    }
-
-    /// Three places outside the picture need to POINT at something in it: the tutorial's
-    /// spotlight and a coach mark's arrow. They get the node, never the right to change it.
-    public Control P1ScoreBlock => _p1Score?.Root;
-    public Control DeckFootprint => _deckHolder; // the turned deck's footprint in portrait
-    public Control P1ActionRow => _p1ActionRow;
-    public Control EffectBanner => _effectBanner;
+    // ------------------------------------------------------------------
+    // What other classes point at. The tutorial's spotlight and a coach mark's arrow get the
+    // node, never the right to change it. All of them follow the layout across a rotation.
+    // ------------------------------------------------------------------
+    public Control P1ScoreBlock => L?.P1ScoreBox;
+    public Control DeckFootprint => L?.DeckFootprint ?? L?.Deck;
+    public Control P1ActionRow => L?.P1ButtonSlot;
+    public Control P1Hand => L?.P1Hand;
+    public Control P1WinsRow => L?.P1WinsRow;
+    public Control EffectBanner => (Control)L?.EffectToast ?? L?.EffectLabel;
+    public Control P1Board => L?.P1Board;
+    public Control P2Board => L?.P2Board;
 
     /// The two sounds a press makes. They live here because the card animations play them too,
     /// and one owner of the two AudioStreamPlayers is one fewer thing to keep in step.
     public void SoundPlace() => _sfxPlace?.Play();
     public void SoundSlide() => _sfxSlide?.Play();
 
-    /// A call put off to the end of the frame.
-    ///
-    /// It used to be Node.CallDeferred on GameManager itself, which Godot simply drops if that
-    /// object has been freed in the meantime - and a Restart frees it. A plain Callable has no
-    /// such courtesy, so the check is made here instead; without it a deferred repaint could land
-    /// on a table that no longer exists.
+    /// A call put off to the end of the frame, and dropped if the table has gone away in between
+    /// (a Restart frees it; a plain Callable would still fire on the freed object).
     private void Defer(Action action) =>
         Callable.From(() => { if (GodotObject.IsInstanceValid(_root)) action(); }).CallDeferred();
 
-    /// A refresh at the end of the frame rather than now, and dropped if the table has gone away
-    /// in between. Callers used to get this free from Node.CallDeferred(MethodName.UpdateUI).
+    /// A refresh at the end of the frame rather than now.
     public void DeferRefresh() => Defer(Refresh);
 
     private Player P1 => _host.Player1;
     private Player P2 => _host.Player2;
     private GameState State => _host.State;
 
+    /// Face-to-face local play turns Player 2's side round. Never against the bot.
+    public bool IsMirrored => _mirrorToggle != null && _mirrorToggle.ButtonPressed && !_host.VsBot;
+
     /// A rescue card is not one you own, so it is washed mint wherever it appears. The rescue
     /// OFFER is monetisation and lives in GameManager; this is only its colour.
     public static readonly Color RescueTint = new Color(0.7f, 1.3f, 1.05f);
 
-    // ------------------------------------------------------------------
-    // UI scaling
-    //
-    // project.godot uses a 720x720 base viewport with stretch aspect "expand", so the SHORT
-    // side of whatever screen we're on is always 720 design-pixels and the long side grows.
-    // Everything below is sized in those design pixels. ApplyResponsiveLayout enlarges that
-    // base (shrinking the whole UI uniformly) when a screen is too short for the full layout.
-    // ------------------------------------------------------------------
-    private const int BoardSlots = 9;                       // 3x3 board
+    /// The shape every card size in the game is derived from (the art is 140x190).
+    public static readonly Vector2 BaseCardSize = new Vector2(84, 114);
 
-    private const int WinsToTakeMatch = GameState.SetsToWinMatch;  // one chip slot per win needed
+    /// An ordinary card off the board: the flying card, and what the shop and deck screens scale.
+    public Vector2 CardSize => L?.CardSize ?? BaseCardSize;
 
-    public static readonly Vector2 BaseCardSize = new Vector2(84, 114); // Kenney cards are 140x190
+    /// A card in a hand, as the layout scene sets it.
+    public Vector2 ModifierCardSize => L?.HandCardSize ?? BaseCardSize;
 
-    private const float ModifierCardScale = 0.8f;
+    // The layout's nodes under the names the painting code below has always used.
+    private Control _mainDeckPosition => L?.Deck;
+    private Label _setInfoLabel => L?.SetInfoLabel;
+    private Label _targetLabel => L?.TargetLabel;
+    private Label _effectBanner => L?.EffectLabel;
+    private PanelContainer _effectToast => L?.EffectToast;
+    private Control _p1BoardContainer => L?.P1Board;
+    private Control _p2BoardContainer => L?.P2Board;
 
-    /// Portrait has the width for a bigger hand. Pass 23 shrank this to 0.86 to buy height for
-    /// the 3x3 board; Alexander, 2026-09-17: "modifier placement was shifted a little, it was
-    /// better where it was before" - the hand is right-aligned, so a smaller card moves its left
-    /// edge inward and the whole row appears to shift. Back to 0.95, and the height comes from
-    /// the middle panel instead.
-    private const float ModifierCardScalePortrait = 0.95f;
-
-    /// The face-down deck in the middle panel: a prop, not something anyone reads, so portrait
-    /// draws it small and spends the height on the boards.
-    private const float DeckCardScalePortrait = 0.75f;
-
-    private bool _portraitLayout;
-
-    private const float MinCardScale = 0.6f;
-
-    private float _cardScale = 1f;
-
-    private BoxContainer _mainLayout;
-
-    // The middle panel's two added lines: the target, big, above the set line; and a banner
-    // under it that says what an effect card just did. Both are built in code (BuildTableBanners)
-    // so the two .tscn scenes stay as they are.
-    private Label _targetLabel;
-
-    private Label _effectBanner;
+    private Tween _effectFade;
 
     private uint _effectBannerToken;   // so a stale timer never wipes a newer message
 
-    public Vector2 CardSize => BaseCardSize * _cardScale;
-
-    public Vector2 ModifierCardSize =>
-        BaseCardSize * _cardScale * (_portraitLayout ? ModifierCardScalePortrait : ModifierCardScale);
-
     // ------------------------------------------------------------------
     // Art. Card faces, the back and the playmat are the game's own (assets/aimfor20_art/, one
-    // 560x760 PNG per face - the same 140:190 shape the Kenney cards had, so every size in this
-    // file still holds). The win chips are still Kenney (CC0 - see assets/kenney/LICENSE.txt).
+    // 560x760 PNG per face - the same 140:190 shape the Kenney cards had).
     // ------------------------------------------------------------------
     private const string ArtDir = "res://assets/aimfor20_art/";
 
@@ -312,25 +198,20 @@ public sealed class TableUi
     private Texture2D _faceEffect;   // foil   - effect cards (Copy, Shave, Veto, ...)
     private Texture2D _cardBack;     // the face-down deck, and the card that flies from it
 
-    // Win markers: an empty ring, and a gold coin carrying the card back's diamond (pass 31 -
-    // replaces the Kenney poker chips).
+    // Win markers: an empty ring, and a gold coin carrying the card back's diamond.
     private Texture2D _chipWon;
-
     private Texture2D _chipEmpty;
 
-    /// The target on the table: gold on the dark mat. (OverlayUi.MedalGold is the darker gold
-    /// INK that reads on the pale panels.)
+    /// The target on the table: gold on the dark mat.
     private static readonly Color TableGold = new Color(1f, 0.85f, 0.35f);
 
     // The collection log's reward. There is one back now, so the reward is the gilding alone.
     private static readonly Color CollectorBackTint = new Color(1.45f, 1.2f, 0.45f);
 
-    /// A "+/-" card wears its own violet face, split into a +n half and a -n half. False goes back
-    /// to the pass-7 look: the blue face on top, the red face clipped under it.
+    /// A "+/-" card wears its own violet face, split into a +n half and a -n half.
     private const bool FlipCardsUseOwnFace = true;
 
-    // The faces are pale, so the numbers and pips are drawn in a dark ink of the face's own hue
-    // rather than white-with-an-outline, the way the icon draws its "20".
+    // The faces are pale, so the numbers and pips are drawn in a dark ink of the face's own hue.
     private static readonly Color InkMain = new Color(0.12f, 0.42f, 0.27f);
     private static readonly Color InkPlus = new Color(0.13f, 0.33f, 0.66f);
     private static readonly Color InkMinus = new Color(0.68f, 0.17f, 0.22f);
@@ -340,43 +221,25 @@ public sealed class TableUi
     /// Effect cards used to wear a violet wash over a green back; the foil face replaces it.
     private static readonly Color EffectTint = Colors.White;
 
-    // The playmat behind the whole table: one image per orientation, swapped with the layout.
-    private Texture2D _playmatLandscape;
-    private Texture2D _playmatPortrait;
-    private TextureRect _playmat;
-
     /// The mat's average colour. A rank's table colour divided by this is the tint that turns the
-    /// teal mat into that rank's felt - so the ladder still repaints the table every two rungs,
-    /// and the mat keeps its vignette and border instead of going flat.
+    /// teal mat into that rank's felt.
     private static readonly Color PlaymatAverage = new Color(0.114f, 0.227f, 0.243f);
-
-
-
-    private const float ChipSize = 33f; // pass 23: was 28
-
-    private HBoxContainer _p1WinChips;
-
-    private HBoxContainer _p2WinChips;
 
     /// The felt colour of the 2-player table and of stage 1 - project.godot's clear colour.
     private static readonly Color DefaultTableColor = new Color(0.07f, 0.24f, 0.13f);
 
     /// Tint applied to the standard (main deck) card art for the rank in play. See ApplyRankTheme.
     private Color _rankCardTint = Colors.White;
+    private Color _playmatTint = Colors.White;
 
     /// The face-down deck: the rank's own back, or the collection reward when it is switched on.
     private bool GildedDeck => RunData.Instance != null && RunData.Instance.UseCollectorBack;
 
-
     private Color DeckBackTint => GildedDeck ? CollectorBackTint : _rankCardTint;
 
     private AudioStreamPlayer _sfxSlide;
-
     private AudioStreamPlayer _sfxPlace;
 
-    // ------------------------------------------------------------------
-    // Audio
-    // ------------------------------------------------------------------
     private AudioStreamPlayer CreateSfx(string path)
     {
         AudioStream stream = GD.Load<AudioStream>(path);
@@ -387,741 +250,316 @@ public sealed class TableUi
     }
 
     // ------------------------------------------------------------------
-    // Responsive layout
+    // Which layout, and how big
+    //
+    // project.godot keeps a 720x720 base with stretch "canvas_items" / aspect "expand": every
+    // size in the layout scenes is in those design pixels. Each layout scene draws the table on a
+    // fixed design canvas (720x1560 portrait, 1560x720 landscape - a 19.5:9 phone), with every
+    // element placed by hand. The fit scales that canvas to fit the screen and centres it; on a
+    // phone of another shape the playmat simply shows a little more at the edges.
     // ------------------------------------------------------------------
-    // Approximate design-pixel footprint of the whole UI (both sides + control panel) in each
-    // orientation. If the screen can't show that much at the 720px base, the base is enlarged so
-    // the entire UI scales down uniformly instead of cropping. (Phones in portrait are ~720x1560,
-    // desktop landscape is 1280x720 - both fit as-is; a short portrait desktop window doesn't.)
-    // (Each side is stats + board + hand + its own Draw Card / Hold row in the 2-player scene; the
-    // middle panel also carries the How to Play button.)
-    private const float BaseSide = 720f;
 
-    // Portrait dropped by roughly the height of a stats block and an action row PER SIDE when
-    // ApplySideLayout moved both beside the board, and grew sideways by the width of that column.
-    // Left deliberately on the SMALL side: EnsureLayoutFits was built to correct an underestimate
-    // (its high-water mark exists for exactly that), whereas an overestimate is never corrected -
-    // it just scales the whole UI down further than it needs to go and nothing ever says so.
-    // Pass 23 put the third board row back (the stack is gone) and raised every font, so both
-    // grew. Still deliberately on the small side - see the note above.
-    // Pass 32 (3x2 board, one full-width row per job): the bar of Wins + two buttons sets the width,
-    // and two rows of much bigger cards per board the height.
-    private static readonly Vector2 NeedPortrait = new Vector2(640, 1400);
+    private bool _fitPending;
 
-    private static readonly Vector2 NeedLandscape = new Vector2(1080, 700);
+    private (Vector2I Window, bool Portrait, bool Mirrored, bool VsBot) _fitBasis;
 
-    /// The GameUI MarginContainer's margin, per side, as both .tscn files set it. The estimate
-    /// above is of MainLayout's contents; this is the frame around them.
-    private const float GameUiMargin = 20f;
+    /// Forget every size this layout has settled on (a real resize, a rotation, a mirror toggle).
+    public void ResetFitState() => StableBox.ResetAll();
 
-    /// Extra gutter inside the margin when a portrait side is stretched to the screen's width.
-    private const float PortraitSidePad = 8f;
-
-    // ------------------------------------------------------------------
-    // ...and the correction, because the estimate above is a GUESS.
-    //
-    // Those two constants are a hand-maintained tally of everything in the portrait/landscape
-    // column, and they have now been wrong three times: they were bumped for the confirm row, for
-    // the How to Play button, and they were STILL short - local 2-player in portrait cropped both
-    // players' Draw Card / Hold rows off the top and bottom of the phone (Alexander, 2026-09-13).
-    // That is the mechanism working correctly on a wrong number, and it will go wrong again the
-    // next time anyone adds a row, silently, on a device nobody is testing on.
-    //
-    // So the estimate is now only the FIRST guess. After the layout settles, the container is
-    // asked what it actually needs - GetCombinedMinimumSize is exact, where the tally is not - and
-    // if it does not fit, the base grows and the whole UI scales down until it does.
-    //
-    // Monotonic on purpose: _fitScale only ever GROWS within a given window size, so it converges
-    // in a pass or two and cannot oscillate. A real window resize or a rotation resets it, so the
-    // UI grows back when there is room again - the one thing a grow-only correction would
-    // otherwise get wrong.
-    // ------------------------------------------------------------------
-    private float _fitScale = 1f;
-
-    private int _fitAttempts;
-
-    private bool _fitCheckPending;
-
-    /// Everything the layout is measured AGAINST - it replaces the old _fitWindow, which only
-    /// watched the window. When any of it changes, every size remembered from before it belongs
-    /// to a different table (see ApplyResponsiveLayout).
-    private (Vector2 Window, bool Portrait, bool Mirrored, bool VsBot) _layoutBasis;
-
-    private Vector2 _fitLastNeeded = Vector2.Zero;
-
-    private const int MaxFitAttempts = 6;
-
-    // GROWS the UI into spare room as well as shrinking it to fit (Alexander, 2026-09-16:
-    // "text is too small for how much space is now available"). The Need* tally is sized for the
-    // 2-player table, so the solo table - one side, not two - was drawn at 2-player scale on a
-    // phone with half the screen empty.
-    //
-    // Landscape was left alone at first (playtesters said it felt right on the sizes it was
-    // tried on), but Alexander, 2026-09-21, screenshots off the S25 Ultra in landscape (2340x1080):
-    // "3x3 grid isn't big enough. Score isn't big enough" - NeedLandscape is far smaller than that
-    // window, and with growth gated to portrait only, that slack just sat there as green table felt
-    // rather than being spent on the board and the score beside it. Both orientations now grow
-    // into spare room the same way; only the ceiling differs (MaxLandscapeZoom below).
-    private bool _fitPortrait;
-
-    private float _fitBaseK = 1f; // k before _fitScale is applied, so the grow can respect the cap
-
-    /// How far the UI may be enlarged past the 720px base (1 / this is the smallest _fitScale).
-    /// Was 1.8, then 2.2; the S25 Ultra screenshots Alexander sent (2026-09-21) still showed real
-    /// gaps above/below the board+score block at 2.2 on that phone's tall aspect - another guess
-    /// to check against a real device, same as NeedPortrait above.
-    private const float MaxPortraitZoom = 2.6f;
-
-    /// Landscape's own ceiling (see the note above _fitPortrait). A first guess, the same way
-    /// NeedLandscape is - worth raising further if a real phone still shows spare room at this
-    /// cap. Kept a little under the portrait one for now since landscape has two boards side by
-    /// side, so the same zoom reads as more growth across the whole table.
-    private const float MaxLandscapeZoom = 1.8f;
-
-    /// Spare room below this fraction is not worth a re-layout.
-    private const float GrowThreshold = 0.95f;
-
-    /// Forget every size this layout has settled on.
-    ///
-    /// The fit is ITERATIVE and its state is a set of high-water marks - _fitLastNeeded here, and
-    /// StableBox's own inside each fixed slot - so it only lands on the same answer twice if it
-    /// starts from the same clean state twice. Every route to a given table has to reset the same
-    /// way, or the same screen comes out at two different sizes depending on how it was reached.
-    public void ResetFitState()
-    {
-        _fitScale = 1f;
-        _fitAttempts = 0;
-        _fitLastNeeded = Vector2.Zero;
-        StableBox.ResetAll();
-    }
-
+    /// Puts up the right layout for the window and fits it. Runs on every window resize and
+    /// rotation, when the mirror is toggled, and when a match starts (the mode decides P2's side).
     public void ApplyResponsiveLayout()
     {
-        Window root = _root.GetTree().Root;
-        Vector2 win = root.Size;
+        Window window = _root.GetTree().Root;
+        Vector2I win = window.Size;
         bool portrait = win.Y > win.X;
-        _fitPortrait = portrait;
-        _portraitLayout = portrait;
-        UpdatePlaymat(portrait);
 
-        // A genuine resize, rotation, mirror toggle or mode change: start the correction over, so
-        // the UI can find the right size for the table it is actually showing. Re-running
-        // ourselves from EnsureLayoutFits changes ContentScaleSize, not the basis below, so this
-        // still does not fire on our own passes.
-        //
-        // The WINDOW alone is not enough, and that was the bug (Alexander, 2026-09-18: rotate to
-        // landscape, back to portrait, then turn Mirror for Player 2 on or off, and Player 1's
-        // side has shifted). The mirror swaps a one-line score for a two-line one and re-shapes
-        // both sides around it at the SAME window size, so nothing here fired: the fixed slots
-        // kept the taller of the two forms for good, and the fit kept the scale it had settled on
-        // for it. The same screen then came out at a different size depending on the route to it.
+        if (L == null || L.Portrait != portrait) SwapLayout(portrait);
+        if (L == null) return;
+
         var basis = (win, portrait, IsMirrored, _host.VsBot);
-        if (basis != _layoutBasis)
+        if (basis != _fitBasis)
         {
-            _layoutBasis = basis;
-            ResetFitState(); // sizes from the old table mean nothing in this one
+            _fitBasis = basis;
+            ResetFitState();
         }
 
-        // What the viewport would be at the plain 720px base, and how much bigger it must be.
-        float baseScale = Mathf.Min(win.X / BaseSide, win.Y / BaseSide);
-        Vector2 baseViewport = win / Mathf.Max(baseScale, 0.001f);
-        Vector2 need = portrait ? NeedPortrait : NeedLandscape;
-        float k = Mathf.Max(1f, Mathf.Max(need.X / baseViewport.X, need.Y / baseViewport.Y)) * _fitScale;
-        _fitBaseK = k / Mathf.Max(_fitScale, 0.001f);
-        float maxZoom = portrait ? MaxPortraitZoom : MaxLandscapeZoom;
-        k = Mathf.Max(k, 1f / maxZoom);
-        Vector2I contentSize = (Vector2I)(new Vector2(BaseSide, BaseSide) * k).Round();
-        if (root.ContentScaleSize != contentSize) root.ContentScaleSize = contentSize; // re-fires SizeChanged once
-
-        Vector2 vp = _root.GetViewport().GetVisibleRect().Size;
-
-        // Stack the two player sides vertically in portrait, side by side in landscape.
-        if (_mainLayout != null)
-        {
-            _mainLayout.Vertical = portrait;
-
-            // Portrait: P2 on top, P1 at the bottom (near the thumbs). Landscape: P1 left, P2 right.
-            Control p1Side = _mainLayout.GetNodeOrNull<Control>("Player1Side");
-            Control p2Side = _mainLayout.GetNodeOrNull<Control>("Player2Side");
-            Control panel = _mainLayout.GetNodeOrNull<Control>("SharedControlPanel");
-            if (p1Side != null && p2Side != null && panel != null)
-            {
-                _mainLayout.MoveChild(portrait ? p2Side : p1Side, 0);
-                _mainLayout.MoveChild(panel, 1);
-                _mainLayout.MoveChild(portrait ? p1Side : p2Side, 2);
-            }
-        }
-
-        ApplyOrientationTypography(portrait);
-
-        // Before ANYTHING is measured. The score's font and its one-or-two lines are chosen from
-        // the orientation and the mirror, and either may have just changed; left to the next
-        // UpdateUI they would only land after this pass had already sized every slot around the
-        // form that is going away.
-        RefreshScoreLines();
-
-        // Portrait spreads each side across the screen (pass 22: "everything is compacted to the
-        // middle"): the side is as wide as the screen allows, the score column sits at the left
-        // edge and the board at the right. EnsureLayoutFits measures around this width (see
-        // NaturalContentWidth), or the filler would look like content and stop the UI growing.
-        float fill = portrait ? Mathf.Max(0f, vp.X - 2f * (GameUiMargin + PortraitSidePad)) : 0f;
-        foreach (Control side in new[] { _p1SideLayout, _p2SideLayout })
-            if (side != null) side.CustomMinimumSize = new Vector2(fill, 0f);
-
-        // ...and each side re-flows within itself: a column in landscape, score and buttons beside
-        // the board in portrait.
-        ApplySideLayout(_p1SideLayout, _p1ActionRow ?? _drawCardButton?.GetParent() as Control,
-                        _p1ConfirmRow, _p1ButtonSlot, portrait);
-        ApplySideLayout(_p2SideLayout, _p2ActionRow, _p2ConfirmRow, _p2ButtonSlot, portrait);
-
-        // Player 2's side faces the other way when the "Mirror" toggle is on (face-to-face play).
-        if (_p2Rotator != null) _p2Rotator.RotationDegrees = IsMirrored ? 180f : 0f;
-
-        // The base-size adjustment above guarantees the viewport is at least `need`, so this only
-        // trims the cards in the rare case the estimate is a little short.
-        // Measured against the viewport BEFORE the fit correction: when the fit enlarges the UI the
-        // viewport shrinks below `need`, and trimming the cards for that would undo the enlargement.
-        Vector2 vpUnfit = vp / Mathf.Max(_fitScale, 0.001f);
-        _cardScale = Mathf.Clamp(Mathf.Min(vpUnfit.Y / need.Y, vpUnfit.X / need.X), MinCardScale, 1f);
-
-        ResizeBoard(_p1BoardContainer);
-        ResizeBoard(_p2BoardContainer);
-        ApplyDeckOrientation(portrait);
-        _deckCountLabel?.AddThemeFontSizeOverride("font_size", Mathf.RoundToInt(CardSize.Y * 0.30f));
-        RefreshModifiersUI();
-        Defer(UpdateRotatorSize);
+        ApplyMirror();
+        Show(L.P2ButtonSlot, !_host.VsBot); // the bot presses nothing
+        Defer(PlaceEffectToast);
+        Defer(() => { PlaceStatusToast(_p1StatusToast, false); PlaceStatusToast(_p2StatusToast, true); });
         Defer(_host.LayoutChanged); // a rotation moves whatever is anchored to a node
-        EnsureLayoutFits();
+        FitToWindow();
     }
 
-    /// Re-flows ONE player's side for the orientation.
-    ///
-    /// PORTRAIT (pass 32, Alexander's sketch against Pokemon TCG Pocket, 2026-09-24) is a plain
-    /// top-to-bottom stack, one full-width row per job, and the board shrinks to 3x2:
-    ///
-    ///     [ You  11/20                  Your move ]   TopRow: score left, status right
-    ///             [ . ][ . ][ . ]                     the board, centred, two rows
-    ///             [ . ][ . ][ . ]                     (a third appears for the 7th card)
-    ///     [ Wins O O O        ][ Hold ][Draw Card ]   BarRow
-    ///          [ -3 ][ +4 ][ +1 ][ +3 ]               the hand, centred
-    ///
-    /// Pass 29's column beside the board is gone. It cost the board a third of the screen's width;
-    /// with the board alone in its row, the room goes into the cards instead (PortraitBoardCardScale).
-    ///
-    /// In the bar, Draw Card is on the RIGHT, under the thumb, and Play takes its place when a card
-    /// is picked up; Hold and Put back share the left button. Flip Value has no room of its own in
-    /// one row, so it stands in the Wins spot while a flippable card is picked up (BarLeft).
-    ///
-    /// LANDSCAPE is unchanged: the score in a column on the board's INNER side - P1's to the
-    /// right of its grid, P2's to the left of its - so both scores face each other across the
-    /// middle panel, and the buttons stay under the hand:
-    ///
-    ///     [ . . . ]  Wins O O O      Wins O O O  [ . . . ]
-    ///     [ . . . ]  You  21/20      Them  20    [ . . . ]
-    ///     [ . . . ]  Over target!    Thinking... [ . . . ]
-    ///     [     the hand     ]        [     the hand     ]
-    ///     [ Draw Card ][ Hold ]
-    ///
-    /// The confirm row travels WITH the action row it stands in for (they share ButtonSlot).
-    private void ApplySideLayout(Control layout, Control actionRow, Control confirmRow,
-                                 Control buttonSlot, bool portrait)
+    /// Instances the layout scene for this orientation and paints the match onto it.
+    private void SwapLayout(bool portrait)
     {
-        if (layout == null) return;
-
-        // Found by name rather than held, because they move between the two arrangements.
-        // owned:false - the rows and slots are built here and have no owner.
-        Control stats = layout.FindChild("Stats", true, false) as Control;
-        Control board = layout.FindChild("BoardSlotsContainer", true, false) as Control;
-        Control hand = layout.FindChild("ModifierContainer", true, false) as Control;
-        Control status = layout.FindChild("StatusLabel", true, false) as Control;
-        if (stats == null || board == null || hand == null) return;
-
-        bool isP1 = layout == _p1SideLayout;
-        Button draw = isP1 ? (_p1DrawCardButton ?? _drawCardButton) : _p2DrawCardButton;
-        Button play = isP1 ? _p1PlayButton : _p2PlayButton;
-        Button flip = isP1 ? _p1FlipValueButton : _p2FlipValueButton;
-
-        HBoxContainer winsRow = ApplyWinsRow(stats, isP1 ? _p1WinChips : _p2WinChips);
-        SetRowOrientation(actionRow, portrait);
-        SetRowOrientation(confirmRow, portrait);
-        OrderBarButtons(actionRow, draw, portrait);
-        OrderBarButtons(confirmRow, play, portrait);
-        hand.SizeFlagsHorizontal = Control.SizeFlags.ShrinkCenter;
-        board.SizeFlagsHorizontal = Control.SizeFlags.ShrinkCenter;
-        if (status is Label statusLabel)
+        PackedScene scene = portrait
+            ? (_portraitScene ??= GD.Load<PackedScene>(PortraitScenePath))
+            : (_landscapeScene ??= GD.Load<PackedScene>(LandscapeScenePath));
+        if (scene == null)
         {
-            statusLabel.HorizontalAlignment = portrait ? HorizontalAlignment.Right : HorizontalAlignment.Center;
-            statusLabel.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill; // the rest of TopRow
-        }
-
-        HBoxContainer sideRow = EnsureSideRow(layout);
-        HBoxContainer topRow = EnsurePortraitRow(layout, "TopRow");
-        HBoxContainer barRow = EnsurePortraitRow(layout, "BarRow");
-        StableBox barLeft = EnsureBarLeft(barRow, winsRow, flip);
-        Control buttons = buttonSlot ?? actionRow;
-
-        if (portrait)
-        {
-            // TopRow: the score at the left edge, the status taking the rest, right-aligned.
-            PlaceChild(stats, topRow, 0);
-            PlaceChild(status, topRow, 1);
-
-            // BarRow: Wins (or Flip Value) at the left edge, the button pair at the right.
-            PlaceChild(barLeft, barRow, 0);
-            PlaceChild(barRow.GetNodeOrNull<Control>("BarSpacer"), barRow, 1);
-            PlaceChild(winsRow, barLeft, 0);
-            PlaceChild(flip, barLeft, 1);
-            if (buttons != null)
-            {
-                PlaceChild(buttons, barRow, 2);
-                buttons.SizeFlagsHorizontal = Control.SizeFlags.Fill;
-                buttons.SizeFlagsVertical = Control.SizeFlags.ShrinkCenter;
-            }
-            if (buttonSlot == null) PlaceChild(confirmRow, barRow, 3);
-
-            // Top to bottom. Each placement leaves the ones above it where they are.
-            layout.MoveChild(sideRow, layout.GetChildCount() - 1);
-            PlaceChild(topRow, layout, 0);
-            PlaceChild(board, layout, 1);
-            PlaceChild(barRow, layout, 2);
-            PlaceChild(hand, layout, 3);
-        }
-        else
-        {
-            Control slot = sideRow.GetNodeOrNull<Control>("SideSlot");
-            Control column = slot?.GetNodeOrNull<Control>("SideColumn");
-            Control columnSpacer = column?.GetNodeOrNull<Control>("ColumnSpacer");
-            Control rowSpacer = sideRow.GetNodeOrNull<Control>("RowSpacer");
-            if (slot == null || column == null) return;
-
-            // Everything portrait borrowed goes home: Wins above the score, the status under it,
-            // Flip Value back to the end of its confirm row.
-            PlaceChild(winsRow, stats, 0);
-            PlaceChild(status, stats, 2);
-            if (flip != null && confirmRow != null)
-            {
-                flip.Visible = true;
-                PlaceChild(flip, confirmRow, 2);
-            }
-            if (winsRow != null) winsRow.Visible = true;
-
-            // Which side of the board the column stands on: the inner edge, which is the right of
-            // P1's board and the left of P2's - EXCEPT that P2's whole side is rotated 180 degrees
-            // for face-to-face play, and a rotation swaps which end of the row draws on the left.
-            // So the child order flips back with it, and P2 lands on the middle panel either way.
-            bool columnFirst = !isP1 && !IsMirrored;
-
-            PlaceChild(stats, column, 0);
-            PlaceChild(columnSpacer, column, 1);
-
-            // Ordered board-first on purpose: PlaceChild clamps to the child count as it goes, so
-            // moving the far end into place before the near one is what survives a flip between the
-            // two arrangements without leaving the spacer stranded on the wrong side.
-            PlaceChild(board, sideRow, columnFirst ? 2 : 0);
-            PlaceChild(rowSpacer, sideRow, 1);
-            PlaceChild(slot, sideRow, columnFirst ? 0 : 2);
-
-            layout.MoveChild(sideRow, 0);
-            PlaceChild(hand, layout, 1);
-            if (buttons != null)
-            {
-                PlaceChild(buttons, layout, 2);
-                buttons.SizeFlagsHorizontal = Control.SizeFlags.Fill;
-                buttons.SizeFlagsVertical = Control.SizeFlags.Fill;
-            }
-            if (buttonSlot == null) PlaceChild(confirmRow, layout, 3);
-        }
-
-        // An empty row still takes its separation in a VBox, so the arrangement not in use hides.
-        sideRow.Visible = !portrait;
-        topRow.Visible = portrait;
-        barRow.Visible = portrait;
-        UpdateBarLeft(layout == _p1SideLayout ? P1 : P2, winsRow, flip);
-    }
-
-    /// One of portrait's full-width rows (TopRow, BarRow). Built once, hidden in landscape.
-    private static HBoxContainer EnsurePortraitRow(Control layout, string name)
-    {
-        HBoxContainer row = layout.GetNodeOrNull<HBoxContainer>(name);
-        if (row != null) return row;
-
-        row = new HBoxContainer { Name = name, Visible = false };
-        row.AddThemeConstantOverride("separation", 12);
-        layout.AddChild(row);
-
-        if (name == "BarRow")
-        {
-            // Pushes the button pair to the right edge, whatever width the side has.
-            row.AddChild(new Control
-            {
-                Name = "BarSpacer",
-                SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
-                MouseFilter = Control.MouseFilterEnum.Ignore,
-            });
-        }
-        return row;
-    }
-
-    /// The bar's left end: Wins, or Flip Value in its place while a flippable card is picked up.
-    /// Both lie over the same rect (StableBox), sized to the bigger of the two, so the swap moves
-    /// nothing else in the bar.
-    private static StableBox EnsureBarLeft(HBoxContainer barRow, Control winsRow, Control flip)
-    {
-        StableBox left = barRow.GetNodeOrNull<StableBox>("BarLeft");
-        if (left != null) return left;
-
-        left = new StableBox
-        {
-            Name = "BarLeft",
-            SizeFlagsVertical = Control.SizeFlags.Fill,
-            Measure = () => Bigger(winsRow?.GetCombinedMinimumSize() ?? Vector2.Zero,
-                                   flip?.GetCombinedMinimumSize() ?? Vector2.Zero),
-        };
-        barRow.AddChild(left);
-        return left;
-    }
-
-    /// Portrait only: which of Wins and Flip Value the bar's left end is showing. Landscape keeps
-    /// both visible, with Flip Value switched on and off in place by UpdateConfirmRow.
-    private void UpdateBarLeft(Player player, Control winsRow, Button flip)
-    {
-        if (!_portraitLayout || player == null) return;
-        Card picked = _host.SelectedFor(player);
-        bool flippable = picked != null && picked.CanFlipValue;
-        if (flip != null) flip.Visible = flippable;
-        if (winsRow != null) winsRow.Visible = !(flippable && flip != null);
-    }
-
-    /// Portrait puts the main button on the RIGHT of its pair (Hold | Draw Card, Put back | Play)
-    /// - the sketch's order, and where a right thumb rests. Landscape keeps it first.
-    private void OrderBarButtons(Control row, Button main, bool portrait)
-    {
-        if (row == null || main == null || main.GetParent() != row) return;
-        row.MoveChild(main, portrait ? row.GetChildCount() - 1 : 0);
-
-        // Equal halves in portrait: both buttons of a pair expand, and the slot is measured as two
-        // of the widest button (MeasureButtonRow), so Draw Card and Play line up exactly.
-        foreach (Node node in row.GetChildren())
-        {
-            if (node is not Button button) continue;
-            bool isFlip = button == _p1FlipValueButton || button == _p2FlipValueButton;
-            if (isFlip) continue;
-            // The scene's Draw Card / Hold expand in landscape and the built confirm buttons do
-            // not; whatever a button started with is what landscape gets back.
-            if (!button.HasMeta("landscapeFlags")) button.SetMeta("landscapeFlags", (int)button.SizeFlagsHorizontal);
-            button.SizeFlagsHorizontal = portrait
-                ? Control.SizeFlags.ExpandFill
-                : (Control.SizeFlags)button.GetMeta("landscapeFlags").AsInt32();
-        }
-    }
-
-    /// The row holding one player's board and the column that stands beside it.
-    ///
-    /// Built on demand and then kept for good: both orientations use it now, where portrait alone
-    /// used to, so nothing tears it down on a rotation any more. (The old teardown had to
-    /// RemoveChild before QueueFree - a queued node stays in the tree until the end of the frame
-    /// and still counts toward the layout's minimum size, which is the bug that squeezed P1 off
-    /// screen when the hand was rebuilt, ui-scaling-and-art.md. One less way to hit it.)
-    private static HBoxContainer EnsureSideRow(Control layout)
-    {
-        HBoxContainer sideRow = layout.GetNodeOrNull<HBoxContainer>("SideRow");
-        if (sideRow != null) return sideRow;
-
-        sideRow = new HBoxContainer { Name = "SideRow", Alignment = BoxContainer.AlignmentMode.Center };
-        sideRow.AddThemeConstantOverride("separation", 14);
-        layout.AddChild(sideRow);
-
-        // The column sits in a fixed-size slot: a score growing from 7/20 to 24/20 or a status
-        // line changing must not slide the board sideways (pass 21).
-        StableBox slot = new StableBox { Name = "SideSlot", SizeFlagsVertical = Control.SizeFlags.Fill };
-        sideRow.AddChild(slot);
-
-        // Takes whatever width the side has spare, so the column and the board sit at the two
-        // edges instead of huddling in the middle (pass 22).
-        sideRow.AddChild(new Control
-        {
-            Name = "RowSpacer",
-            SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
-            MouseFilter = Control.MouseFilterEnum.Ignore,
-        });
-
-        VBoxContainer column = new VBoxContainer
-        {
-            Name = "SideColumn",
-            Alignment = BoxContainer.AlignmentMode.Begin,
-            SizeFlagsVertical = Control.SizeFlags.Fill,
-        };
-        column.AddThemeConstantOverride("separation", 12);
-        slot.AddChild(column);
-
-        // Holds Wins + score at the TOP of the column, level with the board's first row, and
-        // pushes anything below it (portrait's buttons) down level with the board's last.
-        column.AddChild(new Control
-        {
-            Name = "ColumnSpacer",
-            SizeFlagsVertical = Control.SizeFlags.ExpandFill,
-            MouseFilter = Control.MouseFilterEnum.Ignore,
-        });
-
-        return sideRow;
-    }
-
-    /// A button row. Both orientations lay it out as a ROW since pass 32 (portrait stacked it in
-    /// the column beside the board from pass 21 to 31); portrait packs it against the right edge,
-    /// under the thumb. Still a plain BoxContainer, so a later layout can stand it up again.
-    private static void SetRowOrientation(Control row, bool portrait)
-    {
-        if (row is not BoxContainer box) return;
-        if (box is HBoxContainer || box is VBoxContainer)
-        {
-            GD.PushWarning($"{row.Name} is an {box.GetClass()} and cannot be turned; make it a BoxContainer.");
+            GD.PushError($"TableUi: missing layout scene {(portrait ? PortraitScenePath : LandscapeScenePath)}");
             return;
         }
-        box.Vertical = false;
-        box.Alignment = portrait ? BoxContainer.AlignmentMode.End : BoxContainer.AlignmentMode.Center;
-        // The button slot measures its rows on request; tell it the answer just changed.
-        (row.GetParent() as Control)?.UpdateMinimumSize();
-    }
 
-    /// "Wins" and its chips take a line of their own ABOVE the score, in both orientations now
-    /// that the block stands in a narrow column beside the board rather than a wide row above it
-    /// (Alexander's sketch, 2026-09-16; landscape joined it on 2026-09-19):
-    ///
-    ///     Wins: O O O     [ . . . ]
-    ///     You  14/20      [ . . . ]
-    ///     Them 18         [ . . . ]
-    ///
-    /// Everything in the column reads from the same left edge, so the eye drops straight down the
-    /// three lines instead of tracking a centred block that re-centres itself every time the score
-    /// gains a digit.
-    ///
-    /// Pass 32: portrait takes the row down into the bar under the board instead (ApplySideLayout
-    /// places it; this only builds it).
-    private HBoxContainer ApplyWinsRow(Control stats, HBoxContainer chips)
-    {
-        Label wins = stats.FindChild("WinsLabel", true, false) as Label;
-        Control scoreRow = stats.GetNodeOrNull<Control>("Row1");
-        if (wins == null || scoreRow == null) return stats.FindChild("WinsRow", true, false) as HBoxContainer;
+        TableLayout next = scene.Instantiate<TableLayout>();
 
-        stats.AddThemeConstantOverride("separation", 14);
-        if (stats is BoxContainer statsBox) statsBox.Alignment = BoxContainer.AlignmentMode.Begin;
-        if (scoreRow is BoxContainer scoreBox) scoreBox.Alignment = BoxContainer.AlignmentMode.Begin;
-
-        // Looked up in the stats AND wherever portrait last put it (the bar), so a rotation
-        // never builds a second one.
-        HBoxContainer winsRow = wins.GetParent() as HBoxContainer;
-        if (winsRow == null || winsRow.Name != "WinsRow")
+        if (L != null)
         {
-            winsRow = new HBoxContainer
-            {
-                Name = "WinsRow",
-                // Centred on the bar's height in portrait, left-aligned in both.
-                SizeFlagsVertical = Control.SizeFlags.ShrinkCenter,
-                SizeFlagsHorizontal = Control.SizeFlags.ShrinkBegin,
-            };
-            winsRow.AddThemeConstantOverride("separation", 8);
-            stats.AddChild(winsRow);
-            stats.MoveChild(winsRow, 0);
+            // Detached now, not just queued: a queued node is still in the tree until the end of
+            // the frame and would still be measured, and still be found by FindChild.
+            _layoutHost.RemoveChild(L);
+            L.QueueFree();
         }
-        wins.VerticalAlignment = VerticalAlignment.Center;
-        PlaceChild(wins, winsRow, 0);
-        PlaceChild(chips, winsRow, 1);
-        return winsRow;
+
+        L = next;
+        _layoutHost.AddChild(L);
+        // The scene's root is sized like a phone so it previews properly in the editor; in the
+        // game it fills whatever the screen is.
+        L.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
+
+        BindLayout();
+        _host.LayoutBound(L);
+        Refresh();
     }
 
-    /// Move a node to an exact slot under a parent, reparenting only when it is somewhere else.
-    /// Called every layout pass, so the guard is what stops it thrashing the tree.
-    ///
-    /// Named PlaceChild rather than Reparent on purpose: Node already has a Reparent, and a
-    /// same-named static here would quietly overload the engine's own method.
-    private static void PlaceChild(Control node, Control parent, int index)
+    /// Everything a fresh layout needs once: its buttons wired and styled, its boards measured,
+    /// and whatever is already on the table redrawn into it.
+    private void BindLayout()
     {
-        if (node == null || parent == null) return;
+        RememberAuthoredVisibility();
+        Wire(L.P1DrawCard, () => _host.DrawCardPressed(P1));
+        Wire(L.P1Hold, () => _host.HoldPressed(P1));
+        Wire(L.P1Play, () => _host.PlayPressed(P1));
+        Wire(L.P1PutBack, () => { _host.PutBackPressed(P1); Refresh(); });
+        Wire(L.P1FlipValue, () => _host.FlipValuePressed(P1));
+        Wire(L.P2DrawCard, () => _host.DrawCardPressed(P2));
+        Wire(L.P2Hold, () => _host.HoldPressed(P2));
+        Wire(L.P2Play, () => _host.PlayPressed(P2));
+        Wire(L.P2PutBack, () => { _host.PutBackPressed(P2); Refresh(); });
+        Wire(L.P2FlipValue, () => _host.FlipValuePressed(P2));
+        Wire(L.MenuButton, () => _host.MenuPressed());
 
-        if (node.GetParent() != parent)
+        // Pass 31's house pill. Draw Card and Play are the table's one accent - the thing you do
+        // next, most turns - and Flip Value is ringed in the violet of a +/- card.
+        foreach (Button primary in new[] { L.P1DrawCard, L.P2DrawCard, L.P1Play, L.P2Play })
+            if (primary != null) OverlayUi.StyleButton(primary, primary: true);
+        foreach (Button plain in new[] { L.P1Hold, L.P2Hold, L.P1PutBack, L.P2PutBack })
+            if (plain != null) OverlayUi.StyleButton(plain);
+        foreach (Button flip in new[] { L.P1FlipValue, L.P2FlipValue })
+            if (flip != null) OverlayUi.StyleButton(flip, ring: InkFlip);
+
+        // Play / Put back land on Draw Card / Hold's spots (see ConfirmCopiesAction).
+        MatchConfirmRow(L.P1DrawCard, L.P1Hold, L.P1Play, L.P1PutBack);
+        MatchConfirmRow(L.P2DrawCard, L.P2Hold, L.P2Play, L.P2PutBack);
+        SetUpButtonSlot(L.P1ActionRow, L.P1ConfirmRow);
+        SetUpButtonSlot(L.P2ActionRow, L.P2ConfirmRow);
+
+        // The board size is whatever the scene's slots are - remembered before portrait's third
+        // row ever changes it.
+        foreach (GridContainer board in new[] { L.P1Board, L.P2Board })
         {
-            node.GetParent()?.RemoveChild(node);
-            parent.AddChild(node);
+            if (board == null || board.GetChildCount() == 0) continue;
+            if (board.GetChild(0) is Control first) board.SetMeta(BaseCardMeta, first.CustomMinimumSize);
+            board.SetMeta(ThirdRowMeta, true); // as authored: all nine; RefreshBoardSlots decides
         }
-        parent.MoveChild(node, Mathf.Clamp(index, 0, parent.GetChildCount() - 1));
+
+        if (L.EffectToast != null)
+        {
+            L.EffectToast.TopLevel = true; // never takes room in the middle panel
+            L.EffectToast.Visible = false;
+        }
+
+        // Whatever is already on the table - a rotation mid-set - drawn straight in, no flight.
+        BuildStatusToasts();
+        if (L.P1ScoreThem != null) L.P1ScoreThem.Visible = false; // the box is one line now
+        if (L.P2ScoreThem != null) L.P2ScoreThem.Visible = false;
+        RestoreBoard(L.P1Board, P1);
+        RestoreBoard(L.P2Board, P2);
+        ApplyRankTheme();
     }
 
-    /// Asks the layout what it ACTUALLY needs, and shrinks the whole UI until it fits. This is the
-    /// backstop behind the Need* estimate; the reasoning is with those constants.
-    ///
-    /// A BoxContainer cannot go below the sum of its children's minimums - handed less room than
-    /// that it overflows its own rect and the ends are simply cut off by the screen, which is
-    /// exactly what portrait 2-player was doing. Nothing warns about it, so this looks instead.
-    private async void EnsureLayoutFits()
+    // ------------------------------------------------------------------
+    // Things the code shows and hides (the opponent score, Wins, Hold, P2's buttons) stay hidden
+    // if you hid them in the layout scene - so hiding one in the editor is how you drop it from
+    // the design without the game switching it back on.
+    // ------------------------------------------------------------------
+    private readonly HashSet<Control> _authoredHidden = new HashSet<Control>();
+
+    private void RememberAuthoredVisibility()
     {
-        // Setting ContentScaleSize re-fires SizeChanged, so ApplyResponsiveLayout re-enters and
-        // calls this again while the first call is still waiting on its frames. Without the latch
-        // each of them would apply the SAME overflow and the UI would end up several times
-        // smaller than it needs to be.
-        if (_fitCheckPending || _mainLayout == null) return;
-        _fitCheckPending = true;
-        bool relayout = false;
+        _authoredHidden.Clear();
+        foreach (Control c in new Control[] { L.P1OpponentBox, L.P2OpponentBox, L.P1WinsRow, L.P2WinsRow,
+                                              L.P1Hold, L.P2Hold, L.P1ButtonSlot, L.P2ButtonSlot })
+            if (c != null && !c.Visible) _authoredHidden.Add(c);
+    }
 
-        try
+    private void Show(Control c, bool show)
+    {
+        if (c != null) c.Visible = show && !_authoredHidden.Contains(c);
+    }
+
+    private static void Wire(Button button, Action onPressed)
+    {
+        if (button == null) return;
+        button.FocusMode = Control.FocusModeEnum.None;
+        button.Pressed += onPressed;
+    }
+
+    /// Draw Card / Hold are placed by hand in the layout scene (pass 38: no containers - each
+    /// button sits exactly where and as big as you draw it). With ConfirmCopiesAction on, the
+    /// Play / Put back pair that stands in for them while a card is picked up is put on the same
+    /// spots - Play on Draw Card's, Put back on Hold's - so only ActionRow ever needs arranging.
+    private void MatchConfirmRow(Button draw, Button hold, Button play, Button putBack)
+    {
+        if (!L.ConfirmCopiesAction) return;
+        foreach ((Button from, Button to) in new[] { (draw, play), (hold, putBack) })
         {
-            // Two frames, not one. UpdateRotatorSize is deferred to the end of THIS frame and
-            // writes P2Holder's minimum size; a container's combined minimum is only correct on
-            // the pass after the one that changed it. Measuring earlier measures the old layout.
-            for (int i = 0; i < 2; i++)
+            if (from == null || to == null) continue;
+            to.OffsetLeft = from.OffsetLeft;
+            to.OffsetTop = from.OffsetTop;
+            to.OffsetRight = from.OffsetRight;
+            to.OffsetBottom = from.OffsetBottom;
+            to.GrowHorizontal = from.GrowHorizontal;
+            to.GrowVertical = from.GrowVertical;
+            to.Scale = from.Scale;
+            to.PivotOffset = from.PivotOffset;
+            to.Rotation = from.Rotation;
+        }
+    }
+
+    /// Only one of the two button rows shows at a time; the confirm row waits hidden.
+    private static void SetUpButtonSlot(Control action, Control confirm)
+    {
+        if (confirm != null) confirm.Visible = false;
+        if (action != null) action.Visible = true;
+    }
+
+    /// Mirror on: Player 2's side is turned round about its centre. In landscape every element in
+    /// it is also mirrored left-to-right first, so that once the side is turned its score column
+    /// still stands on the side facing the middle (turning alone would put it on the outer edge).
+    ///
+    /// The mirrored positions are worked out from the edges you placed in the editor - left and
+    /// right swap ends, and so does the direction a box grows - and put back exactly when the
+    /// mirror goes off. Nothing is touched while the mirror is off, so a box that grows leftward
+    /// from its right edge (portrait's opponent score) keeps doing so.
+    private void ApplyMirror()
+    {
+        Control side = L?.P2Side;
+        if (side == null) return;
+        bool mirrored = IsMirrored;
+        bool flipX = mirrored && !L.Portrait;
+        float width = side.Size.X;
+
+        foreach (Node node in side.GetChildren())
+        {
+            if (node is not Control child) continue;
+            bool isFlipped = child.HasMeta(FlippedMeta) && child.GetMeta(FlippedMeta).AsBool();
+            if (isFlipped == flipX) continue;
+
+            if (!child.HasMeta(AuthoredLeftMeta))
             {
-                await _root.ToSignal(_root.GetTree(), SceneTree.SignalName.ProcessFrame);
-                if (!_root.IsInsideTree() || _mainLayout == null) return; // scene restarted mid-wait
+                child.SetMeta(AuthoredLeftMeta, child.OffsetLeft);
+                child.SetMeta(AuthoredRightMeta, child.OffsetRight);
+                child.SetMeta(AuthoredGrowMeta, (int)child.GrowHorizontal);
             }
+            float left = child.GetMeta(AuthoredLeftMeta).AsSingle();
+            float right = child.GetMeta(AuthoredRightMeta).AsSingle();
+            var grow = (Control.GrowDirection)child.GetMeta(AuthoredGrowMeta).AsInt32();
 
-            Vector2 vp = _root.GetViewport().GetVisibleRect().Size;
-            if (vp.X <= 1f || vp.Y <= 1f) return;
-
-            Vector2 needed = _mainLayout.GetCombinedMinimumSize() + new Vector2(GameUiMargin, GameUiMargin) * 2f;
-            if (_fitPortrait) needed.X = NaturalContentWidth() + 2f * (GameUiMargin + PortraitSidePad);
-
-            // A high-water mark, and the thing that tells a LOOP apart from real GROWTH. A loop
-            // that will not settle re-measures the same content over and over; content that has
-            // genuinely grown measures bigger than anything seen before, and deserves a fresh
-            // budget of attempts rather than being refused because an earlier fit spent them.
-            //
-            // This is not hypothetical - it is the bug. The first check runs from _Ready, and with
-            // the start menu up the hands are not dealt until the player taps a mode seconds
-            // later. The table measured on an EMPTY layout, two hand rows short, and nothing
-            // re-measured once the cards landed (Alexander, 2026-09-13: toggling the mirror, which
-            // re-runs the layout, was what fixed it by hand).
-            if (needed.X > _fitLastNeeded.X + 1f || needed.Y > _fitLastNeeded.Y + 1f)
+            if (flipX)
             {
-                _fitAttempts = 0;
-                _fitLastNeeded = new Vector2(Mathf.Max(_fitLastNeeded.X, needed.X),
-                                             Mathf.Max(_fitLastNeeded.Y, needed.Y));
-            }
-
-            float overflow = Mathf.Max(needed.X / vp.X, needed.Y / vp.Y);
-            if (_fitAttempts >= MaxFitAttempts) return; // a loop that will not settle
-
-            if (overflow <= 1.002f)
-            {
-                // It fits. Also use the room that is left over - unless the UI is already as
-                // large as it is allowed to get. The target is 98% so the next pass lands inside
-                // the dead band (0.95..1.002) and stops rather than bouncing off the shrink branch
-                // below.
-                // Measured against the HIGH-WATER mark, not this frame: the hand gets narrower
-                // every time a card is played, and growing into that would zoom the table mid-match.
-                float room = Mathf.Max(_fitLastNeeded.X / vp.X, _fitLastNeeded.Y / vp.Y);
-                float maxZoom = _fitPortrait ? MaxPortraitZoom : MaxLandscapeZoom;
-                float minFit = (1f / maxZoom) / Mathf.Max(_fitBaseK, 0.001f);
-                if (room >= GrowThreshold || _fitScale <= minFit + 0.001f) return;
-
-                _fitAttempts++;
-                _fitScale = Mathf.Max(minFit, _fitScale * room / 0.98f);
-                GD.Print($"Layout has room ({needed.X:0}x{needed.Y:0} in {vp.X:0}x{vp.Y:0}) - "
-                       + $"enlarging the UI, scale {_fitScale:0.000}");
-                relayout = true; // no return: a return here would skip the re-layout after the finally
+                child.OffsetLeft = width - right;
+                child.OffsetRight = width - left;
+                child.GrowHorizontal = grow switch
+                {
+                    Control.GrowDirection.Begin => Control.GrowDirection.End,
+                    Control.GrowDirection.End => Control.GrowDirection.Begin,
+                    _ => grow,
+                };
             }
             else
             {
-                // The 1% of slack is what makes this converge in ONE step rather than creeping up
-                // on the answer a fraction at a time and spending all the attempts getting there.
-                _fitAttempts++;
-                _fitScale *= overflow * 1.01f;
-                relayout = true;
-                GD.Print($"Layout did not fit ({needed.X:0}x{needed.Y:0} into {vp.X:0}x{vp.Y:0}) - "
-                       + $"scaling the UI down by {_fitScale:0.000}");
+                child.OffsetLeft = left;
+                child.OffsetRight = right;
+                child.GrowHorizontal = grow;
+            }
+            child.SetMeta(FlippedMeta, flipX);
+        }
+
+        side.PivotOffset = side.Size / 2f;
+        side.RotationDegrees = mirrored ? 180f : 0f;
+
+        // Face to face, Player 2 sits at the top of the screen, so their board recedes toward the
+        // middle of the table rather than toward the top edge (pass 39).
+        if (L.P2Board is PerspectiveBoard p2Board) p2Board.FarAtTop = !mirrored;
+    }
+
+    private const string FlippedMeta = "mirrorFlipped";
+    private const string AuthoredLeftMeta = "authoredLeft";
+    private const string AuthoredRightMeta = "authoredRight";
+    private const string AuthoredGrowMeta = "authoredGrow";
+
+    /// Scales the whole UI so the layout's design canvas exactly fits the screen: whichever axis
+    /// is tighter decides, and the canvas is centred along the other (the playmat fills the rest).
+    /// A frame first, so a freshly swapped layout has its size.
+    private async void FitToWindow()
+    {
+        if (_fitPending) return;
+        _fitPending = true;
+        try
+        {
+            await _root.ToSignal(_root.GetTree(), SceneTree.SignalName.ProcessFrame);
+            if (!GodotObject.IsInstanceValid(_root) || !_root.IsInsideTree() || L == null) return;
+
+            Window window = _root.GetTree().Root;
+            Vector2 win = window.Size;
+            if (win.X <= 1f || win.Y <= 1f) return;
+
+            Control canvas = L.Canvas ?? L;
+            Vector2 design = canvas.Size;
+            if (design.X <= 1f || design.Y <= 1f) return;
+
+            // Design pixels per screen pixel.
+            float k = Mathf.Max(design.X / win.X, design.Y / win.Y);
+            Vector2I size = (Vector2I)(win * k).Round();
+
+            if (window.ContentScaleSize != size)
+            {
+                GD.Print($"Table fit: canvas {design.X:0}x{design.Y:0} -> design screen {size.X}x{size.Y}");
+                window.ContentScaleSize = size; // re-fires SizeChanged; the next pass lands on the same size
             }
         }
         finally
         {
-            _fitCheckPending = false;
-        }
-
-        // Only when the measurement above changed the scale (too big, or room to grow). Outside the
-        // finally so the latch is already clear and the new pass may measure again.
-        if (relayout) ApplyResponsiveLayout();
-    }
-
-    /// Portrait: how wide the content really is, ignoring the width each side is stretched to.
-    /// The MainLayout is a column there, so this is its widest row.
-    private float NaturalContentWidth()
-    {
-        float width = 0f;
-        Control panel = _mainLayout?.GetNodeOrNull<Control>("SharedControlPanel");
-        if (panel != null) width = panel.GetCombinedMinimumSize().X;
-
-        foreach (Control side in new[] { _p1SideLayout, _p2SideLayout })
-        {
-            if (side == null) continue;
-            foreach (Node node in side.GetChildren())
-            {
-                if (node is not Control child || !child.Visible) continue;
-                width = Mathf.Max(width, child.GetCombinedMinimumSize().X);
-            }
-        }
-        return width;
-    }
-
-    public bool IsMirrored => _mirrorToggle != null && _mirrorToggle.ButtonPressed;
-
-    /// Player2Side (CenterContainer) > P2Holder (plain Control) > P2Rotator (full-rect, rotated) > Layout.
-    /// Containers reset their children's rotation every time they re-lay them out, which is why
-    /// the rotated node must NOT sit directly in a container - the holder takes the hit instead.
-    /// The holder reports 0x0 on its own (its content is anchored, not laid out), so copy the
-    /// Layout's minimum size onto it whenever the content changes.
-    private void UpdateRotatorSize()
-    {
-        if (_p2Rotator == null || _p2Rotator.GetChildCount() == 0) return;
-        if (_p2Rotator.GetChild(0) is Control layout && _p2Rotator.GetParent() is Control holder)
-        {
-            holder.CustomMinimumSize = layout.GetCombinedMinimumSize();
-            _p2Rotator.RotationDegrees = IsMirrored ? 180f : 0f;
+            _fitPending = false;
         }
     }
 
     // ------------------------------------------------------------------
-    // The board (3x3, both orientations)
+    // The boards
     //
-    // Pass 21 tried a one-column pile in portrait, pass 22 a sideways five-wide fan. Alexander's
-    // verdict, 2026-09-17: scrap the stack, the 3x3 grid is the board. So there is one board
-    // layout again - nine slots, three columns, in portrait and in landscape alike - and the
-    // debug switch that let the two be compared is gone with it.
+    // Nine slot Panels per board, placed in the layout scene; a card is dropped INTO the next
+    // free slot, so the grid never grows or shifts. Their size in the scene is the board card
+    // size.
     //
-    // What the stack was really buying was SIZE: two rows instead of three left height over, and
-    // the height paid for bigger cards. The grid has to find that room somewhere else, so it is
-    // found in the things around the board instead - a smaller hand and a tighter middle panel in
-    // portrait (see ModifierCardScalePortrait and CompactPortraitPanel) - and spent here, on the
-    // board, through PortraitBoardCardScale.
-    //
-    // The ceiling is arithmetic and worth writing down, because the next "make them bigger" runs
-    // into it: portrait shows TWO boards, so six card-heights plus two hands plus the middle panel
-    // have to fit one phone. That caps a portrait card at roughly 1.25x what the grid drew before
-    // this pass. Past that the rows have to overlap, which is the stack again.
-    // ------------------------------------------------------------------
-    private const int GridGap = 10;                 // the .tscn h/v_separation
-
-    private const int GridGapPortrait = 6;          // every pixel here is a pixel off the cards
-
-    /// Portrait spends the room reclaimed from the hand and the panel on the board itself.
-    /// Pass 32: 1.25 -> 1.7. The board has a row to itself now and only two card rows, so it has
-    /// both the width and the height for much bigger cards. A guess to check on the S25 - too big
-    /// and EnsureLayoutFits scales the whole table down to make it fit, buttons and all.
-    private const float PortraitBoardCardScale = 1.7f;
-
-    // ------------------------------------------------------------------
-    // 3x2 in portrait (pass 32)
-    //
-    // Portrait shows two rows of three. Most sets end inside six cards, and the seventh is the
-    // first to need the third row: it appears then, and every card on THAT board shrinks so three
-    // rows fill exactly the height two did - so nothing else on the table moves mid-set. The board
-    // goes back to two rows when it is cleared for the next set. Landscape keeps 3x3 throughout.
+    // Portrait shows two rows of three (pass 32). The seventh card opens the third row, and every
+    // card on THAT board shrinks so three rows fill exactly the height two did - so nothing else
+    // on the table moves mid-set. The board goes back to two rows when it is cleared.
     // ------------------------------------------------------------------
     private const int PortraitRows = 2;
 
     private const int PortraitSlots = PortraitRows * 3;
 
-    /// Whether this board is showing its third row: always in landscape; in portrait, once any of
-    /// the last three slots holds a card.
+    private const string BaseCardMeta = "baseCardSize";
+
+    private const string ThirdRowMeta = "thirdRow";
+
     private bool ShowsThirdRow(Control board)
     {
-        if (!_portraitLayout || board == null) return true;
+        if (L == null || !L.Portrait || board == null) return true;
         int i = 0;
         foreach (Node child in board.GetChildren())
         {
@@ -1130,102 +568,35 @@ public sealed class TableUi
         return false;
     }
 
-    /// The size of a card on THIS board: BoardCardSize, or, in portrait with the third row open,
-    /// small enough that three rows take the height two did.
+    /// The size of a card on THIS board: the scene's slot size, or, in portrait with the third
+    /// row open, small enough that three rows take the height two did.
     private Vector2 BoardCardSizeFor(Control board)
     {
-        Vector2 size = BoardCardSize;
-        if (!_portraitLayout || !ShowsThirdRow(board)) return size;
-        float gap = GridGapPortrait;
+        Vector2 size = board != null && board.HasMeta(BaseCardMeta)
+            ? board.GetMeta(BaseCardMeta).AsVector2()
+            : CardSize;
+        if (L == null || !L.Portrait || !ShowsThirdRow(board)) return size;
+
+        float gap = board.GetThemeConstant("v_separation");
         float h = (PortraitRows * size.Y + (PortraitRows - 1) * gap - 2f * gap) / 3f;
         return size * (h / size.Y);
     }
-
-    // ------------------------------------------------------------------
-    // The face-down deck in the middle panel
-    //
-    // Portrait lays it on its SIDE (Alexander, 2026-09-17: "deck should be rotated in portrait
-    // mode to be horizontal"). The middle panel is a wide, short strip between the two boards
-    // there, so an upright card is the one thing in it fighting the shape of its own space; on its
-    // side it costs the strip roughly a third of the height and reads as a deck on a table edge.
-    //
-    // A container resets its children's rotation on every layout pass - the same fact that gave
-    // Player 2 its Holder/Rotator pair - so the node that TURNS cannot be the row's direct child.
-    // A plain holder stands in the row instead, reserving the footprint the turned card occupies,
-    // and the deck sits inside it unmanaged.
-    // ------------------------------------------------------------------
-    private Control _deckHolder;
-
-    private void ApplyDeckOrientation(bool portrait)
-    {
-        if (_mainDeckPosition == null) return;
-        Vector2 size = portrait ? CardSize * DeckCardScalePortrait : CardSize;
-
-        if (_deckHolder == null && _mainDeckPosition.GetParent() is Control row)
-        {
-            int at = _mainDeckPosition.GetIndex();
-            _deckHolder = new Control
-            {
-                Name = "DeckHolder",
-                MouseFilter = Control.MouseFilterEnum.Ignore,
-                SizeFlagsVertical = Control.SizeFlags.ShrinkCenter,
-            };
-            row.AddChild(_deckHolder);
-            row.MoveChild(_deckHolder, at);
-            row.RemoveChild(_mainDeckPosition);
-            _deckHolder.AddChild(_mainDeckPosition);
-        }
-
-        _mainDeckPosition.CustomMinimumSize = size;
-        _mainDeckPosition.Size = size;
-        _mainDeckPosition.PivotOffset = size / 2f; // turn about the middle, so the centre holds
-
-        if (_deckHolder == null) return;
-
-        // What the card occupies once it has turned: its own size with the axes swapped.
-        Vector2 footprint = portrait ? new Vector2(size.Y, size.X) : size;
-        _deckHolder.CustomMinimumSize = footprint;
-        _mainDeckPosition.RotationDegrees = portrait ? 90f : 0f;
-        _mainDeckPosition.Position = (footprint - size) / 2f;
-    }
-
-    /// The size of a card ON A BOARD. Everything else (deck, flying card, shop) keeps CardSize.
-    private Vector2 BoardCardSize => _portraitLayout ? CardSize * PortraitBoardCardScale : CardSize;
 
     private void ResizeBoard(Control board)
     {
         if (board == null) return;
         Vector2 size = BoardCardSizeFor(board);
-        board.SetMeta("thirdRow", ShowsThirdRow(board));
-
-        if (board is GridContainer grid)
-        {
-            grid.Columns = 3;
-            int gap = _portraitLayout ? GridGapPortrait : GridGap;
-            grid.AddThemeConstantOverride("h_separation", gap);
-            grid.AddThemeConstantOverride("v_separation", gap);
-        }
-
+        board.SetMeta(ThirdRowMeta, ShowsThirdRow(board));
         foreach (Node child in board.GetChildren())
         {
-            if (child is Control slot)
-            {
-                slot.CustomMinimumSize = size;
-                foreach (Node inner in slot.GetChildren())
-                {
-                    if (inner is TextureRect view) ApplyCardSize(view, size);
-                }
-            }
+            if (child is not Control slot) continue;
+            slot.CustomMinimumSize = size;
+            foreach (Node inner in slot.GetChildren())
+                if (inner is TextureRect view) ApplyCardSize(view, size);
         }
-        RefreshBoardSlots(board);
     }
 
-    /// Every empty slot shows its outline: on a grid the nine places ARE the board, and an empty
-    /// one says how much room is left. (The stack hid them, because an outline peeking out from
-    /// under the last card read as a card that was not there.)
-    ///
-    /// Pass 32: also where portrait's third row opens and closes (see PortraitRows). A change
-    /// re-sizes every card on the board, since the rows share the height two used to have.
+    /// Opens and closes portrait's third row (a change re-sizes every card on that board).
     private void RefreshBoardSlots(Control board)
     {
         if (board == null) return;
@@ -1234,81 +605,570 @@ public sealed class TableUi
         foreach (Node child in board.GetChildren())
         {
             if (child is not Control slot) continue;
-            // SelfModulate: hides the slot's own outline without touching a card inside it.
-            slot.SelfModulate = Colors.White;
             slot.Visible = third || i < PortraitSlots;
             i++;
         }
 
-        bool had = board.HasMeta("thirdRow") && board.GetMeta("thirdRow").AsBool();
-        if (had != third) ResizeBoard(board); // re-enters once; the meta matches after
+        bool had = board.HasMeta(ThirdRowMeta) && board.GetMeta(ThirdRowMeta).AsBool();
+        if (had != third) ResizeBoard(board);
     }
 
-    private Label _deckCountLabel;
-
-    /// The count on the deck art - the counting aid, and the clearest signal that the deck is a
-    /// real object with a bottom rather than a random number generator with a picture on it.
-    ///
-    /// Switched off in pass 22 (Alexander, 2026-09-16: "remaining cards don't need to be displayed
-    /// as a number"). The label is simply never built; every use of it is null-safe.
-    private const bool ShowDeckCount = false;
-
-    public void BuildDeckCounter()
+    /// Empties a board for a new set: every card view leaves its slot, the slots stay.
+    public void FillBoardWithSlots(Control board)
     {
-        if (_mainDeckPosition == null || !ShowDeckCount) return;
+        if (board == null) return;
+        foreach (Node child in board.GetChildren())
+            ClearChildren(child);
+        RefreshBoardSlots(board);
+    }
 
-        _deckCountLabel = new Label
+    /// Draws a player's cards straight into a freshly bound layout - no flight, no sound.
+    private void RestoreBoard(Control board, Player player)
+    {
+        if (board == null || player == null) return;
+        FillBoardWithSlots(board);
+        if (!_host.GameStarted) return;
+
+        foreach (Card card in player.ActiveCardsOnBoard)
         {
-            HorizontalAlignment = HorizontalAlignment.Center,
-            VerticalAlignment = VerticalAlignment.Center,
-            MouseFilter = Control.MouseFilterEnum.Ignore,
-        };
-        _deckCountLabel.AddThemeColorOverride("font_color", Colors.White);
-        _deckCountLabel.AddThemeColorOverride("font_outline_color", new Color(0, 0, 0, 0.75f));
-        _deckCountLabel.AddThemeConstantOverride("outline_size", 8);
-        _mainDeckPosition.AddChild(_deckCountLabel);
-        _deckCountLabel.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
+            Control slot = FindFreeSlot(board);
+            if (slot == null) break;
+            TextureRect view = CreateCardView(card, BoardCardSizeFor(board));
+            slot.AddChild(view);
+            view.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
+            RefreshBoardSlots(board);
+        }
+        ResizeBoard(board); // one size for every card, now the row count is known
     }
 
-    private void UpdateDeckCounter()
+    private Control FindFreeSlot(Control board)
     {
-        if (_deckCountLabel == null) return;
-        _deckCountLabel.Text = _host.GameStarted ? _host.Table.Remaining.ToString() : string.Empty;
+        foreach (Node child in board.GetChildren())
+        {
+            if (child is Control slot && slot.GetChildCount() == 0) return slot;
+        }
+        return null;
     }
 
-    /// The target, and the banner that narrates effect cards. Added around the existing set
-    /// line in code rather than in the two scene files, so both scenes get them from one place.
-    public void BuildTableBanners()
+    private static void ClearChildren(Node parent)
     {
-        Control column = _setInfoLabel?.GetParent() as Control;
-        if (column == null) return;
-        int at = _setInfoLabel.GetIndex();
-
-        // The target is the whole difficulty curve on this ladder - it moves from 20 to 23 to 18
-        // and back up - so it is the one number that cannot be a fragment of a status string.
-        _targetLabel = OverlayUi.MakeLabel(string.Empty, 36); // pass 23: was 30
-        column.AddChild(_targetLabel);
-        column.MoveChild(_targetLabel, at);
-
-        // Kept VISIBLE and empty rather than hidden, so the panel does not jump by a line every
-        // time an effect card resolves.
-        _effectBanner = OverlayUi.MakeLabel(string.Empty, 21, new Color(0.86f, 0.74f, 1.0f));
-        _effectBanner.AutowrapMode = TextServer.AutowrapMode.WordSmart;
-        _effectBanner.CustomMinimumSize = new Vector2(0, 50); // two lines at the bigger font
-        column.AddChild(_effectBanner);
-        column.MoveChild(_effectBanner, at + 2);
+        if (parent == null) return;
+        foreach (Node child in parent.GetChildren())
+        {
+            parent.RemoveChild(child);
+            child.QueueFree();
+        }
     }
 
-    /// A refusal is a sentence now, so the status line has to be able to hold one. The height for
-    /// two lines is reserved up front - a label that grows when a card is picked up would shove
-    /// the board down the screen mid-turn.
-    private void ConfigureStatusLabel(Label label)
+    // ------------------------------------------------------------------
+    // The refresh: the game's state, pushed onto the layout
+    // ------------------------------------------------------------------
+    public void Refresh()
+    {
+        if (L == null) return;
+
+        // A picked-up card that can no longer be played (spent, or the player just held) is
+        // dropped before anything is drawn, so the status line and the buttons agree.
+        _host.ValidateSelections();
+
+        RefreshScoreLines();
+        UpdateTargetLabel();
+
+        RefreshOpponentLines();
+        ApplyScoreDanger(L.P1ScoreBox, P1);
+        ApplyScoreDanger(L.P2ScoreBox, P2);
+        ApplyScoreDanger(L.P1OpponentBox, P2); // the opponent's score, boxed and red the same way
+        ApplyScoreDanger(L.P2OpponentBox, P1);
+        UpdateStatusToast(0, P1, _p1StatusToast);
+        UpdateStatusToast(1, P2, _p2StatusToast);
+
+        SetChips(L.P1Chips, State.SetsWonPlayer1);
+        SetChips(L.P2Chips, State.SetsWonPlayer2);
+
+        // While the set-end explanation is up, EndSet owns this label.
+        if (_host.GameStarted && _setInfoLabel != null && !State.IsGameOver && !_host.SetOverPending)
+        {
+            _setInfoLabel.Text = _host.SetInfoLine();
+        }
+        // The middle panel's lines take no room while they have nothing to say (local 2-player
+        // has no stage line, and the target line only speaks when the target moved).
+        HideIfEmpty(_setInfoLabel);
+        HideIfEmpty(_targetLabel);
+
+        // Both sides act at once: each player's row stays live until THAT player has ended the
+        // turn or is holding. Everything is locked while a set-end explanation is waiting.
+        bool p1Can = _host.CanAct(P1);
+        bool p2Can = _host.CanAct(P2);
+        SetEnabled(L.P1DrawCard, p1Can);
+        SetEnabled(L.P1Hold, p1Can);
+        SetEnabled(L.P2DrawCard, p2Can);
+        SetEnabled(L.P2Hold, p2Can);
+
+        // Whose move it is lives on the buttons (pass 33), not in a status line.
+        bool live = _host.GameStarted && !State.IsGameOver;
+        ApplyWaiting(L.P1DrawCard, L.P1Hold, live && !p1Can);
+        ApplyWaiting(L.P2DrawCard, L.P2Hold, live && !p2Can);
+
+        // While a card is picked up, that player's Draw Card / Hold row is swapped for the
+        // Play / Put back row (same slot, so nothing moves).
+        UpdateConfirmRow(P1, L.P1ConfirmRow, L.P1Play, L.P1FlipValue, L.P1ActionRow, L.P1WinsRow);
+        UpdateConfirmRow(P2, L.P2ConfirmRow, L.P2Play, L.P2FlipValue, L.P2ActionRow, L.P2WinsRow);
+
+        RefreshModifiersUI();
+        RefreshBoardSlots(L.P1Board);
+        RefreshBoardSlots(L.P2Board);
+        _host.AfterRefresh();
+
+        ApplyMirror(); // only does anything when the mirror has just changed
+    }
+
+    /// The score lines, in whichever form the mirror calls for.
+    ///
+    /// The score says whose it is and what it is chasing - "You  17/20" (playtest, 2026-09-14).
+    /// The target appears once per READER: against the bot only your row carries it; in local
+    /// 2-player each player reads their own row, so both do. Mirrored, each side reads from its
+    /// own player's point of view ("You: 13/20").
+    private void RefreshScoreLines()
+    {
+        ScoreLines p1 = new ScoreLines { YouPrefix = L.P1ScorePrefix, YouValue = L.P1ScoreValue, Them = L.P1ScoreThem };
+        ScoreLines p2 = new ScoreLines { YouPrefix = L.P2ScorePrefix, YouValue = L.P2ScoreValue, Them = L.P2ScoreThem };
+
+        if (IsMirrored)
+        {
+            // Pass 36: the "Them" line left the box for the spot beside it (RefreshOpponentLines).
+            SetScoreLines(p1, "You: ", P1, null);
+            SetScoreLines(p2, "You: ", P2, null);
+        }
+        else if (_host.VsBot)
+        {
+            SetScoreLines(p1, "You  ", P1, null);
+            SetScoreLines(p2, "Them  ", P2, null, preview: false, withTarget: false);
+        }
+        else
+        {
+            SetScoreLines(p1, "P1  ", P1, null);
+            SetScoreLines(p2, "P2  ", P2, null);
+        }
+    }
+
+    /// The other player's score, in the spot beside each player's own (pass 36). Always shown to
+    /// the person reading that side; against the bot the bot's side has no reader, so it is
+    /// left empty there rather than repeating your score across the table.
+    private void RefreshOpponentLines()
+    {
+        string p1 = _host.GameStarted ? P1.CurrentScore.ToString() : "-";
+        string p2 = _host.GameStarted ? P2.CurrentScore.ToString() : "-";
+
+        if (IsMirrored)
+        {
+            SetText(L.P1OpponentScore, $"Them: {p2}");
+            SetText(L.P2OpponentScore, $"Them: {p1}");
+        }
+        else if (_host.VsBot)
+        {
+            SetText(L.P1OpponentScore, $"Them  {p2}");
+            SetText(L.P2OpponentScore, string.Empty);
+        }
+        else
+        {
+            SetText(L.P1OpponentScore, $"P2  {p2}");
+            SetText(L.P2OpponentScore, $"P1  {p1}");
+        }
+    }
+
+    private void SetText(Label label, string text)
     {
         if (label == null) return;
-        label.AutowrapMode = TextServer.AutowrapMode.WordSmart;
-        label.HorizontalAlignment = HorizontalAlignment.Center;
-        label.CustomMinimumSize = new Vector2(0, label.GetThemeFontSize("font_size") * 2.6f);
+        label.Text = text;
+        // An empty line hides its box too (the bot's side, against the bot).
+        Control box = label == L.P1OpponentScore ? L.P1OpponentBox : label == L.P2OpponentScore ? L.P2OpponentBox : null;
+        Show(box, !string.IsNullOrEmpty(text));
     }
+
+    // ------------------------------------------------------------------
+    // Over the target: the score box turns red (pass 36), in place of the "Over target!" and
+    // "Bust!" words. Red while the score is over - a warning mid-turn (play a minus Modifier
+    // before ending it), a bust once the turn is over.
+    // ------------------------------------------------------------------
+    private readonly Dictionary<Control, StyleBox> _authoredBoxStyle = new Dictionary<Control, StyleBox>();
+    private readonly Dictionary<Control, StyleBox> _dangerBoxStyle = new Dictionary<Control, StyleBox>();
+
+    private static readonly Color DangerFill = new Color(0.5f, 0.06f, 0.08f, 0.88f);
+    private static readonly Color DangerEdge = new Color(1f, 0.45f, 0.42f, 0.95f);
+
+    private void ApplyScoreDanger(Control box, Player player)
+    {
+        if (box is not PanelContainer panel || player == null) return;
+
+        if (!_authoredBoxStyle.TryGetValue(box, out StyleBox authored))
+        {
+            // Whatever the scene gave the box is its normal look; red is made from a copy of it,
+            // so a restyle in the editor carries over to the red version too.
+            authored = panel.GetThemeStylebox("panel");
+            _authoredBoxStyle[box] = authored;
+            StyleBox danger = (StyleBox)authored?.Duplicate();
+            if (danger is StyleBoxFlat flat)
+            {
+                flat.BgColor = DangerFill;
+                flat.BorderColor = DangerEdge;
+            }
+            _dangerBoxStyle[box] = danger;
+        }
+
+        bool over = _host.GameStarted && player.CurrentScore > State.TargetScore;
+        StyleBox want = over ? _dangerBoxStyle[box] : authored;
+        if (want != null) panel.AddThemeStyleboxOverride("panel", want);
+    }
+
+    // ------------------------------------------------------------------
+    // Status toasts (pass 36)
+    //
+    // The messages about a side - what a picked-up effect card would do, "Just recalled",
+    // "Holding" - float over the middle of the table instead of taking a spot beside the score.
+    // One toast per player, copied from the layout's EffectToast so they share its look: Player
+    // 1's just below the middle, Player 2's just above (turned round with P2's side when
+    // mirrored). A message about a picked-up card stays while the card is picked up; any other
+    // message shows for a moment and fades.
+    // ------------------------------------------------------------------
+    private PanelContainer _p1StatusToast;
+    private PanelContainer _p2StatusToast;
+    private readonly string[] _statusShown = new string[2];
+    private readonly uint[] _statusToken = new uint[2];
+
+    private const float StatusToastSeconds = 2.5f;
+
+    private void BuildStatusToasts()
+    {
+        _statusShown[0] = _statusShown[1] = null;
+        _statusToken[0]++;
+        _statusToken[1]++;
+        _p1StatusToast = MakeStatusToast("P1StatusToast");
+        _p2StatusToast = MakeStatusToast("P2StatusToast");
+    }
+
+    private PanelContainer MakeStatusToast(string name)
+    {
+        if (L.EffectToast == null) return null;
+        PanelContainer toast = (PanelContainer)L.EffectToast.Duplicate();
+        toast.Name = name;
+        toast.TopLevel = true;
+        toast.Visible = false;
+        L.EffectToast.GetParent().AddChild(toast);
+        return toast;
+    }
+
+    private static Label ToastLabel(Control toast)
+    {
+        foreach (Node child in toast.GetChildren())
+            if (child is Label label) return label;
+        return null;
+    }
+
+    private void UpdateStatusToast(int index, Player player, PanelContainer toast)
+    {
+        if (toast == null || player == null) return;
+        Label label = ToastLabel(toast);
+        if (label == null) return;
+
+        string text = _host.StatusFor(player);
+        if (string.IsNullOrEmpty(text))
+        {
+            if (_statusShown[index] != null)
+            {
+                _statusToken[index]++;
+                toast.Visible = false;
+            }
+            _statusShown[index] = null;
+            return;
+        }
+
+        bool lasting = _host.SelectedFor(player) != null; // about the card in hand: stays while held
+        bool changed = text != _statusShown[index];
+        _statusShown[index] = text;
+        if (!changed && !lasting) return; // a timed message already had its moment
+
+        label.Text = text;
+        ApplyStatusColor(label, player);
+        toast.Modulate = Colors.White;
+        toast.Visible = true;
+        PlaceStatusToast(toast, index == 1);
+        Defer(() => PlaceStatusToast(toast, index == 1)); // again once the text has been shaped
+
+        if (changed)
+        {
+            uint token = ++_statusToken[index];
+            if (!lasting) FadeStatusToastLater(toast, index, token);
+        }
+    }
+
+    private async void FadeStatusToastLater(PanelContainer toast, int index, uint token)
+    {
+        await _root.ToSignal(_root.GetTree().CreateTimer(StatusToastSeconds), SceneTreeTimer.SignalName.Timeout);
+        if (!GodotObject.IsInstanceValid(toast) || token != _statusToken[index]) return;
+
+        Tween fade = toast.CreateTween();
+        fade.TweenProperty(toast, "modulate:a", 0f, 0.35f);
+        await _root.ToSignal(fade, Tween.SignalName.Finished);
+        if (!GodotObject.IsInstanceValid(toast) || token != _statusToken[index]) return;
+        toast.Visible = false;
+    }
+
+    private void PlaceStatusToast(PanelContainer toast, bool playerTwo)
+    {
+        if (toast == null || !toast.Visible || !toast.IsInsideTree() || L?.Canvas == null) return;
+        Label label = ToastLabel(toast);
+        Vector2 vp = _root.GetViewport().GetVisibleRect().Size;
+        float width = Mathf.Min(520f, vp.X - 32f);
+        if (label != null) label.CustomMinimumSize = new Vector2(Mathf.Max(80f, width - 40f), 0f);
+        toast.ResetSize();
+        Vector2 size = toast.GetCombinedMinimumSize();
+        toast.Size = size;
+
+        // Clear of the effect banner, which sits on the middle itself.
+        Vector2 centre = L.Canvas.GetGlobalRect().GetCenter();
+        float offset = size.Y / 2f + 70f;
+        Vector2 at = centre + new Vector2(-size.X / 2f, (playerTwo ? -offset : offset) - size.Y / 2f);
+        at.X = Mathf.Clamp(at.X, 16f, Mathf.Max(16f, vp.X - size.X - 16f));
+        at.Y = Mathf.Clamp(at.Y, 16f, Mathf.Max(16f, vp.Y - size.Y - 16f));
+        toast.GlobalPosition = at;
+
+        // Player 2's reads from the other side of the table when the side is turned round.
+        toast.PivotOffset = size / 2f;
+        toast.RotationDegrees = (playerTwo && IsMirrored) ? 180f : 0f;
+    }
+
+    /// The three labels of one side's score, as the layout scene has them.
+    private sealed class ScoreLines
+    {
+        public Label YouPrefix;
+        public Label YouValue;
+        public Label Them;
+    }
+
+    private void UpdateConfirmRow(Player player, Control row, Button playButton,
+                                  Button flipValueButton, Control actionRow, Control winsRow)
+    {
+        if (row == null) return;
+
+        Card picked = _host.SelectedFor(player);
+        row.Visible = picked != null;
+        if (actionRow != null) actionRow.Visible = picked == null;
+
+        bool flippable = picked != null && picked.CanFlipValue;
+        if (flipValueButton != null)
+        {
+            flipValueButton.Disabled = !flippable;
+            if (L.Portrait)
+            {
+                // Portrait: Flip Value stands in the bar's Wins spot, and only while it applies.
+                flipValueButton.Visible = flippable;
+                Show(winsRow, !flippable);
+            }
+            else
+            {
+                // Landscape: it stays in the confirm row, drawn and tappable only when it applies,
+                // so its space never opens or closes under the other two buttons.
+                flipValueButton.Visible = true;
+                flipValueButton.Modulate = flippable ? Colors.White : new Color(1, 1, 1, 0);
+                flipValueButton.MouseFilter = flippable ? Control.MouseFilterEnum.Stop : Control.MouseFilterEnum.Ignore;
+                Show(winsRow, true);
+            }
+        }
+
+        // An effect card that is not legal right now cannot be played at all, so the button says
+        // so rather than the card bouncing back with a message. The status line explains why.
+        if (playButton != null)
+        {
+            playButton.Disabled = picked != null && picked.Effect != CardEffect.None
+                && !_host.CanPlayEffect(player, picked);
+        }
+    }
+
+    private void RefreshModifiersUI()
+    {
+        if (L?.P1Hand == null || L.P2Hand == null || P1 == null) return;
+
+        // Detach immediately, not just QueueFree: queued nodes stay in the tree until the end of
+        // the frame and would still count towards the hand's minimum size.
+        ClearChildren(L.P1Hand);
+        ClearChildren(L.P2Hand);
+
+        bool p1Can = _host.CanAct(P1);
+        bool p2Can = _host.CanAct(P2);
+        Card p1Picked = _host.SelectedFor(P1);
+        Card p2Picked = _host.SelectedFor(P2);
+
+        foreach (Card card in P1.Modifiers)
+        {
+            L.P1Hand.AddChild(CreateModifierButton(
+                card, !p1Can, card == p1Picked, p1Picked != null,
+                () => _host.ModifierPressed(P1, card)));
+        }
+
+        foreach (Card card in P2.Modifiers)
+        {
+            L.P2Hand.AddChild(CreateModifierButton(
+                card, !p2Can, card == p2Picked, p2Picked != null,
+                () => _host.ModifierPressed(P2, card)));
+        }
+    }
+
+    private void SetChips(Container chips, int wins)
+    {
+        if (chips == null) return;
+        int i = 0;
+        foreach (Node child in chips.GetChildren())
+        {
+            if (child is TextureRect chip) chip.Texture = i < wins ? _chipWon : _chipEmpty;
+            i++;
+        }
+    }
+
+    /// Repaints the table and the standard cards for the rank the player is on. This is the whole
+    /// progression display: a board that looks different every two rungs (Alexander, 2026-09-07).
+    public void ApplyRankTheme()
+    {
+        RunData run = _host.InRun ? RunData.Instance : null;
+
+        // No run (local 2-player, or the scene opened on its own) means the plain felt: the
+        // clear colour is global and would otherwise follow us out of the run.
+        Color table = (run == null) ? DefaultTableColor : run.CurrentRank.Table;
+        _rankCardTint = (run == null) ? Colors.White : run.CurrentRank.CardTint;
+        _playmatTint = PlaymatTintFor(table);
+
+        RenderingServer.SetDefaultClearColor(table);
+        if (L == null) return;
+        if (L.Background != null) L.Background.SelfModulate = _playmatTint;
+        if (L.Deck != null)
+        {
+            // The gilded back is a profile reward, so it shows in local 2-player too.
+            if (_cardBack != null) L.Deck.Texture = _cardBack;
+            L.Deck.SelfModulate = DeckBackTint;
+        }
+    }
+
+    /// Blue: the picked-up Modifier keeps you at or under the target. Orange: it would take you over.
+    private static readonly Color PreviewUnderColor = new Color(0.45f, 0.72f, 1.00f);
+
+    private static readonly Color PreviewOverColor = new Color(1.00f, 0.55f, 0.30f);
+
+    private void SetScoreLines(ScoreLines lines, string prefix, Player player,
+                               string themLine, bool preview = true, bool withTarget = true)
+    {
+        if (lines?.YouPrefix == null || lines.YouValue == null) return;
+
+        lines.YouPrefix.Text = prefix;
+
+        int? previewed = preview ? PreviewedScore(player) : null;
+        if (previewed.HasValue)
+        {
+            int value = previewed.Value;
+            lines.YouValue.Text = _host.GameStarted ? $"{value}/{State.TargetScore}" : "-";
+            lines.YouValue.AddThemeColorOverride("font_color",
+                value > State.TargetScore ? PreviewOverColor : PreviewUnderColor);
+        }
+        else
+        {
+            lines.YouValue.Text = withTarget ? ScoreOf(player)
+                                             : (_host.GameStarted ? player.CurrentScore.ToString() : "-");
+            lines.YouValue.RemoveThemeColorOverride("font_color");
+        }
+
+        if (lines.Them != null)
+        {
+            lines.Them.Visible = themLine != null;
+            lines.Them.Text = themLine ?? string.Empty;
+        }
+    }
+
+    /// The score a picked-up plain Modifier would give, or null when nothing like that is picked
+    /// up. Effect cards and a just-recalled card explain themselves on the status line instead.
+    private int? PreviewedScore(Player player)
+    {
+        Card picked = _host.SelectedFor(player);
+        if (picked == null || picked.Effect != CardEffect.None || _host.Table.IsRecallLocked(player, picked)) return null;
+        return player.CurrentScore + picked.Value;
+    }
+
+    /// A player's score with the target behind it - "17/20" - so "how close am I" is one glance
+    /// rather than arithmetic against a number somewhere else on the screen.
+    private string ScoreOf(Player player) =>
+        _host.GameStarted ? $"{player.CurrentScore}/{State.TargetScore}" : "-";
+
+    private static void SetEnabled(Button button, bool enabled)
+    {
+        if (button != null) button.Disabled = !enabled;
+    }
+
+    private static void HideIfEmpty(Label label)
+    {
+        if (label != null) label.Visible = !string.IsNullOrEmpty(label.Text);
+    }
+
+    /// A side that cannot act right now - the other player (or the bot) is still deciding, it has
+    /// ended its turn, or it is holding - shows one disabled "Waiting..." button (playtest, pass
+    /// 33): Draw Card changes its words, in its own spot, and Hold steps out of the way.
+    private void ApplyWaiting(Button draw, Button hold, bool waiting)
+    {
+        if (draw != null) draw.Text = waiting ? "Waiting..." : "Draw Card";
+        Show(hold, !waiting);
+    }
+
+    /// Colours the status line for a picked-up EFFECT card (green: playable, red: not). A plain
+    /// Modifier's preview is on the score line instead (SetScoreLines).
+    private void ApplyStatusColor(Label label, Player player)
+    {
+        if (label == null) return;
+
+        Card picked = _host.SelectedFor(player);
+        if (picked == null)
+        {
+            label.RemoveThemeColorOverride("font_color");
+            return;
+        }
+
+        // An effect card is not added to this player's score, so "would this bust me" is the wrong
+        // question: colour it by whether it can be played at all.
+        if (picked.Effect != CardEffect.None)
+        {
+            label.AddThemeColorOverride("font_color", _host.CanPlayEffect(player, picked)
+                ? new Color(0.55f, 0.95f, 0.60f)
+                : new Color(1f, 0.45f, 0.42f));
+            return;
+        }
+
+        // A plain Modifier's preview lives on the score line (ScorePreviewColor), not here.
+        label.RemoveThemeColorOverride("font_color");
+    }
+
+    private static Vector2 Bigger(Vector2 a, Vector2 b) =>
+        new Vector2(Mathf.Max(a.X, b.X), Mathf.Max(a.Y, b.Y));
+
+    // ------------------------------------------------------------------
+    // The middle panel
+    // ------------------------------------------------------------------
+    /// Centres the floating banner on the middle panel. Its width is chosen here (autowrap needs
+    /// one), and its height follows from the text.
+    private void PlaceEffectToast()
+    {
+        if (_effectToast == null || _effectBanner == null || !_effectToast.Visible || !_effectToast.IsInsideTree()) return;
+        Control column = L?.Canvas ?? _effectToast.GetParent() as Control;
+        if (column == null) return;
+
+        Vector2 vp = _root.GetViewport().GetVisibleRect().Size;
+        float width = Mathf.Min(560f, vp.X - 32f);
+        _effectBanner.CustomMinimumSize = new Vector2(Mathf.Max(80f, width - 40f), 0f);
+        _effectToast.ResetSize(); // shrink back to the new text before measuring
+        Vector2 size = _effectToast.GetCombinedMinimumSize();
+        _effectToast.Size = size;
+
+        Vector2 centre = column.GetGlobalRect().GetCenter();
+        Vector2 at = centre - size / 2f;
+        at.X = Mathf.Clamp(at.X, 16f, Mathf.Max(16f, vp.X - size.X - 16f));
+        at.Y = Mathf.Clamp(at.Y, 16f, Mathf.Max(16f, vp.Y - size.Y - 16f));
+        _effectToast.GlobalPosition = at;
+    }
+
 
     private void UpdateTargetLabel()
     {
@@ -1350,7 +1210,6 @@ public sealed class TableUi
         _targetLabel.AddThemeColorOverride("font_color", TableGold);
     }
 
-
     /// What an effect card just did, on the table. The explanation already existed - CardEffects
     /// writes one for every card it resolves - but it only ever went to the log, so at the table
     /// a score simply changed and nothing said why.
@@ -1360,10 +1219,27 @@ public sealed class TableUi
 
         uint token = ++_effectBannerToken;
         _effectBanner.Text = text;
+        if (_effectToast != null)
+        {
+            _effectFade?.Kill(); // an older banner's fade must not carry on into this one
+            _effectToast.Modulate = Colors.White;
+            _effectToast.Visible = true;
+            PlaceEffectToast();
+            Defer(PlaceEffectToast); // again once the new text has been shaped
+        }
 
         await _root.ToSignal(_root.GetTree().CreateTimer(5.0f), SceneTreeTimer.SignalName.Timeout);
         if (!_root.IsInsideTree() || token != _effectBannerToken) return; // a newer card owns the line
 
+        // A short fade rather than a blink, so a player who was looking elsewhere sees it leave.
+        if (_effectToast != null)
+        {
+            Tween fade = _effectFade = _effectToast.CreateTween();
+            fade.TweenProperty(_effectToast, "modulate:a", 0f, 0.35f);
+            await _root.ToSignal(fade, Tween.SignalName.Finished);
+            if (!_root.IsInsideTree() || token != _effectBannerToken) return;
+            _effectToast.Visible = false;
+        }
         _effectBanner.Text = string.Empty;
     }
 
@@ -1371,314 +1247,8 @@ public sealed class TableUi
     {
         _effectBannerToken++;
         if (_effectBanner != null) _effectBanner.Text = string.Empty;
-    }
-
-    // ------------------------------------------------------------------
-    // UI refresh
-    // ------------------------------------------------------------------
-    /// The two score lines, in whichever form the orientation and the mirror call for.
-    ///
-    /// Its own method because TWO things need it: UpdateUI, whenever a number changes, and
-    /// ApplyResponsiveLayout, BEFORE it measures - the form decided here is what the fixed slots
-    /// are sized around, so a layout pass that ran first sized them around the outgoing one.
-    ///
-    /// The score is the number the whole decision hangs on, so it says whose it is and what it is
-    /// chasing - "You  17/20" - rather than making the player find two labels on opposite sides of
-    /// the screen and hold a target in their head (playtest, 2026-09-14).
-    ///
-    /// The target appears once per READER, never twice. Against the bot one person is looking at
-    /// the screen, so it rides on their row only; in local 2-player each player reads their own
-    /// row, so both carry it.
-    private void RefreshScoreLines()
-    {
-        // The size is set every refresh rather than once in _Ready, because the mirror toggle
-        // changes which of the two forms is on screen while the game is running.
-        int scoreFont = _portraitLayout
-            ? (IsMirrored ? ScoreFontSizeMirroredPortrait : ScoreFontSizePortrait)
-            : (IsMirrored ? ScoreFontSizeMirrored : ScoreFontSize);
-        // Each line is its own node now (ScoreLines): while a Modifier is picked up, the "You"
-        // number shows what it WOULD be, in colour, instead of a sum on a line of its own
-        // (Alexander, 2026-09-16).
-        if (IsMirrored)
-        {
-            // Two lines, each side reading from ITS OWN player's point of view. "P1 13/20 P2 8"
-            // was one dense row of four numbers and two labels that mean nothing to a stranger
-            // (Alexander, 2026-09-15: "isn't elderly friendly"). A mirrored side is only ever read
-            // by the person sitting at it, so "You" and "Them" are unambiguous there.
-            SetScoreLines(_p1Score, scoreFont, "You: ", P1, $"Them: {P2.CurrentScore}");
-            SetScoreLines(_p2Score, scoreFont, "You: ", P2, $"Them: {P1.CurrentScore}");
-        }
-        else if (_host.VsBot)
-        {
-            SetScoreLines(_p1Score, scoreFont, "You  ", P1, null);
-            SetScoreLines(_p2Score, scoreFont, "Them  ", P2, null, preview: false, withTarget: false);
-        }
-        else
-        {
-            SetScoreLines(_p1Score, scoreFont, "P1  ", P1, null);
-            SetScoreLines(_p2Score, scoreFont, "P2  ", P2, null);
-        }
-    }
-
-    public void Refresh()
-    {
-        // A picked-up card that can no longer be played (spent, or the player just held) is
-        // dropped before anything is drawn, so the status line and the buttons agree.
-        _host.ValidateSelections();
-
-        RefreshScoreLines();
-
-        UpdateTargetLabel();
-        UpdateDeckCounter();
-
-        if (_p1StatusLabel != null) _p1StatusLabel.Text = _host.StatusFor(P1);
-        if (_p2StatusLabel != null) _p2StatusLabel.Text = _host.StatusFor(P2);
-        ApplyStatusColor(_p1StatusLabel, P1);
-        ApplyStatusColor(_p2StatusLabel, P2);
-
-        // Set wins are shown as chips next to the label (see UpdateWinChips).
-        if (_p1WinsLabel != null) _p1WinsLabel.Text = "Wins:";
-        if (_p2WinsLabel != null) _p2WinsLabel.Text = "Wins:";
-        UpdateWinChips();
-
-        // While the set-end explanation is up, EndSet owns this label.
-        if (_host.GameStarted && _setInfoLabel != null && !State.IsGameOver && !_host.SetOverPending)
-        {
-            _setInfoLabel.Text = _host.SetInfoLine();
-        }
-
-        // Both sides act at once: each player's row stays live until THAT player has ended the
-        // turn or is holding. Everything is locked while a set-end explanation is waiting to be
-        // acknowledged. The solo scene's shared pair is Player 1's.
-        bool p1Can = _host.CanAct(P1);
-        bool p2Can = _host.CanAct(P2);
-        SetEnabled(_drawCardButton, p1Can);
-        SetEnabled(_holdButton, p1Can);
-        SetEnabled(_p1DrawCardButton, p1Can);
-        SetEnabled(_p1HoldButton, p1Can);
-        SetEnabled(_p2DrawCardButton, p2Can);
-        SetEnabled(_p2HoldButton, p2Can);
-
-        // While a card is picked up, that player's Draw Card / Hold row is swapped for the
-        // Play / +- / Put back row (same slot in the layout, so nothing moves).
-        UpdateConfirmRow(P1, _p1ConfirmRow, _p1PlayButton, _p1FlipValueButton, _p1ActionRow);
-        UpdateConfirmRow(P2, _p2ConfirmRow, _p2PlayButton, _p2FlipValueButton, _p2ActionRow);
-
-        RefreshModifiersUI();
-        RefreshBoardSlots(_p1BoardContainer);
-        RefreshBoardSlots(_p2BoardContainer);
-        _host.AfterRefresh();
-        Defer(UpdateRotatorSize);
-
-        // The layout is only as big as what is IN it, and what is in it changes here - the hands
-        // are dealt, and the confirm row (four buttons) swaps in for Draw Card / Hold (two). A
-        // check that only ran on resize measured the table before any of that existed. The latch
-        // inside makes this cheap: at most one measurement is ever in flight.
-        EnsureLayoutFits();
-    }
-
-    private static void SetEnabled(Button button, bool enabled)
-    {
-        if (button != null) button.Disabled = !enabled;
-    }
-
-    /// Colours the status line for a picked-up EFFECT card (green: playable, red: not). A plain
-    /// Modifier's preview is on the score line instead (SetScoreLines).
-    private void ApplyStatusColor(Label label, Player player)
-    {
-        if (label == null) return;
-
-        Card picked = _host.SelectedFor(player);
-        if (picked == null)
-        {
-            label.RemoveThemeColorOverride("font_color");
-            return;
-        }
-
-        // An effect card is not added to this player's score, so "would this bust me" is the wrong
-        // question: colour it by whether it can be played at all.
-        if (picked.Effect != CardEffect.None)
-        {
-            label.AddThemeColorOverride("font_color", _host.CanPlayEffect(player, picked)
-                ? new Color(0.55f, 0.95f, 0.60f)
-                : new Color(1f, 0.45f, 0.42f));
-            return;
-        }
-
-        // A plain Modifier's preview lives on the score line (ScorePreviewColor), not here.
-        label.RemoveThemeColorOverride("font_color");
-    }
-
-    /// Builds each player's Play / +- / Put back row, directly under the Draw Card / Hold row it
-    /// stands in for. Found from the exported buttons rather than a NodePath, so it works in both
-    /// scenes (and inside P2's rotator, so it flips with the rest of P2's side).
-    public void BuildConfirmRows()
-    {
-        _p1ConfirmRow = BuildConfirmRow(P1, _p1DrawCardButton ?? _drawCardButton, out _p1PlayButton,
-                                        out _p1FlipValueButton, out _p1ActionRow, out _p1ButtonSlot);
-        _p2ConfirmRow = BuildConfirmRow(P2, _p2DrawCardButton, out _p2PlayButton,
-                                        out _p2FlipValueButton, out _p2ActionRow, out _p2ButtonSlot);
-    }
-
-    private BoxContainer BuildConfirmRow(Player player, Button anchorButton, out Button playButton,
-                                         out Button flipValueButton, out Control actionRow,
-                                         out Control buttonSlot)
-    {
-        playButton = null;
-        flipValueButton = null;
-        actionRow = null;
-        buttonSlot = null;
-        if (anchorButton == null) return null; // that side has no buttons in this scene (the bot's)
-
-        actionRow = anchorButton.GetParent() as Control; // the Draw Card / Hold row
-        Node host = actionRow?.GetParent();              // the column that row lives in
-        if (actionRow == null || host == null) return null;
-
-        // A plain BoxContainer, not an HBox: only a BoxContainer can be turned vertical.
-        BoxContainer row = new BoxContainer
-        {
-            Visible = false,
-            Alignment = BoxContainer.AlignmentMode.Center,
-        };
-        row.AddThemeConstantOverride("separation", 12);
-
-        // Play and Put back sit where Draw Card and Hold sit, and Flip Value goes last - so the
-        // two buttons every card has never move, and a card without Flip Value leaves its space
-        // empty at the end rather than closing the gap (pass 21).
-        Button play = MakeConfirmButton("Play", primary: true);
-        play.Pressed += () => _host.PlayPressed(player);
-        row.AddChild(play);
-        playButton = play;
-
-        Button cancel = MakeConfirmButton("Put back");
-        cancel.Pressed += () => { _host.PutBackPressed(player); Refresh(); };
-        row.AddChild(cancel);
-
-        flipValueButton = MakeConfirmButton("Flip Value", ring: InkFlip);
-        flipValueButton.Pressed += () => _host.FlipValuePressed(player);
-        row.AddChild(flipValueButton);
-
-        // Both rows go into one fixed-size slot where the action row was. The slot is as big as
-        // the bigger of the two, so swapping them moves nothing else on the table.
-        //
-        // Measured, not remembered (pass 22): the size comes from the buttons and each row's
-        // CURRENT orientation every time it is asked, and the rows keep their own height.
-        Control action = actionRow;
-        StableBox slot = new StableBox
-        {
-            Name = "ButtonSlot",
-            StretchChildrenVertically = false,
-            Measure = () => Bigger(MeasureButtonRow(action as BoxContainer, _portraitLayout),
-                                   MeasureButtonRow(row, _portraitLayout)),
-        };
-        int at = actionRow.GetIndex();
-        host.AddChild(slot);
-        host.MoveChild(slot, at);
-        actionRow.GetParent().RemoveChild(actionRow);
-        slot.AddChild(actionRow);
-        slot.AddChild(row);
-        buttonSlot = slot;
-        return row;
-    }
-
-    /// What a row of buttons needs laid out the way it is facing now. Hidden rows count too -
-    /// that is what lets the slot hold the bigger of the two rows while only one is showing.
-    ///
-    /// equalWidths (portrait's bar, pass 32): every button is as wide as the widest, so the pair
-    /// splits the slot into two equal halves and Play lands exactly where Draw Card was.
-    private static Vector2 MeasureButtonRow(BoxContainer row, bool equalWidths = false)
-    {
-        if (row == null) return Vector2.Zero;
-        int sep = row.GetThemeConstant("separation");
-        float along = 0f, across = 0f, widest = 0f;
-        int count = 0;
-        foreach (Node node in row.GetChildren())
-        {
-            if (node is not Control child) continue;
-            Vector2 min = child.GetCombinedMinimumSize();
-            along += row.Vertical ? min.Y : min.X;
-            across = Mathf.Max(across, row.Vertical ? min.X : min.Y);
-            widest = Mathf.Max(widest, min.X);
-            count++;
-        }
-        if (equalWidths && !row.Vertical) along = widest * count;
-        if (count > 1) along += sep * (count - 1);
-        return row.Vertical ? new Vector2(across, along) : new Vector2(along, across);
-    }
-
-    private static Vector2 Bigger(Vector2 a, Vector2 b) =>
-        new Vector2(Mathf.Max(a.X, b.X), Mathf.Max(a.Y, b.Y));
-
-    /// Play / Put back / Flip Value. Pass 31: the house pill (OverlayUi.StyleButton) - Play is
-    /// the accent, Put back is plain, and Flip Value is ringed in the violet of a +/- card.
-    private static Button MakeConfirmButton(string text, bool primary = false, Color? ring = null)
-    {
-        Button button = new Button { Text = text, FocusMode = Control.FocusModeEnum.None };
-        OverlayUi.StyleButton(button, primary, ring);
-        return button;
-    }
-
-    private void UpdateConfirmRow(Player player, BoxContainer row, Button playButton,
-                                  Button flipValueButton, Control actionRow)
-    {
-        if (row == null) return;
-
-        Card picked = _host.SelectedFor(player);
-        row.Visible = picked != null;
-        if (actionRow != null) actionRow.Visible = picked == null;
-        // Portrait: Flip Value stands in the bar's Wins spot, and only while it applies.
-        UpdateBarLeft(player, WinsRowOf(player), flipValueButton);
-        if (flipValueButton != null)
-        {
-            // Kept in the layout and just not drawn or tappable, so its space never opens or
-            // closes under the other two buttons.
-            bool flippable = picked != null && picked.CanFlipValue;
-            flipValueButton.Modulate = flippable ? Colors.White : new Color(1, 1, 1, 0);
-            flipValueButton.Disabled = !flippable;
-            flipValueButton.MouseFilter = flippable ? Control.MouseFilterEnum.Stop : Control.MouseFilterEnum.Ignore;
-        }
-
-        // An effect card that is not legal right now cannot be played at all, so the button says
-        // so rather than the card bouncing back with a message. The status line above it is
-        // already explaining why (see EffectPreview).
-        if (playButton != null)
-        {
-            playButton.Disabled = picked != null && picked.Effect != CardEffect.None
-                && !_host.CanPlayEffect(player, picked);
-        }
-    }
-
-    private Control WinsRowOf(Player player) =>
-        (player == P1 ? _p1WinChips : _p2WinChips)?.GetParent() as Control;
-
-    private void RefreshModifiersUI()
-    {
-        if (_p1ModifierContainer == null || _p2ModifierContainer == null || P1 == null) return;
-
-        // Detach immediately, not just QueueFree: queued nodes stay in the tree until the end of
-        // the frame and would still count towards the hand's minimum size when the deferred
-        // UpdateRotatorSize runs (P2's side then reserved room for 8-12 cards and pushed P1 off-screen).
-        ClearChildren(_p1ModifierContainer);
-        ClearChildren(_p2ModifierContainer);
-
-        bool p1Can = _host.CanAct(P1);
-        bool p2Can = _host.CanAct(P2);
-        Card p1Picked = _host.SelectedFor(P1);
-        Card p2Picked = _host.SelectedFor(P2);
-
-        foreach (Card card in P1.Modifiers)
-        {
-            _p1ModifierContainer.AddChild(CreateModifierButton(
-                card, !p1Can, card == p1Picked, p1Picked != null,
-                () => _host.ModifierPressed(P1, card)));
-        }
-
-        foreach (Card card in P2.Modifiers)
-        {
-            _p2ModifierContainer.AddChild(CreateModifierButton(
-                card, !p2Can, card == p2Picked, p2Picked != null,
-                () => _host.ModifierPressed(P2, card)));
-        }
+        _effectFade?.Kill();
+        if (_effectToast != null) _effectToast.Visible = false;
     }
 
     /// A tappable modifier card: an invisible Button (so the theme's touch-friendly hit area
@@ -1736,52 +1306,6 @@ public sealed class TableUi
         return button;
     }
 
-    // ------------------------------------------------------------------
-    // Board slots
-    // ------------------------------------------------------------------
-    /// Clears the board and fills it with 9 empty, faintly outlined slots. Cards are placed
-    /// INTO these slots (see InstantiateCardView) so the grid never grows or shifts.
-    private static void ClearChildren(Node parent)
-    {
-        if (parent == null) return;
-        foreach (Node child in parent.GetChildren())
-        {
-            parent.RemoveChild(child);
-            child.QueueFree();
-        }
-    }
-
-    public void FillBoardWithSlots(Control board)
-    {
-        if (board == null) return;
-        ClearChildren(board);
-
-        for (int i = 0; i < BoardSlots; i++)
-        {
-            Panel slot = new Panel { CustomMinimumSize = BoardCardSizeFor(board), MouseFilter = Control.MouseFilterEnum.Ignore };
-            StyleBoxFlat style = new StyleBoxFlat
-            {
-                // Pass 31: Pocket's board - a faint white wash inside a thin white ring.
-                BgColor = new Color(1, 1, 1, 0.05f),
-                BorderColor = new Color(1, 1, 1, 0.3f),
-                AntiAliasingSize = 1.2f,
-            };
-            style.SetBorderWidthAll(2);
-            style.SetCornerRadiusAll(10);
-            slot.AddThemeStyleboxOverride("panel", style);
-            board.AddChild(slot);
-        }
-        RefreshBoardSlots(board);
-    }
-
-    private Control FindFreeSlot(Control board)
-    {
-        foreach (Node child in board.GetChildren())
-        {
-            if (child is Control slot && slot.GetChildCount() == 0) return slot;
-        }
-        return null;
-    }
 
     // ------------------------------------------------------------------
     // Card views
@@ -1812,14 +1336,6 @@ public sealed class TableUi
             Label label = view.GetNodeOrNull<Label>(name);
             if (label != null) label.AddThemeColorOverride("font_color", ink);
         }
-    }
-
-    /// Sets the mat for the orientation, and tints it for the rank in play.
-    private void UpdatePlaymat(bool portrait)
-    {
-        if (_playmat == null || !GodotObject.IsInstanceValid(_playmat)) return;
-        Texture2D mat = portrait ? _playmatPortrait : _playmatLandscape;
-        if (mat != null && _playmat.Texture != mat) _playmat.Texture = mat;
     }
 
     private static Color PlaymatTintFor(Color table)
@@ -2048,292 +1564,6 @@ public sealed class TableUi
         bottom.Modulate = plusChosen ? DimmedHalf : Colors.White;
     }
 
-    /// Two sizes. The mirrored form carries two scores; stacked on two lines it is no longer
-    /// wider than the screen (which was the original reason for shrinking it - a too-wide side
-    /// inside a CenterContainer spills off BOTH edges and EnsureLayoutFits answers by scaling the
-    /// whole UI down), so it only gives up what the extra line costs in height.
-    private const int ScoreFontSize = 40;          // pass 23: was 34
-
-    private const int ScoreFontSizeMirrored = 36;  // was 30
-
-    private const int ActionFontSize = 35;         // was 30
-
-    private const float ActionButtonHeight = 86f;  // was 76
-
-    // Portrait sizes, raised again in pass 23 (Alexander, 2026-09-17: "cards and all other text
-    // need to be MUCH bigger"). EnsureLayoutFits scales the whole table down if a phone cannot
-    // take them, so this is not free: every point here is shared with the board through the fit.
-    // Pass 32 moved the score to a row ABOVE the board, so its width no longer comes off the
-    // cards - but its height does, twice (one per side). Left at 54.
-    private const int ScoreFontSizePortrait = 54;          // was 46
-
-    private const int ScoreFontSizeMirroredPortrait = 46;  // was 40
-
-    // Pass 32: back down from 38 / 92. The buttons share ONE row with Wins now (the bar under
-    // the board) instead of standing in a column, and that row is what sets portrait's width.
-    private const int ActionFontSizePortrait = 34;
-
-    private const float ActionButtonHeightPortrait = 86f;
-
-    private const int StatusFontSizePortrait = 33;         // was 28
-
-    private const int WinsFontSizePortrait = 33;           // was 28
-
-    private const float ChipSizePortrait = 42f;            // was 36
-
-    private const int PanelFontSizePortrait = 34;          // was 28
-
-    /// Font sizes that differ by orientation, applied on every layout pass.
-    private void ApplyOrientationTypography(bool portrait)
-    {
-        foreach (Button button in ActionButtons())
-            StyleActionButton(button, portrait);
-
-        foreach (Label status in new[] { _p1StatusLabel, _p2StatusLabel })
-        {
-            if (status == null) continue;
-            if (portrait) status.AddThemeFontSizeOverride("font_size", StatusFontSizePortrait);
-            else status.RemoveThemeFontSizeOverride("font_size");
-            ConfigureStatusLabel(status); // its reserved two lines follow the font
-        }
-
-        foreach (Label wins in new[] { _p1WinsLabel, _p2WinsLabel })
-        {
-            if (wins == null) continue;
-            if (portrait) wins.AddThemeFontSizeOverride("font_size", WinsFontSizePortrait);
-            else wins.RemoveThemeFontSizeOverride("font_size");
-        }
-
-        float chip = portrait ? ChipSizePortrait : ChipSize;
-        foreach (HBoxContainer chips in new[] { _p1WinChips, _p2WinChips })
-        {
-            if (chips == null) continue;
-            foreach (Node node in chips.GetChildren())
-                if (node is Control c) c.CustomMinimumSize = new Vector2(chip, chip);
-        }
-
-        if (_setInfoLabel != null)
-        {
-            if (portrait) _setInfoLabel.AddThemeFontSizeOverride("font_size", PanelFontSizePortrait);
-            else _setInfoLabel.RemoveThemeFontSizeOverride("font_size");
-        }
-
-        CompactPortraitPanel(portrait);
-    }
-
-    /// The middle panel sits BETWEEN the two boards in portrait, so every pixel of padding in it
-    /// is a pixel the two 3x3 grids do not get (pass 23). Landscape keeps the roomier spacing -
-    /// it has the width, and the playtesters said it already felt right.
-    private void CompactPortraitPanel(bool portrait)
-    {
-        Control panel = _mainLayout?.GetNodeOrNull<Control>("SharedControlPanel");
-        if (panel?.GetNodeOrNull<BoxContainer>("VBoxContainer") is not BoxContainer column) return;
-        column.AddThemeConstantOverride("separation", portrait ? 4 : 10);
-        if (_mainLayout != null) _mainLayout.AddThemeConstantOverride("separation", portrait ? 6 : 12);
-    }
-
-    private IEnumerable<Button> ActionButtons()
-    {
-        foreach (Button button in new[] { _drawCardButton, _holdButton, _p1DrawCardButton,
-                                          _p1HoldButton, _p2DrawCardButton, _p2HoldButton })
-            if (button != null) yield return button;
-
-        // The confirm row stands in for Draw Card / Hold in the same slot, so it has to be the same
-        // height - otherwise the whole side jumps every time a card is picked up or put back.
-        foreach (Control row in new Control[] { _p1ConfirmRow, _p2ConfirmRow })
-        {
-            if (row == null) continue;
-            foreach (Node child in row.GetChildren())
-                if (child is Button button && button != _p1FlipValueButton && button != _p2FlipValueButton)
-                    yield return button;
-        }
-
-        // Named, not found in the row: portrait moves Flip Value out of it into the bar (pass 32).
-        foreach (Button flip in new[] { _p1FlipValueButton, _p2FlipValueButton })
-            if (flip != null) yield return flip;
-    }
-
-    /// Blue: the picked-up Modifier keeps you at or under the target. Orange: it would take you over.
-    private static readonly Color PreviewUnderColor = new Color(0.45f, 0.72f, 1.00f);
-
-    private static readonly Color PreviewOverColor = new Color(1.00f, 0.55f, 0.30f);
-
-    // ------------------------------------------------------------------
-    // Score lines (pass 21)
-    //
-    // The exported ScoreLabel was one Label holding "You: 7/20\nThem: 12". A Label has one colour,
-    // so the preview could not colour just the number - and the sum sat on a line of its own that
-    // appeared and vanished as cards were picked up. Now each piece is its own node, built once
-    // in the label's place; the exported label stays in the scene (hidden) so nothing that
-    // references it breaks.
-    // ------------------------------------------------------------------
-    private sealed class ScoreLines
-    {
-        public Control Root;
-        public Label YouPrefix;
-        public Label YouValue;
-        public Label Them;
-    }
-
-    private ScoreLines BuildScoreLines(Label source)
-    {
-        if (source?.GetParent() is not Control parent) return null;
-
-        VBoxContainer root = new VBoxContainer { Name = "ScoreLines", MouseFilter = Control.MouseFilterEnum.Ignore };
-        root.AddThemeConstantOverride("separation", 0);
-        int at = source.GetIndex();
-        parent.AddChild(root);
-        parent.MoveChild(root, at);
-        source.Visible = false;
-
-        HBoxContainer youRow = new HBoxContainer { MouseFilter = Control.MouseFilterEnum.Ignore };
-        youRow.AddThemeConstantOverride("separation", 0);
-        root.AddChild(youRow);
-
-        ScoreLines lines = new ScoreLines
-        {
-            Root = root,
-            YouPrefix = new Label(),
-            YouValue = new Label(),
-            Them = new Label(),
-        };
-        youRow.AddChild(lines.YouPrefix);
-        youRow.AddChild(lines.YouValue);
-        root.AddChild(lines.Them);
-        return lines;
-    }
-
-    private void SetScoreLines(ScoreLines lines, int fontSize, string prefix, Player player,
-                               string themLine, bool preview = true, bool withTarget = true)
-    {
-        if (lines == null) return;
-
-        foreach (Label label in new[] { lines.YouPrefix, lines.YouValue, lines.Them })
-            label.AddThemeFontSizeOverride("font_size", fontSize);
-
-        lines.YouPrefix.Text = prefix;
-
-        int? previewed = preview ? PreviewedScore(player) : null;
-        if (previewed.HasValue)
-        {
-            int value = previewed.Value;
-            lines.YouValue.Text = _host.GameStarted ? $"{value}/{State.TargetScore}" : "-";
-            lines.YouValue.AddThemeColorOverride("font_color",
-                value > State.TargetScore ? PreviewOverColor : PreviewUnderColor);
-        }
-        else
-        {
-            lines.YouValue.Text = withTarget ? ScoreOf(player)
-                                             : (_host.GameStarted ? player.CurrentScore.ToString() : "-");
-            lines.YouValue.RemoveThemeColorOverride("font_color");
-        }
-
-        lines.Them.Visible = themLine != null;
-        lines.Them.Text = themLine ?? string.Empty;
-    }
-
-    /// The score a picked-up plain Modifier would give, or null when nothing like that is picked
-    /// up. Effect cards and a just-recalled card explain themselves on the status line instead.
-    private int? PreviewedScore(Player player)
-    {
-        Card picked = _host.SelectedFor(player);
-        if (picked == null || picked.Effect != CardEffect.None || _host.Table.IsRecallLocked(player, picked)) return null;
-        return player.CurrentScore + picked.Value;
-    }
-
-    /// A player's score with the target behind it - "17/20" - so "how close am I" is one glance
-    /// rather than arithmetic against a number somewhere else on the screen.
-    private string ScoreOf(Player player) =>
-        _host.GameStarted ? $"{player.CurrentScore}/{State.TargetScore}" : "-";
-
-    /// The score is the biggest thing on the table and Draw Card / Hold are the biggest buttons,
-    /// both from the same note: the 55+ players could not read either at arm's length.
-    ///
-    /// ONLY those two buttons grow. Restart / Exit / How to Play serve presses that happen once a
-    /// session and sit behind the Menu button now; growing them as well would spend the portrait
-    /// column's whole height budget, and EnsureLayoutFits would take it straight back by scaling
-    /// the entire UI down - which is the trap this pass had to be built around, not sprung.
-    public void StyleTableForReadability()
-    {
-        // The score leads its row. It was third, behind "Wins:" and the chips - which put the
-        // largest and most-read thing on the table after the least-read (Alexander's sketch).
-        foreach (Label score in new[] { _p1ScoreLabel, _p2ScoreLabel })
-        {
-            if (score?.GetParent() is Control row) row.MoveChild(score, 0);
-        }
-
-        foreach (Button button in ActionButtons())
-            StyleActionButton(button, portrait: false);
-    }
-
-    private static void StyleActionButton(Button button, bool portrait)
-    {
-        if (button == null) return;
-        button.AddThemeFontSizeOverride("font_size", portrait ? ActionFontSizePortrait : ActionFontSize);
-        button.CustomMinimumSize = new Vector2(button.CustomMinimumSize.X,
-                                               portrait ? ActionButtonHeightPortrait : ActionButtonHeight);
-    }
-
-    /// Portrait feedback: "centre is too clustered in portrait mode, but landscape feels nice".
-    /// Landscape has a whole extra axis to spread the same content across, so the fix is NOT a
-    /// landscape lock (the orientation lock was removed deliberately) - it is that the middle
-    /// column carries too much for one phone-width strip.
-    ///
-    /// Three things move:
-    ///  - How to Play / Restart / Exit / the mirror toggle go behind one "Menu" button. All four
-    ///    were permanently on screen to serve presses that happen once a session.
-    ///  - The solo scene's Draw Card / Hold leave the middle panel for Player 1's own side, under
-    ///    the hand they act on and near the thumb, which is where the 2-player scene already has
-    ///    them. (In the 2-player scene _drawCardButton is null and this does nothing.)
-    ///  - The mode dropdown is hidden: the start menu has owned mode selection since pass 7. The
-    ///    NODE stays, because "_gameModeButton != null" is how this class tells the two scenes
-    ///    apart - deleting it would break the auto-start routing on both sides.
-    ///
-    /// Runs BEFORE BuildConfirmRows, which finds each action row from its exported button and
-    /// inserts the Play / +- / Put back row next to it. Moving the row afterwards would leave the
-    /// confirm row behind in the middle panel, which is exactly the bug this ordering prevents.
-    public void CompactControlPanel()
-    {
-        if (_gameModeButton != null) _gameModeButton.Visible = false;
-
-        Control actionRow = _drawCardButton?.GetParent() as Control;
-        Control p1Layout = _root.GetNodeOrNull<Control>("GameUI/MainLayout/Player1Side/Layout");
-        if (actionRow != null && p1Layout != null && actionRow.GetParent() != p1Layout)
-        {
-            actionRow.GetParent().RemoveChild(actionRow);
-            p1Layout.AddChild(actionRow);
-        }
-
-        _host.BuildTableMenu();
-    }
-
-    /// Repaints the table and the standard cards for the rank the player is on. This is the whole
-    /// progression display: no invented venue names, just a board that looks different every two
-    /// rungs (Alexander, 2026-09-07).
-    public void ApplyRankTheme()
-    {
-        RunData run = _host.InRun ? RunData.Instance : null;
-
-        // No run (local 2-player, or the solo scene opened on its own) means the plain felt: the
-        // clear colour is global and would otherwise follow us out of the run.
-        Color table = (run == null) ? DefaultTableColor : run.CurrentRank.Table;
-        _rankCardTint = (run == null) ? Colors.White : run.CurrentRank.CardTint;
-
-        // The clear colour only shows if the mat is missing; the mat is the table now.
-        RenderingServer.SetDefaultClearColor(table);
-        if (_playmat != null && GodotObject.IsInstanceValid(_playmat))
-        {
-            UpdatePlaymat(_portraitLayout);
-            _playmat.SelfModulate = PlaymatTintFor(table);
-        }
-        if (_mainDeckPosition is TextureRect deck)
-        {
-            // The gilded back is a profile reward, so it shows in local 2-player too.
-            if (_cardBack != null) deck.Texture = _cardBack;
-            deck.SelfModulate = DeckBackTint;
-        }
-    }
-
     public TextureRect CreateCardView(Card card, Vector2 size)
     {
         TextureRect view = (TextureRect)_cardViewScene.Instantiate();
@@ -2554,6 +1784,17 @@ public sealed class TableUi
         Vector2 targetCenter = realCard.GetGlobalTransform() * (realCard.Size / 2f);
         float targetRotation = Mathf.RadToDeg(realCard.GetGlobalTransform().Rotation);
 
+        // A tilted board draws the card somewhere else than its slot's flat rect (pass 39), and
+        // narrower: aim for where it will be SEEN, at the size it will be seen.
+        Vector2 landScale = Vector2.One;
+        if (FindBoardOf(realCard) is PerspectiveBoard tilted)
+        {
+            Vector2 flatCenter = targetCenter;
+            targetCenter = tilted.Warp(flatCenter);
+            float s = tilted.Tilt ? tilted.WidthScaleAt(flatCenter) : 1f;
+            landScale = new Vector2(s, tilted.Tilt ? tilted.Depth : 1f);
+        }
+
         // 3. Fly, spin and grow at the same time, then reveal the real card
         Tween tween = _root.GetTree().CreateTween();
         tween.SetParallel(true);
@@ -2576,7 +1817,7 @@ public sealed class TableUi
         tween.TweenProperty(fakeCard, "rotation_degrees", targetRotation, 0.35f)
              .SetTrans(Tween.TransitionType.Cubic)
              .SetEase(Tween.EaseType.Out);
-        tween.TweenProperty(fakeCard, "scale", Vector2.One, 0.35f)
+        tween.TweenProperty(fakeCard, "scale", landScale, 0.35f)
              .SetTrans(Tween.TransitionType.Cubic)
              .SetEase(Tween.EaseType.Out);
         tween.Chain().TweenCallback(Callable.From(() =>
@@ -2587,87 +1828,17 @@ public sealed class TableUi
         }));
     }
 
+    private static Control FindBoardOf(Node node)
+    {
+        for (Node at = node?.GetParent(); at != null; at = at.GetParent())
+            if (at is GridContainer grid) return grid;
+        return null;
+    }
+
     private void RevealWithoutFlight(Control realCard)
     {
         if (!GodotObject.IsInstanceValid(realCard)) return;
         realCard.Modulate = Colors.White;
         if (_sfxPlace != null) _sfxPlace.Play();
     }
-
-    // ------------------------------------------------------------------
-    // Set-win chips
-    // ------------------------------------------------------------------
-    /// Adds a row of poker chips right after the "Wins" label (one per set needed to win the match).
-    private HBoxContainer EnsureWinChips(Label winsLabel)
-    {
-        if (winsLabel == null || _chipEmpty == null) return null;
-        Node parent = winsLabel.GetParent();
-        if (parent == null) return null;
-
-        HBoxContainer chips = new HBoxContainer { Alignment = BoxContainer.AlignmentMode.Center };
-        chips.AddThemeConstantOverride("separation", 4);
-        for (int i = 0; i < WinsToTakeMatch; i++)
-        {
-            chips.AddChild(new TextureRect
-            {
-                Texture = _chipEmpty,
-                CustomMinimumSize = new Vector2(ChipSize, ChipSize),
-                ExpandMode = TextureRect.ExpandModeEnum.IgnoreSize,
-                StretchMode = TextureRect.StretchModeEnum.KeepAspectCentered,
-                SizeFlagsVertical = Control.SizeFlags.ShrinkCenter,
-            });
-        }
-        parent.AddChild(chips);
-        parent.MoveChild(chips, winsLabel.GetIndex() + 1);
-        return chips;
-    }
-
-    private void UpdateWinChips()
-    {
-        SetChips(_p1WinChips, State.SetsWonPlayer1);
-        SetChips(_p2WinChips, State.SetsWonPlayer2);
-    }
-
-    private void SetChips(HBoxContainer chips, int wins)
-    {
-        if (chips == null) return;
-        int i = 0;
-        foreach (Node child in chips.GetChildren())
-        {
-            if (child is TextureRect chip) chip.Texture = i < wins ? _chipWon : _chipEmpty;
-            i++;
-        }
-    }
-
-    // The score as three separate nodes per side, so the "You" number can change colour on its
-    // own while a Modifier is being previewed (pass 21).
-    private ScoreLines _p1Score;
-
-    private ScoreLines _p2Score;
-
-    private BoxContainer _p1ConfirmRow;
-
-    private BoxContainer _p2ConfirmRow;
-
-    // Draw Card / Hold and Play / Put back / Flip Value share ONE fixed-size slot per player, so
-    // picking a card up no longer resizes the side around it (pass 21).
-    private Control _p1ButtonSlot;
-
-    private Control _p2ButtonSlot;
-
-    private Button _p1PlayButton;
-
-    private Button _p2PlayButton;
-
-    private Button _p1FlipValueButton;
-
-    private Button _p2FlipValueButton;
-
-    private Control _p1ActionRow;
-
-    private Control _p1SideLayout;
-
-    private Control _p2SideLayout;
-
-    private Control _p2ActionRow;
 }

@@ -1,0 +1,255 @@
+[gd_scene format=3 uid="uid://b7qn5xyxoj23q"]
+
+[ext_resource type="Script" uid="uid://cdrp0i3hpccul" path="res://GameManager.cs" id="1_u7gne"]
+[ext_resource type="Texture2D" path="res://assets/aimfor20_art/card_back.png" id="2_back"]
+[ext_resource type="Texture2D" path="res://assets/aimfor20_art/playmat_landscape.png" id="3_mat"]
+
+[node name="TableScene" type="Control" unique_id=610587453 node_paths=PackedStringArray("_p1ScoreLabel", "_p1StatusLabel", "_p1WinsLabel", "_p1BoardContainer", "_p1ModifierContainer", "_p1DrawCardButton", "_p1HoldButton", "_p2ScoreLabel", "_p2StatusLabel", "_p2WinsLabel", "_p2BoardContainer", "_p2ModifierContainer", "_p2Rotator", "_p2DrawCardButton", "_p2HoldButton", "_setInfoLabel", "_gameModeButton", "_mirrorToggle", "_startButton", "_mainDeckPosition", "_restartButton", "_exitButton")]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("1_u7gne")
+_p1ScoreLabel = NodePath("GameUI/MainLayout/Player1Side/Layout/Stats/Row1/ScoreLabel")
+_p1StatusLabel = NodePath("GameUI/MainLayout/Player1Side/Layout/Stats/StatusLabel")
+_p1WinsLabel = NodePath("GameUI/MainLayout/Player1Side/Layout/Stats/Row1/WinsLabel")
+_p1BoardContainer = NodePath("GameUI/MainLayout/Player1Side/Layout/BoardSlotsContainer")
+_p1ModifierContainer = NodePath("GameUI/MainLayout/Player1Side/Layout/ModifierContainer")
+_p1DrawCardButton = NodePath("GameUI/MainLayout/Player1Side/Layout/ActionButtons/DrawCardButton")
+_p1HoldButton = NodePath("GameUI/MainLayout/Player1Side/Layout/ActionButtons/HoldButton")
+_p2ScoreLabel = NodePath("GameUI/MainLayout/Player2Side/P2Holder/P2Rotator/Layout/Stats/Row1/ScoreLabel")
+_p2StatusLabel = NodePath("GameUI/MainLayout/Player2Side/P2Holder/P2Rotator/Layout/Stats/StatusLabel")
+_p2WinsLabel = NodePath("GameUI/MainLayout/Player2Side/P2Holder/P2Rotator/Layout/Stats/Row1/WinsLabel")
+_p2BoardContainer = NodePath("GameUI/MainLayout/Player2Side/P2Holder/P2Rotator/Layout/BoardSlotsContainer")
+_p2ModifierContainer = NodePath("GameUI/MainLayout/Player2Side/P2Holder/P2Rotator/Layout/ModifierContainer")
+_p2Rotator = NodePath("GameUI/MainLayout/Player2Side/P2Holder/P2Rotator")
+_p2DrawCardButton = NodePath("GameUI/MainLayout/Player2Side/P2Holder/P2Rotator/Layout/ActionButtons/DrawCardButton")
+_p2HoldButton = NodePath("GameUI/MainLayout/Player2Side/P2Holder/P2Rotator/Layout/ActionButtons/HoldButton")
+_setInfoLabel = NodePath("GameUI/MainLayout/SharedControlPanel/VBoxContainer/SetInfoLabel")
+_gameModeButton = NodePath("GameUI/MainLayout/SharedControlPanel/VBoxContainer/GameModeButton")
+_mirrorToggle = NodePath("GameUI/MainLayout/SharedControlPanel/VBoxContainer/MirrorToggle")
+_startButton = NodePath("GameUI/MainLayout/SharedControlPanel/VBoxContainer/StartButton")
+_mainDeckPosition = NodePath("GameUI/MainLayout/SharedControlPanel/VBoxContainer/TableRow/MainDeck")
+_restartButton = NodePath("GameUI/MainLayout/SharedControlPanel/VBoxContainer/TableRow/ButtonColumn/SystemButtons/RestartButton")
+_exitButton = NodePath("GameUI/MainLayout/SharedControlPanel/VBoxContainer/TableRow/ButtonColumn/SystemButtons/ExitButton")
+
+[node name="Background" type="TextureRect" parent="." unique_id=1180029379]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+texture = ExtResource("3_mat")
+expand_mode = 1
+stretch_mode = 6
+
+[node name="GameUI" type="MarginContainer" parent="." unique_id=364165236]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/margin_left = 20
+theme_override_constants/margin_top = 20
+theme_override_constants/margin_right = 20
+theme_override_constants/margin_bottom = 20
+
+[node name="MainLayout" type="BoxContainer" parent="GameUI" unique_id=1743845819]
+layout_mode = 2
+vertical = true
+
+[node name="Player2Side" type="CenterContainer" parent="GameUI/MainLayout" unique_id=360900795]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+
+[node name="P2Holder" type="Control" parent="GameUI/MainLayout/Player2Side" unique_id=2054387746]
+layout_mode = 2
+
+[node name="P2Rotator" type="Control" parent="GameUI/MainLayout/Player2Side/P2Holder" unique_id=23345930]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="Layout" type="VBoxContainer" parent="GameUI/MainLayout/Player2Side/P2Holder/P2Rotator" unique_id=1711430586]
+layout_mode = 1
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+grow_horizontal = 2
+grow_vertical = 2
+alignment = 1
+
+[node name="Stats" type="VBoxContainer" parent="GameUI/MainLayout/Player2Side/P2Holder/P2Rotator/Layout" unique_id=1598554030]
+layout_mode = 2
+theme_override_constants/separation = 0
+alignment = 1
+
+[node name="Row1" type="HBoxContainer" parent="GameUI/MainLayout/Player2Side/P2Holder/P2Rotator/Layout/Stats" unique_id=1139611699]
+layout_mode = 2
+theme_override_constants/separation = 8
+alignment = 1
+
+[node name="WinsLabel" type="Label" parent="GameUI/MainLayout/Player2Side/P2Holder/P2Rotator/Layout/Stats/Row1" unique_id=58649425]
+layout_mode = 2
+text = "Wins: 0"
+
+[node name="ScoreLabel" type="Label" parent="GameUI/MainLayout/Player2Side/P2Holder/P2Rotator/Layout/Stats/Row1" unique_id=413716060]
+layout_mode = 2
+theme_override_font_sizes/font_size = 26
+text = "Score: 0"
+
+[node name="StatusLabel" type="Label" parent="GameUI/MainLayout/Player2Side/P2Holder/P2Rotator/Layout/Stats" unique_id=1782889633]
+layout_mode = 2
+text = "Waiting"
+
+[node name="BoardSlotsContainer" type="GridContainer" parent="GameUI/MainLayout/Player2Side/P2Holder/P2Rotator/Layout" unique_id=540520973]
+layout_mode = 2
+theme_override_constants/h_separation = 10
+theme_override_constants/v_separation = 10
+columns = 3
+
+[node name="ModifierContainer" type="HBoxContainer" parent="GameUI/MainLayout/Player2Side/P2Holder/P2Rotator/Layout" unique_id=264133123]
+layout_mode = 2
+theme_override_constants/separation = 10
+alignment = 1
+
+[node name="ActionButtons" type="BoxContainer" parent="GameUI/MainLayout/Player2Side/P2Holder/P2Rotator/Layout" unique_id=1165380275]
+layout_mode = 2
+theme_override_constants/separation = 10
+alignment = 1
+
+[node name="DrawCardButton" type="Button" parent="GameUI/MainLayout/Player2Side/P2Holder/P2Rotator/Layout/ActionButtons" unique_id=408562984]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Draw Card"
+
+[node name="HoldButton" type="Button" parent="GameUI/MainLayout/Player2Side/P2Holder/P2Rotator/Layout/ActionButtons" unique_id=1402462056]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Hold"
+
+[node name="SharedControlPanel" type="CenterContainer" parent="GameUI/MainLayout" unique_id=414940360]
+layout_mode = 2
+
+[node name="VBoxContainer" type="VBoxContainer" parent="GameUI/MainLayout/SharedControlPanel" unique_id=743490495]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="SetInfoLabel" type="Label" parent="GameUI/MainLayout/SharedControlPanel/VBoxContainer" unique_id=672150649]
+layout_mode = 2
+text = "Press Start Game to Begin"
+horizontal_alignment = 1
+
+[node name="GameModeButton" type="OptionButton" parent="GameUI/MainLayout/SharedControlPanel/VBoxContainer" unique_id=1779882157]
+layout_mode = 2
+
+[node name="MirrorToggle" type="CheckButton" parent="GameUI/MainLayout/SharedControlPanel/VBoxContainer" unique_id=523595024]
+visible = false
+layout_mode = 2
+text = "Mirror for Player 2"
+
+[node name="StartButton" type="Button" parent="GameUI/MainLayout/SharedControlPanel/VBoxContainer" unique_id=2127159909]
+layout_mode = 2
+text = "Start Game"
+
+[node name="TableRow" type="HBoxContainer" parent="GameUI/MainLayout/SharedControlPanel/VBoxContainer" unique_id=814764117]
+layout_mode = 2
+theme_override_constants/separation = 16
+alignment = 1
+
+[node name="MainDeck" type="TextureRect" parent="GameUI/MainLayout/SharedControlPanel/VBoxContainer/TableRow" unique_id=14477606]
+custom_minimum_size = Vector2(84, 114)
+layout_mode = 2
+size_flags_vertical = 4
+texture = ExtResource("2_back")
+expand_mode = 1
+stretch_mode = 5
+
+[node name="ButtonColumn" type="VBoxContainer" parent="GameUI/MainLayout/SharedControlPanel/VBoxContainer/TableRow" unique_id=1535395930]
+layout_mode = 2
+theme_override_constants/separation = 10
+alignment = 1
+
+[node name="SystemButtons" type="HBoxContainer" parent="GameUI/MainLayout/SharedControlPanel/VBoxContainer/TableRow/ButtonColumn" unique_id=1550060130]
+layout_mode = 2
+theme_override_constants/separation = 10
+alignment = 1
+
+[node name="RestartButton" type="Button" parent="GameUI/MainLayout/SharedControlPanel/VBoxContainer/TableRow/ButtonColumn/SystemButtons" unique_id=571703508]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Restart"
+
+[node name="ExitButton" type="Button" parent="GameUI/MainLayout/SharedControlPanel/VBoxContainer/TableRow/ButtonColumn/SystemButtons" unique_id=1179236501]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Exit"
+
+[node name="Player1Side" type="CenterContainer" parent="GameUI/MainLayout" unique_id=1803027458]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+
+[node name="Layout" type="VBoxContainer" parent="GameUI/MainLayout/Player1Side" unique_id=737668783]
+layout_mode = 2
+alignment = 1
+
+[node name="Stats" type="VBoxContainer" parent="GameUI/MainLayout/Player1Side/Layout" unique_id=1528933754]
+layout_mode = 2
+theme_override_constants/separation = 0
+alignment = 1
+
+[node name="Row1" type="HBoxContainer" parent="GameUI/MainLayout/Player1Side/Layout/Stats" unique_id=2015509135]
+layout_mode = 2
+theme_override_constants/separation = 8
+alignment = 1
+
+[node name="WinsLabel" type="Label" parent="GameUI/MainLayout/Player1Side/Layout/Stats/Row1" unique_id=581162210]
+layout_mode = 2
+text = "Wins: 0"
+
+[node name="ScoreLabel" type="Label" parent="GameUI/MainLayout/Player1Side/Layout/Stats/Row1" unique_id=846342447]
+layout_mode = 2
+theme_override_font_sizes/font_size = 26
+text = "Score: 0"
+
+[node name="StatusLabel" type="Label" parent="GameUI/MainLayout/Player1Side/Layout/Stats" unique_id=1363513435]
+layout_mode = 2
+text = "Active Turn"
+
+[node name="BoardSlotsContainer" type="GridContainer" parent="GameUI/MainLayout/Player1Side/Layout" unique_id=733887537]
+layout_mode = 2
+theme_override_constants/h_separation = 10
+theme_override_constants/v_separation = 10
+columns = 3
+
+[node name="ModifierContainer" type="HBoxContainer" parent="GameUI/MainLayout/Player1Side/Layout" unique_id=700209036]
+layout_mode = 2
+theme_override_constants/separation = 10
+alignment = 1
+
+[node name="ActionButtons" type="BoxContainer" parent="GameUI/MainLayout/Player1Side/Layout" unique_id=1676182333]
+layout_mode = 2
+theme_override_constants/separation = 10
+alignment = 1
+
+[node name="DrawCardButton" type="Button" parent="GameUI/MainLayout/Player1Side/Layout/ActionButtons" unique_id=1213137835]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Draw Card"
+
+[node name="HoldButton" type="Button" parent="GameUI/MainLayout/Player1Side/Layout/ActionButtons" unique_id=493120665]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Hold"

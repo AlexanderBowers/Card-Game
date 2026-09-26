@@ -35,6 +35,15 @@ public interface ITeachingHost
 /// TableUi's refresh (ITableUiHost.AfterRefresh) rather than off any game event.
 public sealed class Teaching
 {
+    /// The bits of the table a lesson points at that the picture does not own.
+    public sealed class Nodes
+    {
+        public Control MainDeckPosition;
+        public Control P1ModifierContainer;
+        public Label P1ScoreLabel;
+        public Label P1WinsLabel;
+    }
+
     private readonly ITeachingHost _host;
 
     /// The scene node the overlay hangs on, and the source of the engine services a plain class
@@ -46,16 +55,21 @@ public sealed class Teaching
     private readonly TableUi _ui;
     private readonly Menus _menus;
 
-    // What a lesson points at is asked of the picture every time rather than held: a rotation
-    // swaps the whole layout scene (pass 34), and a node held from before it would be freed.
-    private Control _p1ModifierContainer => _ui.P1Hand;
+    private readonly Control _mainDeckPosition;
+    private readonly Control _p1ModifierContainer;
+    private readonly Label _p1ScoreLabel;
+    private readonly Label _p1WinsLabel;
 
-    public Teaching(ITeachingHost host, Node root, TableUi ui, Menus menus)
+    public Teaching(ITeachingHost host, Node root, TableUi ui, Menus menus, Nodes nodes)
     {
         _host = host;
         _root = root;
         _ui = ui;
         _menus = menus;
+        _mainDeckPosition = nodes.MainDeckPosition;
+        _p1ModifierContainer = nodes.P1ModifierContainer;
+        _p1ScoreLabel = nodes.P1ScoreLabel;
+        _p1WinsLabel = nodes.P1WinsLabel;
     }
 
     /// Whether the walkthrough runs this match, and whether the deal is staged for it.
@@ -245,11 +259,11 @@ public sealed class Teaching
     {
         switch (step)
         {
-            case 0: return _ui.P1ScoreBlock;
-            case 1: return _ui.DeckFootprint;
-            case 2: return _ui.P1Hand;
+            case 0: return _ui.P1ScoreBlock ?? _p1ScoreLabel;
+            case 1: return _ui.DeckFootprint ?? _mainDeckPosition;
+            case 2: return _p1ModifierContainer;
             case 3: return _ui.P1ActionRow;
-            case 4: return _ui.P1WinsRow;
+            case 4: return _p1WinsLabel?.GetParent() as Control;
             default: return null;
         }
     }

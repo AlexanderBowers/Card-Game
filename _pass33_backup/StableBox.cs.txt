@@ -20,12 +20,7 @@ using System.Collections.Generic;
 /// change: the button slot had remembered the height of the portrait Play / Put back / Flip Value
 /// column. The button slot is sized that way now, and its rows keep their own height rather than
 /// being stretched to fill the slot, so a wrong size could only ever show as a gap.
-///
-/// Pass 34: [Tool], so the table scenes show the slot in the editor as the game lays it out. In the
-/// editor there is no Measure function, so the slot is simply as big as its biggest child.
 /// </summary>
-[Tool]
-[GlobalClass]
 public partial class StableBox : Container
 {
     private static readonly List<StableBox> Live = new List<StableBox>();

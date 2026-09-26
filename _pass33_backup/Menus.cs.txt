@@ -14,8 +14,8 @@ public interface IMenusHost
     /// A sentence about the run's rules, for the continue button's note.
     string FinaleRulesLine(RunData run, string prefix);
 
-    /// Deal a match: the solo ladder, or local 2-player as the setup page described it.
-    void StartMatch(bool local2Player);
+    /// Start the match the dropdown and the setup pages have described.
+    void StartMatch();
 
     /// Reload this match with the first-launch walkthrough staged into it. The walkthrough is
     /// staged into the deal, so it has to be decided before the cards are dealt - which is why
@@ -41,8 +41,10 @@ public sealed class Menus
     /// the table menu's case moved into it outright.
     public sealed class Nodes
     {
+        public Button StartButton;
         public Button ExitButton;
         public Button RestartButton;
+        public OptionButton GameModeButton;
         public CheckButton MirrorToggle;
     }
 
@@ -61,8 +63,10 @@ public sealed class Menus
     /// is a plain reference rather than a contract.
     private readonly TableUi _ui;
 
+    private readonly Button _startButton;
     private readonly Button _exitButton;
     private readonly Button _restartButton;
+    private readonly OptionButton _gameModeButton;
     private readonly CheckButton _mirrorToggle;
 
     public Menus(IMenusHost host, Node root, TableUi ui, Nodes nodes)
@@ -70,8 +74,10 @@ public sealed class Menus
         _host = host;
         _root = root;
         _ui = ui;
+        _startButton = nodes.StartButton;
         _exitButton = nodes.ExitButton;
         _restartButton = nodes.RestartButton;
+        _gameModeButton = nodes.GameModeButton;
         _mirrorToggle = nodes.MirrorToggle;
     }
 
@@ -79,11 +85,12 @@ public sealed class Menus
 
     private VBoxContainer _tableMenuBox;
 
-    /// Where the debug rows go, inside the table menu. Empty (and so invisible) in a release build.
-    public VBoxContainer DebugSlot { get; private set; }
-
     public void BuildTableMenu()
     {
+        Node systemRow = _restartButton?.GetParent();
+        Control column = systemRow?.GetParent() as Control;
+        if (column == null) return;
+
         _tableMenuOverlay = new Control { Visible = false, MouseFilter = Control.MouseFilterEnum.Stop };
         _root.AddChild(_tableMenuOverlay);
         _tableMenuOverlay.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
@@ -127,20 +134,87 @@ public sealed class Menus
         };
         box.AddChild(replay);
 
-        // Debug builds put their stage-jump / ad switches here (GameManager.BuildDebugRow) - in
-        // the menu rather than on the table, where they covered the layout (pass 35).
-        DebugSlot = new VBoxContainer { Name = "DebugSlot" };
-        DebugSlot.AddThemeConstantOverride("separation", 6);
-        box.AddChild(DebugSlot);
-
         Button close = new Button { Text = "Back to the table" };
         close.Pressed += HideTableMenu;
         box.AddChild(close);
 
         _tableMenuBox = box; // re-sized on every open: MenuButtonWidth follows the viewport
 
-        // The button that opens this menu is in the table layout scenes now (MenuButton, pass 34);
-        // TableUi wires it to ShowTableMenu.
+        // ...and the one button left on the table, in the slot the Restart / Exit row had.
+        // Pass 33 (playtest): a round "hamburger" button rather than a word - it is the
+        // universal sign for this, and it costs the middle panel far less room.
+        Button open = MakeHamburgerButton();
+        open.Pressed += ShowTableMenu;
+        column.AddChild(open);
+        if (systemRow.GetParent() == column) column.MoveChild(open, systemRow.GetIndex());
+
+        // Restart and Exit have moved into the menu, so their row is empty - and an empty row
+        // still costs its separation in a VBox.
+        if (systemRow is Control emptyRow) emptyRow.Visible = false;
+    }
+
+    /// The table's Menu button: three bars in a circle, in the house pill's colours.
+    private const float HamburgerSize = 76f;
+
+    private static Button MakeHamburgerButton()
+    {
+        Button button = new Button
+        {
+            Name = "MenuButton",
+            TooltipText = "Menu",
+            FocusMode = Control.FocusModeEnum.None,
+            CustomMinimumSize = new Vector2(HamburgerSize, HamburgerSize),
+            SizeFlagsHorizontal = Control.SizeFlags.ShrinkCenter,
+            SizeFlagsVertical = Control.SizeFlags.ShrinkCenter,
+        };
+
+        StyleBoxFlat normal = new StyleBoxFlat
+        {
+            BgColor = OverlayUi.Surface,
+            BorderColor = OverlayUi.SurfaceEdge,
+            ShadowColor = OverlayUi.Shadow,
+            ShadowSize = 8,
+            ShadowOffset = new Vector2(0, 3),
+            AntiAliasingSize = 1.2f,
+        };
+        normal.SetCornerRadiusAll(Mathf.RoundToInt(HamburgerSize / 2f));
+        normal.SetBorderWidthAll(2);
+        normal.BorderWidthBottom = 4;
+        normal.SetContentMarginAll(0);
+
+        StyleBoxFlat hover = (StyleBoxFlat)normal.Duplicate();
+        hover.BgColor = Colors.White;
+        StyleBoxFlat pressed = (StyleBoxFlat)normal.Duplicate();
+        pressed.BgColor = new Color(0.87f, 0.9f, 0.94f);
+        pressed.BorderWidthBottom = 2;
+        pressed.ShadowSize = 3;
+
+        button.AddThemeStyleboxOverride("normal", normal);
+        button.AddThemeStyleboxOverride("hover", hover);
+        button.AddThemeStyleboxOverride("pressed", pressed);
+        button.AddThemeStyleboxOverride("hover_pressed", pressed);
+        button.AddThemeStyleboxOverride("focus", new StyleBoxEmpty());
+
+        // The bars are drawn rather than typed: "≡" is not in every font, and three rects are.
+        Control icon = new Control { Name = "Bars", MouseFilter = Control.MouseFilterEnum.Ignore };
+        button.AddChild(icon);
+        icon.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
+        icon.Draw += () =>
+        {
+            Vector2 size = icon.Size;
+            float width = size.X * 0.44f;
+            float thickness = Mathf.Max(3f, size.Y * 0.075f);
+            float gap = size.Y * 0.14f;
+            float x = (size.X - width) / 2f;
+            float middle = size.Y / 2f - 1f; // a hair above centre: the thicker bottom edge sits below
+            for (int i = -1; i <= 1; i++)
+            {
+                float y = middle + i * gap;
+                icon.DrawLine(new Vector2(x, y), new Vector2(x + width, y), OverlayUi.Ink, thickness, true);
+            }
+        };
+        icon.Resized += icon.QueueRedraw;
+        return button;
     }
 
     /// One size for every button on a full-screen menu. See the MenuButton* constants for why
@@ -275,6 +349,10 @@ public sealed class Menus
         FillStartMenu();
         _startMenuOverlay.Visible = true;
 
+        // The menu replaces them both, and they are behind an opaque backdrop anyway. Leaving them
+        // live is two ways to do one thing, and the dropdown's answer is not the menu's.
+        if (_startButton != null) _startButton.Visible = false;
+        if (_gameModeButton != null) _gameModeButton.Visible = false;
     }
 
     public void HideStartMenu()
@@ -470,8 +548,15 @@ public sealed class Menus
     {
         if (fresh) RunData.Instance?.StartNewRun();
 
+        if (_gameModeButton != null)
+        {
+            if (RunData.Instance != null) RunData.Instance.AutoStartNextMatch = true;
+            _root.GetTree().ChangeSceneToFile("res://solo_table_scene.tscn");
+            return;
+        }
+
         HideStartMenu();
-        _host.StartMatch(local2Player: false);
+        _host.StartMatch();
     }
 
     // ------------------------------------------------------------------
@@ -671,8 +756,20 @@ public sealed class Menus
     {
         SanitizeLocal2PlayerChoices(UnlockedLocalTargets(), UnlockedLocalSpecials());
 
+        if (_gameModeButton == null)
+        {
+            PendingLocal2Player = true;
+            _root.GetTree().ChangeSceneToFile("res://table_scene.tscn");
+            return;
+        }
+
+        // Before starting, not after: OnStartButtonPressed reads this dropdown to decide whether to
+        // route to the solo scene, and on "vs. Bot" it would send us straight back out again.
+        _gameModeButton.Select(0);
+        if (_mirrorToggle != null) _mirrorToggle.Visible = true;
+
         HideStartMenu();
-        _host.StartMatch(local2Player: true);
+        _host.StartMatch();
     }
 
     // ------------------------------------------------------------------

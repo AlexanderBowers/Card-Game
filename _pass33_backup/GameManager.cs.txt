@@ -9,18 +9,37 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
     private Player _player1;
     private Player _player2;
 
-    // Pass 34: no scene nodes are exported here any more. The table is a LAYOUT scene
-    // (table_landscape.tscn / table_portrait.tscn) that TableUi instances under LayoutHost and
-    // swaps on a rotation, so any node held here would go stale the first time the phone turned.
-    // What the game needs from the table it asks TableUi for, at the moment it needs it.
-    private Control _p1BoardContainer => _ui?.P1Board;
-    private Control _p2BoardContainer => _ui?.P2Board;
+    [ExportGroup("Player 1 UI")]
+    [Export] private Label _p1ScoreLabel;
+    [Export] private Label _p1StatusLabel;
+    [Export] private Label _p1WinsLabel;
+    [Export] private Control _p1BoardContainer;
+    [Export] private Control _p1ModifierContainer;
+    [Export] private Button _p1DrawCardButton; // 2-player scene: P1's own Draw Card / Hold row under their hand
+    [Export] private Button _p1HoldButton;
 
-    // The three controls that live in the table MENU rather than on the table. Built here because
-    // their handlers are here; Menus moves them into its overlay.
-    private CheckButton _mirrorToggle;  // local 2-player: turn Player 2's side round
-    private Button _restartButton;
-    private Button _exitButton;
+    [ExportGroup("Player 2 UI (AI)")]
+    [Export] private Label _p2ScoreLabel;
+    [Export] private Label _p2StatusLabel;
+    [Export] private Label _p2WinsLabel;
+    [Export] private Control _p2BoardContainer;
+    [Export] private Control _p2ModifierContainer;
+    [Export] private Control _p2Rotator;
+    [Export] private Button _p2DrawCardButton; // 2-player scene: inside P2Rotator, so it flips with P2's side
+    [Export] private Button _p2HoldButton;
+
+    [ExportGroup("Shared UI")]
+    [Export] private Label _setInfoLabel;
+    [Export] private OptionButton _gameModeButton;
+    [Export] private CheckButton _mirrorToggle; // 2-player scene only: rotate P2's side 180 degrees
+    [Export] private Button _startButton;
+    [Export] private Button _drawCardButton; // solo scene: one shared pair in the middle panel (Player 1, the human)
+    [Export] private Button _holdButton;
+    [Export] private Control _mainDeckPosition;
+
+    [ExportGroup("System UI")]
+    [Export] private Button _restartButton;
+    [Export] private Button _exitButton;
 
     private Random _random = new Random();
     private PackedScene _cardViewScene = GD.Load<PackedScene>("res://CardView.tscn");
@@ -59,82 +78,134 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
         _gameState = new GameState();
         _player1 = new Player("Player 1");
         _player2 = new Player("Player 2");
-        _mirrorToggle = new CheckButton { Text = "Mirror for Player 2", FocusMode = Control.FocusModeEnum.None };
-        // Face-to-face on a phone wants P2 flipped by default; on a desktop it doesn't.
-        _mirrorToggle.SetPressedNoSignal(OS.HasFeature("mobile"));
-        // Refresh FIRST: it decides whether the score is one line or two, and the fit measures
-        // the side around it (Alexander, 2026-09-18: toggling the mirror shifted Player 1's side).
-        _mirrorToggle.Toggled += _ => { _ui.Refresh(); _ui.ApplyResponsiveLayout(); };
-
-        _restartButton = new Button { Text = "Restart" };
-        _restartButton.Pressed += OnRestartPressed;
-        _exitButton = new Button { Text = "Exit" };
-        _exitButton.Pressed += OnExitPressed;
-
-        // The layout scene goes under LayoutHost; every overlay is added to this node AFTER it,
-        // so they all draw on top of whichever layout is up.
-        Control layoutHost = GetNodeOrNull<Control>("LayoutHost");
-        if (layoutHost == null)
+        // The scene's nodes are exported onto THIS class, because that is what the .tscn wires.
+        // They are handed to the picture once, here, and it keeps them for good.
+        _ui = new TableUi(this, this, new TableUi.Nodes
         {
-            layoutHost = new Control { Name = "LayoutHost", MouseFilter = Control.MouseFilterEnum.Pass };
-            AddChild(layoutHost);
-            MoveChild(layoutHost, 0);
-            layoutHost.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
-        }
-        _ui = new TableUi(this, this, layoutHost, _mirrorToggle);
+            MainLayout = GetNodeOrNull<BoxContainer>("GameUI/MainLayout"),
+            P1BoardContainer = _p1BoardContainer,       P2BoardContainer = _p2BoardContainer,
+            P1ModifierContainer = _p1ModifierContainer, P2ModifierContainer = _p2ModifierContainer,
+            P1ScoreLabel = _p1ScoreLabel,               P2ScoreLabel = _p2ScoreLabel,
+            P1StatusLabel = _p1StatusLabel,             P2StatusLabel = _p2StatusLabel,
+            P1WinsLabel = _p1WinsLabel,                 P2WinsLabel = _p2WinsLabel,
+            P1DrawCardButton = _p1DrawCardButton,       P2DrawCardButton = _p2DrawCardButton,
+            P1HoldButton = _p1HoldButton,               P2HoldButton = _p2HoldButton,
+            DrawCardButton = _drawCardButton,           HoldButton = _holdButton,
+            P2Rotator = _p2Rotator,                     MainDeckPosition = _mainDeckPosition,
+            SetInfoLabel = _setInfoLabel,               MirrorToggle = _mirrorToggle,
+            GameModeButton = _gameModeButton,
+        });
 
         _menus = new Menus(this, this, _ui, new Menus.Nodes
         {
-            ExitButton = _exitButton, RestartButton = _restartButton, MirrorToggle = _mirrorToggle,
+            StartButton = _startButton,   ExitButton = _exitButton,
+            RestartButton = _restartButton, GameModeButton = _gameModeButton,
+            MirrorToggle = _mirrorToggle,
         });
 
         _prompts = new Prompts(this, this, _ui);
-        _teaching = new Teaching(this, this, _ui, _menus);
+
+        _teaching = new Teaching(this, this, _ui, _menus, new Teaching.Nodes
+        {
+            MainDeckPosition = _mainDeckPosition, P1ModifierContainer = _p1ModifierContainer,
+            P1ScoreLabel = _p1ScoreLabel,         P1WinsLabel = _p1WinsLabel,
+        });
 
         _table = new Table(this);
         _bot = new Bot(this); // before the first deal: the table asks it for the bot's hand
         _table.DealMatchHands();
 
+        // Both scenes work in portrait and landscape (ApplyResponsiveLayout re-flows on every
+        // resize / rotation), so the phone is free to follow its sensor.
+
+        if (_gameModeButton != null)
+        {
+            _gameModeButton.Clear();
+            _gameModeButton.AddItem("Local 2-Player", 0);
+            _gameModeButton.AddItem("vs. Bot", 1);
+            _gameModeButton.Select(1);
+            _gameModeButton.ItemSelected += id =>
+            {
+                if (_mirrorToggle != null) _mirrorToggle.Visible = (id == 0);
+            };
+        }
+
+        if (_mirrorToggle != null)
+        {
+            // Face-to-face on a phone wants P2 flipped by default; on a desktop it doesn't.
+            _mirrorToggle.SetPressedNoSignal(OS.HasFeature("mobile"));
+            _mirrorToggle.Visible = _gameModeButton != null && _gameModeButton.GetSelectedId() == 0;
+            // UpdateUI FIRST. It is what decides the score's font and whether the score is one
+            // line or two, and ApplyResponsiveLayout is what measures the side around it. The
+            // other way round, every slot was sized against the form that was on its way off the
+            // screen (Alexander, 2026-09-18: toggling the mirror shifts Player 1's side).
+            _mirrorToggle.Toggled += _ => { _ui.Refresh(); _ui.ApplyResponsiveLayout(); };
+        }
+
+        // The button is "Draw Card" (Alexander, 2026-09-15), and the code uses the same words the
+        // player reads (2026-09-16): Match > Set > Turn, Modifiers, Draw Card, Flip Value. Pressing
+        // Draw Card ends your part of this turn, which is why the state is still HasEndedTurn.
+        //
+        // Connect button signals. The solo scene has one shared Draw Card / Hold pair in the middle
+        // panel (it belongs to Player 1, the human); the 2-player scene gives each player their own
+        // pair under their hand instead.
+        _startButton.Pressed += OnStartButtonPressed;
+        if (_drawCardButton != null) _drawCardButton.Pressed += () => OnDrawCardPressed(_player1);
+        if (_holdButton != null) _holdButton.Pressed += () => OnHoldPressed(_player1);
+        if (_p1DrawCardButton != null) _p1DrawCardButton.Pressed += () => OnDrawCardPressed(_player1);
+        if (_p1HoldButton != null) _p1HoldButton.Pressed += () => OnHoldPressed(_player1);
+        if (_p2DrawCardButton != null) _p2DrawCardButton.Pressed += () => OnDrawCardPressed(_player2);
+        if (_p2HoldButton != null) _p2HoldButton.Pressed += () => OnHoldPressed(_player2);
+        if (_restartButton != null) _restartButton.Pressed += OnRestartPressed;
+        if (_exitButton != null) _exitButton.Pressed += OnExitPressed;
+
+        // Set initial waiting message (UpdateUI below disables every action button until Start).
+        _setInfoLabel.Text = "Press Start Game to Begin";
+
+        // Show the empty 3x3 boards and the win chips before the game starts.
+        _ui.FillBoardWithSlots(_p1BoardContainer);
+        _ui.FillBoardWithSlots(_p2BoardContainer);
+        _ui.BuildWinChips();
+        _ui.BuildDeckCounter();
         _teaching.BuildSpotlight();
         _prompts.BuildSetEndOverlay();
         _menus.BuildHowToPlay();
-        _menus.BuildTableMenu();
-        BuildDebugRow(); // into the table menu (Options > Debug shows it)
+        _ui.CompactControlPanel(); // must precede BuildConfirmRows - see the method
+        _ui.BuildConfirmRows();
         BuildIntermissionOverlays();
+        _ui.BuildTableBanners();
         GameSettings.EnsureLoaded();
         GameSettings.Changed += OnSettingsChanged;
+        BuildDebugRow();
         BuildOptions();
         _menus.BuildStartMenu();
+        _ui.ConfigureStatusLabels();
+        _ui.StyleTableForReadability(); // after BuildConfirmRows: it styles those buttons too
+        _ui.BuildScoreLines();          // after StyleTableForReadability moved the labels
 
-        // Puts up the layout for this screen (and repaints it); again on every resize/rotation.
         GetTree().Root.SizeChanged += _ui.ApplyResponsiveLayout;
         _ui.ApplyResponsiveLayout();
+        _ui.Refresh();
 
         // Two ways to arrive already holding a decision, and in both the player has pressed a
         // button to get here - so deal the match rather than showing them a second front door.
-        // The run's note is RunData's (the deck screen, a debug stage jump, Restart); the local
-        // 2-player note is Menus' static. Both survive the reload; neither is saved to disk.
-        bool autoRun = RunData.Instance != null && RunData.Instance.AutoStartNextMatch;
+        //
+        // The run's note is RunData's (the deck screen, a debug stage jump, or the start menu
+        // sending the player over from the two-player table); the local 2-player note is this
+        // class's own static, for the reason written where it is declared. Both survive the
+        // reload; neither is saved to disk, because both describe THIS reload and not the run.
+        bool autoRun = _gameModeButton == null && RunData.Instance != null && RunData.Instance.AutoStartNextMatch;
         if (autoRun) RunData.Instance.AutoStartNextMatch = false;
 
-        bool autoLocal2P = !autoRun && Menus.PendingLocal2Player;
-        Menus.PendingLocal2Player = false;
-
-        // Debug builds only: "-- --autostart=solo" or "-- --autostart=local" (add "--mirror" to
-        // turn Player 2's side round) on the command line
-        // deals straight into a match, skipping the start menu - for looking at the table layouts
-        // (Movie Maker screenshots, a quick check after editing a layout scene).
-        if (OS.IsDebugBuild() && !autoRun && !autoLocal2P)
+        bool autoLocal2P = _gameModeButton != null && Menus.PendingLocal2Player;
+        if (autoLocal2P)
         {
-            foreach (string arg in OS.GetCmdlineUserArgs())
-            {
-                if (arg == "--autostart=solo") autoRun = true;
-                if (arg == "--autostart=local") autoLocal2P = true;
-                if (arg == "--mirror") _mirrorToggle.SetPressedNoSignal(true);
-            }
+            Menus.PendingLocal2Player = false;
+            _gameModeButton.Select(0); // or OnStartButtonPressed routes straight back to the solo scene
+            if (_mirrorToggle != null) _mirrorToggle.Visible = true;
         }
 
-        if (autoRun || autoLocal2P) Callable.From(() => StartMatch(local2Player: autoLocal2P)).CallDeferred();
+        if (autoRun || autoLocal2P) CallDeferred(MethodName.OnStartButtonPressed);
         else _menus.ShowStartMenu();
     }
 
@@ -169,7 +240,7 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
         // on the new sizes rather than keep the old ones, and let the fit find its own scale for
         // the new shape instead of keeping the one it settled on for the old one.
         _ui.ResetFitState();
-        _ui.ApplyResponsiveLayout(); // also re-fits (the debug rows change the height)
+        _ui.ApplyResponsiveLayout(); // also re-runs EnsureLayoutFits (the debug rows change the height)
     }
 
 
@@ -194,7 +265,7 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
         {
             // The same notes the start menu leaves when it sends the player between scenes; _Ready
             // reads them and deals instead of opening the menu.
-            if (_isVsBot)
+            if (_gameModeButton == null)
             {
                 if (RunData.Instance != null) RunData.Instance.AutoStartNextMatch = true;
             }
@@ -228,16 +299,24 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
         }
     }
 
-    /// Deals a match in the mode the start menu chose. Solo and local 2-player share one table
-    /// scene since pass 34, so this is a flag rather than a scene change.
-    private void StartMatch(bool local2Player)
+    private void OnStartButtonPressed()
     {
+        // Route the player to the dedicated solo scene if bot is selected
+        if (_gameModeButton != null && _gameModeButton.GetSelectedId() == 1)
+        {
+            GetTree().ChangeSceneToFile("res://solo_table_scene.tscn");
+            return;
+        }
+
         _isGameStarted = true;
-        _isVsBot = !local2Player;
+
+        // If _gameModeButton is null (meaning we are already in the solo scene), force AI to true
+        _isVsBot = (_gameModeButton == null) ? true : false;
+
         _player2.PlayerName = _isVsBot ? "AI Bot" : "Player 2";
 
-        // The mode decides what the layout shows (P2's buttons, the mirror), so re-apply it.
-        _ui.ApplyResponsiveLayout();
+        _startButton.Visible = false;
+        if (_gameModeButton != null) _gameModeButton.Visible = false;
 
         BeginRunMatch();
 
@@ -394,7 +473,7 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
     bool IMenusHost.GameStarted => _isGameStarted;
     bool IMenusHost.VsBot => _isVsBot;
     string IMenusHost.FinaleRulesLine(RunData run, string prefix) => FinaleRulesLine(run, prefix);
-    void IMenusHost.StartMatch(bool local2Player) => StartMatch(local2Player);
+    void IMenusHost.StartMatch() => OnStartButtonPressed();
     void IMenusHost.OpenOptions(Action onClosed) => OpenOptions(onClosed);
 
     /// The walkthrough is staged into the deal, so replaying it is a reload rather than a flag
@@ -438,10 +517,7 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
     void ITableUiHost.PlayPressed(Player player) => PlaySelectedCard(player);
     void ITableUiHost.PutBackPressed(Player player) => SetSelection(player, null);
     void ITableUiHost.FlipValuePressed(Player player) => FlipSelectedValue(player);
-    void ITableUiHost.DrawCardPressed(Player player) => OnDrawCardPressed(player);
-    void ITableUiHost.HoldPressed(Player player) => OnHoldPressed(player);
-    void ITableUiHost.MenuPressed() => _menus.ShowTableMenu();
-    void ITableUiHost.LayoutBound(TableLayout layout) { } // nothing of the game's hangs on the layout now
+    void ITableUiHost.BuildTableMenu() => _menus.BuildTableMenu();
     void ITableUiHost.LayoutChanged() => _teaching.RefreshSpotlight();
     string ITableUiHost.FinaleRulesLine(RunData run, string prefix) => FinaleRulesLine(run, prefix);
 
@@ -811,11 +887,10 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
 
         _setOverPending = true;
         _ui.Refresh(); // locks every button and Modifier; sides show Bust! / Holding
-        Label setInfo = _ui.Layout?.SetInfoLabel;
-        if (setInfo != null)
+        if (_setInfoLabel != null)
         {
-            setInfo.Text = title;
-            setInfo.Visible = true; // hidden while it had nothing to say (TableUi.Refresh)
+            _setInfoLabel.Text = title;
+            _setInfoLabel.Visible = true; // hidden while it had nothing to say (TableUi.Refresh)
         }
         _prompts.ShowSetEnd(title, why, buttonText, next);
     }
@@ -919,8 +994,9 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
     private void BuildDebugRow()
     {
         if (!OS.IsDebugBuild()) return;
+        if (_gameModeButton != null) return;
 
-        Container column = _menus.DebugSlot;
+        Control column = _setInfoLabel?.GetParent() as Control;
         if (column == null) return;
 
         HBoxContainer row = new HBoxContainer { Alignment = BoxContainer.AlignmentMode.Center };
@@ -992,8 +1068,8 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
     // ------------------------------------------------------------------
     private void BuildIntermissionOverlays()
     {
-        // Only the single-player ladder has a run to spend medals on; local 2-player never does -
-        // but it is the same scene now, so they are built either way and simply never opened.
+        // Only the single-player ladder has a run to spend medals on; local 2-player never does.
+        if (_gameModeButton != null) return;
 
         _shopOverlay = new ShopOverlay();
         AddChild(_shopOverlay);
@@ -1029,14 +1105,17 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
     }
 
 
-    /// A message about this player's side, shown in a floating toast (pass 36) - or empty.
-    ///
-    /// Over target and Bust are NOT words any more: the score box itself turns red (TableUi). The
-    /// set-end panel says the rest once a set is over, so nothing is said while it is up.
     private string StatusFor(Player player)
     {
-        if (_setOverPending) return string.Empty;
+        bool over = player.CurrentScore > _gameState.TargetScore;
 
+        if (_setOverPending && over) return "Bust!";
+        if (_setOverPending) return player.IsHolding ? "Holding" : string.Empty;
+
+        // Pass 33 (playtest): the status line only speaks when it has news - Holding, Bust!,
+        // Over target!, or what a picked-up effect card would do. "Your move", "Done - waiting"
+        // and "Thinking..." are gone; a side that cannot act has its button read "Waiting..."
+        // instead (TableUi.ApplyWaiting).
         if (player.IsHolding) return "Holding";
         if (player.HasEndedTurn) return string.Empty;
 
@@ -1050,6 +1129,8 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
             // A plain Modifier says nothing here: its result is shown on the score itself.
         }
 
+        // Still acting this turn.
+        if (over) return "Over target!"; // a warning, not a bust yet: play a minus Modifier before ending the turn
         return string.Empty;
     }
 
