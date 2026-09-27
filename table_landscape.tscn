@@ -119,7 +119,7 @@ anti_aliasing_size = 1.2
 [sub_resource type="StyleBoxEmpty" id="menu_focus"]
 
 
-[node name="TableLandscape" type="Control" node_paths=PackedStringArray("Canvas", "Background", "P2Side", "SetInfoLabel", "TargetLabel", "Deck", "DeckFootprint", "MenuButton", "EffectToast", "EffectLabel", "P1ScoreBox", "P1ScorePrefix", "P1ScoreValue", "P1ScoreThem", "P1OpponentBox", "P1OpponentScore", "P1WinsRow", "P1WinsLabel", "P1Chips", "P1Board", "P1Hand", "P1ButtonSlot", "P1ActionRow", "P1DrawCard", "P1Hold", "P1ConfirmRow", "P1Play", "P1PutBack", "P1FlipValue", "P2ScoreBox", "P2ScorePrefix", "P2ScoreValue", "P2ScoreThem", "P2OpponentBox", "P2OpponentScore", "P2WinsRow", "P2WinsLabel", "P2Chips", "P2Board", "P2Hand", "P2ButtonSlot", "P2ActionRow", "P2DrawCard", "P2Hold", "P2ConfirmRow", "P2Play", "P2PutBack", "P2FlipValue")]
+[node name="TableLandscape" type="Control" node_paths=PackedStringArray("Canvas", "Background", "P2Side", "SetInfoLabel", "TargetLabel", "Deck", "DeckFootprint", "P2Deck", "P2DeckFootprint", "MenuButton", "EffectToast", "EffectLabel", "P1ScoreBox", "P1ScorePrefix", "P1ScoreValue", "P1ScoreThem", "P1OpponentBox", "P1OpponentScore", "P1WinsRow", "P1WinsLabel", "P1Chips", "P1Board", "P1Hand", "P1ButtonSlot", "P1ActionRow", "P1DrawCard", "P1Hold", "P1ConfirmRow", "P1Play", "P1PutBack", "P1FlipValue", "P2ScoreBox", "P2ScorePrefix", "P2ScoreValue", "P2ScoreThem", "P2OpponentBox", "P2OpponentScore", "P2WinsRow", "P2WinsLabel", "P2Chips", "P2Board", "P2Hand", "P2ButtonSlot", "P2ActionRow", "P2DrawCard", "P2Hold", "P2ConfirmRow", "P2Play", "P2PutBack", "P2FlipValue")]
 layout_mode = 3
 anchors_preset = 0
 offset_right = 1560.0
@@ -134,8 +134,10 @@ Background = NodePath("Background")
 P2Side = NodePath("Canvas/P2Side")
 SetInfoLabel = NodePath("Canvas/InfoColumn/SetInfoLabel")
 TargetLabel = NodePath("Canvas/InfoColumn/TargetLabel")
-Deck = NodePath("Canvas/Deck")
-DeckFootprint = NodePath("Canvas/Deck")
+Deck = NodePath("Canvas/P1Side/Deck")
+DeckFootprint = NodePath("Canvas/P1Side/Deck")
+P2Deck = NodePath("Canvas/P2Side/Deck")
+P2DeckFootprint = NodePath("Canvas/P2Side/Deck")
 MenuButton = NodePath("Canvas/MenuButton")
 EffectToast = NodePath("Canvas/EffectToast")
 EffectLabel = NodePath("Canvas/EffectToast/EffectLabel")
@@ -626,17 +628,6 @@ text = "TARGET  23   (up from 20)"
 horizontal_alignment = 1
 autowrap_mode = 3
 
-[node name="Deck" type="TextureRect" parent="Canvas"]
-layout_mode = 0
-offset_left = 735.0
-offset_top = 270.0
-offset_right = 826.0
-offset_bottom = 394.0
-mouse_filter = 2
-texture = ExtResource("tex_back")
-expand_mode = 1
-stretch_mode = 5
-
 [node name="MenuButton" type="Button" parent="Canvas"]
 layout_mode = 0
 offset_left = 742.0
@@ -1097,3 +1088,25 @@ offset_right = 648.0
 offset_bottom = 86.0
 theme_override_font_sizes/font_size = 30
 text = "Flip Value"
+
+[node name="Deck" type="TextureRect" parent="Canvas/P1Side"]
+layout_mode = 0
+offset_left = 420.0
+offset_top = 400.0
+offset_right = 511.0
+offset_bottom = 524.0
+mouse_filter = 2
+texture = ExtResource("tex_back")
+expand_mode = 1
+stretch_mode = 5
+
+[node name="Deck" type="TextureRect" parent="Canvas/P2Side"]
+layout_mode = 0
+offset_left = 137.0
+offset_top = 400.0
+offset_right = 228.0
+offset_bottom = 524.0
+mouse_filter = 2
+texture = ExtResource("tex_back")
+expand_mode = 1
+stretch_mode = 5

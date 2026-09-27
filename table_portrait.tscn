@@ -145,7 +145,7 @@ shadow_size = 10
 shadow_offset = Vector2(0, 4)
 anti_aliasing_size = 1.2
 
-[node name="TablePortrait" type="Control" unique_id=507457187 node_paths=PackedStringArray("Canvas", "Background", "P1ScoreBox", "P1ScoreValue", "P1ScoreTarget", "P1ScoreFarEnd", "P1ScoreFarValue", "P1ScoreFarTarget", "P1ScoreDivider", "P1OpponentScore", "P1OpponentBox", "P1WinsRow", "P1WinsLabel", "P1Chips", "P1Board", "P1Hand", "P1ButtonSlot", "P1ActionRow", "P1DrawCard", "P1Hold", "P1ConfirmRow", "P1Play", "P1PutBack", "P1FlipValue", "P2Side", "P2ScoreBox", "P2ScoreValue", "P2ScoreTarget", "P2ScoreFarEnd", "P2ScoreFarValue", "P2ScoreFarTarget", "P2ScoreDivider", "P2OpponentScore", "P2OpponentBox", "P2WinsRow", "P2WinsLabel", "P2Chips", "P2Board", "P2Hand", "P2ButtonSlot", "P2ActionRow", "P2DrawCard", "P2Hold", "P2ConfirmRow", "P2Play", "P2PutBack", "P2FlipValue", "SetInfoLabel", "TargetLabel", "Deck", "DeckFootprint", "MenuButton", "EffectToast", "EffectLabel")]
+[node name="TablePortrait" type="Control" unique_id=507457187 node_paths=PackedStringArray("Canvas", "Background", "P1ScoreBox", "P1ScoreValue", "P1ScoreTarget", "P1ScoreFarEnd", "P1ScoreFarValue", "P1ScoreFarTarget", "P1ScoreDivider", "P1ScoreCaption", "P1ScoreFarCaption", "P1OpponentScore", "P1OpponentBox", "P1OpponentCaption", "P1OpponentTarget", "P1WinsRow", "P1WinsLabel", "P1Chips", "P1Board", "P1Hand", "P1ButtonSlot", "P1ActionRow", "P1DrawCard", "P1Hold", "P1ConfirmRow", "P1Play", "P1PutBack", "P1FlipValue", "P2Side", "P2ScoreBox", "P2ScoreValue", "P2ScoreTarget", "P2ScoreFarEnd", "P2ScoreFarValue", "P2ScoreFarTarget", "P2ScoreDivider", "P2ScoreCaption", "P2ScoreFarCaption", "P2OpponentScore", "P2OpponentBox", "P2OpponentCaption", "P2OpponentTarget", "P2WinsRow", "P2WinsLabel", "P2Chips", "P2Board", "P2Hand", "P2ButtonSlot", "P2ActionRow", "P2DrawCard", "P2Hold", "P2ConfirmRow", "P2Play", "P2PutBack", "P2FlipValue", "SetInfoLabel", "TargetLabel", "Deck", "DeckFootprint", "P2Deck", "P2DeckFootprint", "MenuButton", "EffectToast", "EffectLabel")]
 layout_mode = 3
 anchors_preset = 0
 offset_right = 720.0
@@ -164,7 +164,11 @@ P1ScoreFarEnd = NodePath("Canvas/P1Side/ScoreBox/ScoreLines/FarEnd")
 P1ScoreFarValue = NodePath("Canvas/P1Side/ScoreBox/ScoreLines/FarEnd/Turned/Score")
 P1ScoreFarTarget = NodePath("Canvas/P1Side/ScoreBox/ScoreLines/FarEnd/Turned/Target")
 P1ScoreDivider = NodePath("Canvas/P1Side/ScoreBox/ScoreLines/Divider")
-P1OpponentScore = NodePath("Canvas/P1Side/OpponentBox/OpponentScore")
+P1ScoreCaption = NodePath("Canvas/P1Side/ScoreBox/ScoreLines/NearEnd/Caption")
+P1ScoreFarCaption = NodePath("Canvas/P1Side/ScoreBox/ScoreLines/FarEnd/Turned/Caption")
+P1OpponentScore = NodePath("Canvas/P1Side/OpponentBox/Lines/OpponentScore")
+P1OpponentCaption = NodePath("Canvas/P1Side/OpponentBox/Lines/Caption")
+P1OpponentTarget = NodePath("Canvas/P1Side/OpponentBox/Lines/Target")
 P1OpponentBox = NodePath("Canvas/P1Side/OpponentBox")
 P1WinsRow = NodePath("Canvas/P1Side/WinsRow")
 P1WinsLabel = NodePath("Canvas/P1Side/WinsRow/WinsLabel")
@@ -187,7 +191,11 @@ P2ScoreFarEnd = NodePath("Canvas/P2Side/ScoreBox/ScoreLines/FarEnd")
 P2ScoreFarValue = NodePath("Canvas/P2Side/ScoreBox/ScoreLines/FarEnd/Turned/Score")
 P2ScoreFarTarget = NodePath("Canvas/P2Side/ScoreBox/ScoreLines/FarEnd/Turned/Target")
 P2ScoreDivider = NodePath("Canvas/P2Side/ScoreBox/ScoreLines/Divider")
-P2OpponentScore = NodePath("Canvas/P2Side/OpponentBox/OpponentScore")
+P2ScoreCaption = NodePath("Canvas/P2Side/ScoreBox/ScoreLines/NearEnd/Caption")
+P2ScoreFarCaption = NodePath("Canvas/P2Side/ScoreBox/ScoreLines/FarEnd/Turned/Caption")
+P2OpponentScore = NodePath("Canvas/P2Side/OpponentBox/Lines/OpponentScore")
+P2OpponentCaption = NodePath("Canvas/P2Side/OpponentBox/Lines/Caption")
+P2OpponentTarget = NodePath("Canvas/P2Side/OpponentBox/Lines/Target")
 P2OpponentBox = NodePath("Canvas/P2Side/OpponentBox")
 P2WinsRow = NodePath("Canvas/P2Side/WinsRow")
 P2WinsLabel = NodePath("Canvas/P2Side/WinsRow/WinsLabel")
@@ -204,8 +212,10 @@ P2PutBack = NodePath("Canvas/P2Side/ButtonSlot/ConfirmRow/PutBack")
 P2FlipValue = NodePath("Canvas/P2Side/FlipValue")
 SetInfoLabel = NodePath("Canvas/InfoColumn/SetInfoLabel")
 TargetLabel = NodePath("Canvas/InfoColumn/TargetLabel")
-Deck = NodePath("Canvas/DeckHolder/Deck")
-DeckFootprint = NodePath("Canvas/DeckHolder")
+Deck = NodePath("Canvas/P1Side/DeckHolder/Deck")
+DeckFootprint = NodePath("Canvas/P1Side/DeckHolder")
+P2Deck = NodePath("Canvas/P2Side/DeckHolder/Deck")
+P2DeckFootprint = NodePath("Canvas/P2Side/DeckHolder")
 MenuButton = NodePath("Canvas/MenuButton")
 EffectToast = NodePath("Canvas/EffectToast")
 EffectLabel = NodePath("Canvas/EffectToast/EffectLabel")
@@ -276,7 +286,7 @@ mouse_filter = 2
 layout_mode = 0
 offset_left = 16.0
 offset_top = 461.0
-offset_right = 120.0
+offset_right = 128.0
 offset_bottom = 462.0
 grow_vertical = 0
 mouse_filter = 2
@@ -305,6 +315,14 @@ pivot_offset = Vector2(46, 53)
 mouse_filter = 2
 theme_override_constants/separation = -14
 
+[node name="Caption" type="Label" parent="Canvas/P2Side/ScoreBox/ScoreLines/FarEnd/Turned"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.72, 0.84, 0.9, 0.85)
+theme_override_font_sizes/font_size = 20
+text = "YOU"
+horizontal_alignment = 1
+vertical_alignment = 1
+
 [node name="Score" type="Label" parent="Canvas/P2Side/ScoreBox/ScoreLines/FarEnd/Turned"]
 layout_mode = 2
 theme_override_font_sizes/font_size = 60
@@ -332,9 +350,17 @@ layout_mode = 2
 mouse_filter = 2
 theme_override_constants/separation = -14
 
+[node name="Caption" type="Label" parent="Canvas/P2Side/ScoreBox/ScoreLines/NearEnd"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.72, 0.84, 0.9, 0.85)
+theme_override_font_sizes/font_size = 24
+text = "YOU"
+horizontal_alignment = 1
+vertical_alignment = 1
+
 [node name="Score" type="Label" parent="Canvas/P2Side/ScoreBox/ScoreLines/NearEnd"]
 layout_mode = 2
-theme_override_font_sizes/font_size = 60
+theme_override_font_sizes/font_size = 76
 text = "14"
 horizontal_alignment = 1
 vertical_alignment = 1
@@ -342,25 +368,48 @@ vertical_alignment = 1
 [node name="Target" type="Label" parent="Canvas/P2Side/ScoreBox/ScoreLines/NearEnd"]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.72, 0.84, 0.9, 0.85)
-theme_override_font_sizes/font_size = 24
+theme_override_font_sizes/font_size = 28
 text = "/20"
 horizontal_alignment = 1
 vertical_alignment = 1
 
 [node name="OpponentBox" type="PanelContainer" parent="Canvas/P2Side" unique_id=2105272542]
-visible = false
 layout_mode = 0
-offset_left = 0.0
-offset_top = 0.0
-offset_right = 10.0
-offset_bottom = 10.0
+offset_left = 16.0
+offset_top = 317.0
+offset_right = 128.0
+offset_bottom = 318.0
+grow_vertical = 0
 mouse_filter = 2
-theme_override_styles/panel = SubResource("score_box")
+theme_override_styles/panel = SubResource("score_badge")
 
-[node name="OpponentScore" type="Label" parent="Canvas/P2Side/OpponentBox" unique_id=1631934456]
+[node name="Lines" type="VBoxContainer" parent="Canvas/P2Side/OpponentBox"]
 layout_mode = 2
-theme_override_font_sizes/font_size = 40
-text = "Them  14"
+mouse_filter = 2
+theme_override_constants/separation = -14
+
+[node name="Caption" type="Label" parent="Canvas/P2Side/OpponentBox/Lines"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.72, 0.84, 0.9, 0.85)
+theme_override_font_sizes/font_size = 24
+text = "THEM"
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="OpponentScore" type="Label" parent="Canvas/P2Side/OpponentBox/Lines" unique_id=1631934456]
+layout_mode = 2
+theme_override_font_sizes/font_size = 76
+text = "14"
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="Target" type="Label" parent="Canvas/P2Side/OpponentBox/Lines"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.72, 0.84, 0.9, 0.85)
+theme_override_font_sizes/font_size = 28
+text = "/20"
+horizontal_alignment = 1
+vertical_alignment = 1
 
 [node name="Board" type="GridContainer" parent="Canvas/P2Side" unique_id=1525627917]
 script = ExtResource("script_persp")
@@ -729,26 +778,6 @@ text = "TARGET  23   (up from 20)"
 horizontal_alignment = 1
 autowrap_mode = 3
 
-[node name="DeckHolder" type="Control" parent="Canvas" unique_id=860582617]
-anchors_preset = 0
-offset_left = 614.0
-offset_top = 673.0
-offset_right = 772.0
-offset_bottom = 887.0
-mouse_filter = 2
-
-[node name="Deck" type="TextureRect" parent="Canvas/DeckHolder" unique_id=744440185]
-layout_mode = 1
-anchors_preset = 15
-anchor_right = 1.0
-anchor_bottom = 1.0
-grow_horizontal = 2
-grow_vertical = 2
-mouse_filter = 2
-texture = ExtResource("tex_back")
-expand_mode = 1
-stretch_mode = 5
-
 [node name="MenuButton" type="Button" parent="Canvas" unique_id=1674397678]
 layout_mode = 0
 offset_left = 608.0
@@ -826,7 +855,7 @@ mouse_filter = 2
 layout_mode = 0
 offset_left = 16.0
 offset_top = 461.0
-offset_right = 120.0
+offset_right = 128.0
 offset_bottom = 462.0
 grow_vertical = 0
 mouse_filter = 2
@@ -855,6 +884,14 @@ pivot_offset = Vector2(46, 53)
 mouse_filter = 2
 theme_override_constants/separation = -14
 
+[node name="Caption" type="Label" parent="Canvas/P1Side/ScoreBox/ScoreLines/FarEnd/Turned"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.72, 0.84, 0.9, 0.85)
+theme_override_font_sizes/font_size = 20
+text = "YOU"
+horizontal_alignment = 1
+vertical_alignment = 1
+
 [node name="Score" type="Label" parent="Canvas/P1Side/ScoreBox/ScoreLines/FarEnd/Turned"]
 layout_mode = 2
 theme_override_font_sizes/font_size = 60
@@ -882,9 +919,17 @@ layout_mode = 2
 mouse_filter = 2
 theme_override_constants/separation = -14
 
+[node name="Caption" type="Label" parent="Canvas/P1Side/ScoreBox/ScoreLines/NearEnd"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.72, 0.84, 0.9, 0.85)
+theme_override_font_sizes/font_size = 24
+text = "YOU"
+horizontal_alignment = 1
+vertical_alignment = 1
+
 [node name="Score" type="Label" parent="Canvas/P1Side/ScoreBox/ScoreLines/NearEnd"]
 layout_mode = 2
-theme_override_font_sizes/font_size = 60
+theme_override_font_sizes/font_size = 76
 text = "11"
 horizontal_alignment = 1
 vertical_alignment = 1
@@ -892,25 +937,48 @@ vertical_alignment = 1
 [node name="Target" type="Label" parent="Canvas/P1Side/ScoreBox/ScoreLines/NearEnd"]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.72, 0.84, 0.9, 0.85)
-theme_override_font_sizes/font_size = 24
+theme_override_font_sizes/font_size = 28
 text = "/20"
 horizontal_alignment = 1
 vertical_alignment = 1
 
 [node name="OpponentBox" type="PanelContainer" parent="Canvas/P1Side" unique_id=1181125593]
-visible = false
 layout_mode = 0
-offset_left = 0.0
-offset_top = 0.0
-offset_right = 10.0
-offset_bottom = 10.0
+offset_left = 16.0
+offset_top = 317.0
+offset_right = 128.0
+offset_bottom = 318.0
+grow_vertical = 0
 mouse_filter = 2
-theme_override_styles/panel = SubResource("score_box")
+theme_override_styles/panel = SubResource("score_badge")
 
-[node name="OpponentScore" type="Label" parent="Canvas/P1Side/OpponentBox" unique_id=335961484]
+[node name="Lines" type="VBoxContainer" parent="Canvas/P1Side/OpponentBox"]
 layout_mode = 2
-theme_override_font_sizes/font_size = 40
-text = "Them  14"
+mouse_filter = 2
+theme_override_constants/separation = -14
+
+[node name="Caption" type="Label" parent="Canvas/P1Side/OpponentBox/Lines"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.72, 0.84, 0.9, 0.85)
+theme_override_font_sizes/font_size = 24
+text = "THEM"
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="OpponentScore" type="Label" parent="Canvas/P1Side/OpponentBox/Lines" unique_id=335961484]
+layout_mode = 2
+theme_override_font_sizes/font_size = 76
+text = "14"
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="Target" type="Label" parent="Canvas/P1Side/OpponentBox/Lines"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.72, 0.84, 0.9, 0.85)
+theme_override_font_sizes/font_size = 28
+text = "/20"
+horizontal_alignment = 1
+vertical_alignment = 1
 
 [node name="Board" type="GridContainer" parent="Canvas/P1Side" unique_id=1345458710]
 script = ExtResource("script_persp")
@@ -1251,3 +1319,43 @@ theme_override_font_sizes/font_size = 96
 text = "-2"
 horizontal_alignment = 1
 vertical_alignment = 1
+
+[node name="DeckHolder" type="Control" parent="Canvas/P1Side"]
+layout_mode = 0
+offset_left = 576.0
+offset_top = 107.0
+offset_right = 708.0
+offset_bottom = 286.0
+mouse_filter = 2
+
+[node name="Deck" type="TextureRect" parent="Canvas/P1Side/DeckHolder"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+texture = ExtResource("tex_back")
+expand_mode = 1
+stretch_mode = 5
+
+[node name="DeckHolder" type="Control" parent="Canvas/P2Side"]
+layout_mode = 0
+offset_left = 576.0
+offset_top = 107.0
+offset_right = 708.0
+offset_bottom = 286.0
+mouse_filter = 2
+
+[node name="Deck" type="TextureRect" parent="Canvas/P2Side/DeckHolder"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+texture = ExtResource("tex_back")
+expand_mode = 1
+stretch_mode = 5

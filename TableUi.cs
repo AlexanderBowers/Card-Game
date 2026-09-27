@@ -501,6 +501,19 @@ public sealed class TableUi
                 child.OffsetTop = extent.Y - bottom;
                 child.OffsetBottom = extent.Y - top;
                 child.GrowVertical = Opposite(growV);
+
+                // Pass 43: a tilted board shortens toward its near edge. Player 1's near edge is
+                // the bottom, so its board is drawn pulled away from the middle. Mirrored
+                // top-to-bottom, Player 2's board keeps its far edge at the top (the table
+                // recedes from Player 1), so it would shorten TOWARD the middle and sit on the
+                // centre ring. Lift it by the height it gives up, so it is drawn exactly where a
+                // true mirror of Player 1's board would be.
+                if (child is PerspectiveBoard board && board.Tilt)
+                {
+                    float lift = (1f - board.Depth) * (bottom - top);
+                    child.OffsetTop -= lift;
+                    child.OffsetBottom -= lift;
+                }
             }
             child.SetMeta(FlippedMeta, flip);
         }
@@ -730,7 +743,7 @@ public sealed class TableUi
         // turn or is holding. Everything is locked while a set-end explanation is waiting.
         bool p1Can = _host.CanAct(P1);
         bool p2Can = _host.CanAct(P2);
-        SetEnabled(L.P1DrawCard, p1Can);
+        SetEnabled(L.P1DrawCard, p1Can && !TutorialLockDraw);
         SetEnabled(L.P1Hold, p1Can);
         SetEnabled(L.P2DrawCard, p2Can);
         SetEnabled(L.P2Hold, p2Can);
@@ -739,6 +752,7 @@ public sealed class TableUi
         bool live = _host.GameStarted && !State.IsGameOver;
         ApplyWaiting(L.P1DrawCard, L.P1Hold, live && !p1Can);
         ApplyWaiting(L.P2DrawCard, L.P2Hold, live && !p2Can);
+        ApplyHoldPulse(TutorialPulseHold && p1Can);
 
         // While a card is picked up, that player's Draw Card / Hold row is swapped for the
         // Play / Put back row (same slot, so nothing moves).
@@ -783,8 +797,10 @@ public sealed class TableUi
         }
         else
         {
-            SetScoreLines(p1, "P1  ", P1, null);
-            SetScoreLines(p2, "P2  ", P2, null);
+            // Local 2-player, not mirrored: each side is still read by its own player, so it
+            // speaks to them - "You" / "Them", never "P1" / "P2" (playtest, pass 42).
+            SetScoreLines(p1, "You  ", P1, null);
+            SetScoreLines(p2, "You  ", P2, null);
         }
     }
 
@@ -795,6 +811,18 @@ public sealed class TableUi
     {
         string p1 = _host.GameStarted ? P1.CurrentScore.ToString() : "-";
         string p2 = _host.GameStarted ? P2.CurrentScore.ToString() : "-";
+
+        if (L.ScoreBadges)
+        {
+            // Pass 43: face to face, each player reads BOTH scores on their own half - their badge
+            // and a "THEM" badge beside it - instead of reading the opponent's badge upside down
+            // across the table. Otherwise the opponent's own badge is already the right way up.
+            bool faceToFace = IsMirrored;
+            string target = _host.GameStarted ? $"/{State.TargetScore}" : string.Empty;
+            SetOpponentBadge(L.P1OpponentBox, L.P1OpponentScore, L.P1OpponentCaption, L.P1OpponentTarget, p2, target, faceToFace);
+            SetOpponentBadge(L.P2OpponentBox, L.P2OpponentScore, L.P2OpponentCaption, L.P2OpponentTarget, p1, target, faceToFace);
+            return;
+        }
 
         if (IsMirrored)
         {
@@ -808,8 +836,21 @@ public sealed class TableUi
         }
         else
         {
-            SetText(L.P1OpponentScore, $"P2  {p2}");
-            SetText(L.P2OpponentScore, $"P1  {p1}");
+            SetText(L.P1OpponentScore, $"Them  {p2}");
+            SetText(L.P2OpponentScore, $"Them  {p1}");
+        }
+    }
+
+    private void SetOpponentBadge(Control box, Label value, Label caption, Label target,
+                                  string score, string targetText, bool show)
+    {
+        Show(box, show);
+        if (value != null) value.Text = score;
+        if (caption != null) caption.Text = "THEM";
+        if (target != null)
+        {
+            target.Text = targetText;
+            target.Visible = targetText.Length > 0;
         }
     }
 
@@ -1098,11 +1139,14 @@ public sealed class TableUi
         RenderingServer.SetDefaultClearColor(table);
         if (L == null) return;
         if (L.Background != null) L.Background.SelfModulate = _playmatTint;
-        if (L.Deck != null)
+        // Both decks share Player 1's back for now (the gilded back is a profile reward, so it
+        // shows in local 2-player too). Pass 43 gave each player their own deck so that, with
+        // online play, each side can show its owner's customised back.
+        foreach (TextureRect deck in new[] { L.Deck, L.P2Deck })
         {
-            // The gilded back is a profile reward, so it shows in local 2-player too.
-            if (_cardBack != null) L.Deck.Texture = _cardBack;
-            L.Deck.SelfModulate = DeckBackTint;
+            if (deck == null) continue;
+            if (_cardBack != null) deck.Texture = _cardBack;
+            deck.SelfModulate = DeckBackTint;
         }
     }
 
@@ -1129,6 +1173,23 @@ public sealed class TableUi
         bool bothRead = !_host.VsBot; // the bot's badge has no reader of its own: no target on it
         SetScoreBadge(P1, L.P1ScoreValue, L.P1ScoreTarget, L.P1ScoreFarValue, L.P1ScoreFarTarget, true, true);
         SetScoreBadge(P2, L.P2ScoreValue, L.P2ScoreTarget, L.P2ScoreFarValue, L.P2ScoreFarTarget, bothRead, bothRead);
+
+        // Pass 42: a bare number beside a board still read as ambiguous in playtest, so each end
+        // says whose score it is to the person reading that end. The owner reads the near end;
+        // the far end (face to face only) is read from across the table. Against the bot, the
+        // bot's near end is read by Player 1.
+        // Pass 43: Player 2's badge only says YOU face to face, when Player 2 reads it. Without the
+        // mirror the whole table is read from Player 1's end, so it is THEM - "YOU" on both
+        // badges was the confusing case in playtest.
+        SetCaption(L.P1ScoreCaption, "YOU");
+        SetCaption(L.P1ScoreFarCaption, "THEM");
+        SetCaption(L.P2ScoreCaption, IsMirrored ? "YOU" : "THEM");
+        SetCaption(L.P2ScoreFarCaption, "THEM");
+    }
+
+    private static void SetCaption(Label caption, string text)
+    {
+        if (caption != null) caption.Text = text;
     }
 
     private void SetScoreBadge(Player player, Label value, Label target, Label farValue, Label farTarget,
@@ -1167,19 +1228,52 @@ public sealed class TableUi
         }
     }
 
-    /// The far end shows only face to face. The badge hugs its content from its anchored edge -
-    /// the edge nearest its board's player - so the far end grows away from that player and the
-    /// near end never moves.
+    /// Pass 43: the turned-round far end is retired - face to face, each player now gets a
+    /// "THEM" badge on their own half instead (RefreshOpponentLines), so the far end and its
+    /// divider stay hidden in every mode. The nodes are left in the scene in case the idea
+    /// comes back. Each badge hugs its content from its anchored edge.
     private void ApplyScoreBadgeEnds(bool faceToFace)
     {
         if (!L.ScoreBadges) return;
         foreach ((Control far, Control divider, Control box) in new[]
                  { (L.P1ScoreFarEnd, L.P1ScoreDivider, L.P1ScoreBox), (L.P2ScoreFarEnd, L.P2ScoreDivider, L.P2ScoreBox) })
         {
-            if (far != null) far.Visible = faceToFace;
-            if (divider != null) divider.Visible = faceToFace;
+            if (far != null) far.Visible = false;
+            if (divider != null) divider.Visible = false;
             HugContent(box);
         }
+        HugContent(L.P1ScoreBox);
+        HugContent(L.P2ScoreBox);
+        StackBadgePair(L.P1ScoreBox, L.P1OpponentBox, faceToFace);
+        StackBadgePair(L.P2ScoreBox, L.P2OpponentBox, faceToFace);
+        HugContent(L.P1OpponentBox);
+        HugContent(L.P2OpponentBox);
+        Show(L.P1OpponentBox, faceToFace);
+        Show(L.P2OpponentBox, faceToFace);
+    }
+
+    // ------------------------------------------------------------------
+    // YOU / THEM, stacked (pass 45)
+    //
+    // Face to face, each half shows its player's YOU badge with a THEM badge directly above it,
+    // in the column left of the board. Pass 44 tried going side by side on wide screens; in
+    // playtest stacked read better everywhere, so it is stacked always.
+    //
+    // THEM is placed from YOU's size rather than a fixed spot in the scene, so the pair stays
+    // snug whatever the badge fonts are - move or resize the YOU badge in the editor and THEM
+    // follows it. THEM keeps its own authored rect when it is hidden.
+    // ------------------------------------------------------------------
+    private const float BadgeGap = 10f;
+
+    private static void StackBadgePair(Control you, Control them, bool faceToFace)
+    {
+        if (you == null || them == null || !faceToFace) return;
+        float youHeight = you.GetCombinedMinimumSize().Y;
+        float bottom = you.OffsetBottom - youHeight - BadgeGap;
+        them.OffsetLeft = you.OffsetLeft;
+        them.OffsetRight = you.OffsetRight;
+        them.OffsetBottom = bottom;
+        them.OffsetTop = bottom - 1f;
     }
 
     /// Shrinks a free-standing box to its content, keeping the edge it grows away from.
@@ -1267,6 +1361,65 @@ public sealed class TableUi
     {
         if (draw != null) draw.Text = waiting ? "Waiting..." : "Draw Card";
         Show(hold, !waiting);
+    }
+
+    // ------------------------------------------------------------------
+    // Tutorial emphasis (pass 49)
+    //
+    // When a tutorial step has one right answer, the table says so: that control pulses - grows
+    // and shrinks a little - and the wrong answer is greyed out. Teaching sets these; the table
+    // only draws them. The pulse is a looping tween owned by the node it scales, so it dies with
+    // the node (hand cards are rebuilt on every refresh and simply get a fresh one).
+    // ------------------------------------------------------------------
+
+    /// Player 1's Draw Card is disabled - "you are exactly on the target, Hold".
+    public bool TutorialLockDraw;
+
+    /// Player 1's Hold button pulses.
+    public bool TutorialPulseHold;
+
+    /// This card in Player 1's hand pulses (the Modifier the lesson is about).
+    public Card TutorialPulseCard;
+
+    private const float PulseScale = 1.08f;
+    private const float PulseHalfSeconds = 0.45f;
+
+    private Tween _holdPulse;
+
+    /// Player 1's Hold button, for the tutorial's hole.
+    public Control P1HoldButton => L?.P1Hold;
+
+    /// The button in Player 1's hand showing this card, or null. The hand is rebuilt in the order
+    /// of the player's Modifiers, so the index is the same.
+    public Control P1HandCardFor(Card card)
+    {
+        if (L?.P1Hand == null || card == null || P1 == null) return null;
+        int i = P1.Modifiers.IndexOf(card);
+        return (i >= 0 && i < L.P1Hand.GetChildCount()) ? L.P1Hand.GetChild(i) as Control : null;
+    }
+
+    /// Pulses about the target's pivot - set it to the centre first.
+    private static Tween StartPulse(Control target)
+    {
+        Tween tween = target.CreateTween().SetLoops();
+        tween.SetTrans(Tween.TransitionType.Sine).SetEase(Tween.EaseType.InOut);
+        tween.TweenProperty(target, "scale", new Vector2(PulseScale, PulseScale), PulseHalfSeconds);
+        tween.TweenProperty(target, "scale", Vector2.One, PulseHalfSeconds);
+        return tween;
+    }
+
+    private void ApplyHoldPulse(bool on)
+    {
+        Button hold = L?.P1Hold;
+        if (on && hold != null)
+        {
+            hold.PivotOffset = hold.Size / 2f; // every refresh, so a rotation re-centres it
+            if (_holdPulse == null || !_holdPulse.IsValid()) _holdPulse = StartPulse(hold);
+            return;
+        }
+        if (_holdPulse != null && _holdPulse.IsValid()) _holdPulse.Kill();
+        _holdPulse = null;
+        if (hold != null) hold.Scale = Vector2.One;
     }
 
     /// Colours the status line for a picked-up EFFECT card (green: playable, red: not). A plain
@@ -1433,6 +1586,15 @@ public sealed class TableUi
 
         button.AddChild(view);
         view.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
+
+        // Pass 49: the tutorial's card pulses until it is picked up. The art is scaled, not the
+        // Button, for the same reason as the pick-up below.
+        // A tween needs the tree, and this button is not in it yet: start once it arrives.
+        if (!selected && !disabled && card == TutorialPulseCard)
+        {
+            view.PivotOffset = size / 2f;
+            view.TreeEntered += () => StartPulse(view);
+        }
 
         if (selected)
         {
@@ -1898,13 +2060,19 @@ public sealed class TableUi
 
         // Defer the animation by one frame so Godot has time to calculate its final Grid position
         Vector2 flightSize = BoardCardSizeFor(parentContainer);
-        Defer(() => AnimateCardDrop(cardNode, delay, flightSize));
+        Control fromDeck = DeckFor(parentContainer);
+        Defer(() => AnimateCardDrop(cardNode, delay, flightSize, fromDeck));
     }
 
-    private void AnimateCardDrop(Control realCard, float delay, Vector2 cardSize)
+    /// Each player draws from their own deck (pass 43), so a card flies from the deck on its
+    /// owner's side. A layout without a Player 2 deck falls back to Player 1's.
+    private Control DeckFor(Control board) =>
+        (board == L?.P2Board && L?.P2Deck != null) ? L.P2Deck : _mainDeckPosition;
+
+    private void AnimateCardDrop(Control realCard, float delay, Vector2 cardSize, Control fromDeck)
     {
         // Fallback in case the deck isn't assigned in the inspector
-        if (_mainDeckPosition == null || !GodotObject.IsInstanceValid(realCard))
+        if (fromDeck == null || !GodotObject.IsInstanceValid(realCard))
         {
             if (GodotObject.IsInstanceValid(realCard)) realCard.Modulate = Colors.White;
             return;
@@ -1933,7 +2101,7 @@ public sealed class TableUi
         _root.AddChild(fakeCard); // on the scene root so it draws above everything
 
         // 2. Start on the deck, small and upside down
-        Vector2 deckCenter = _mainDeckPosition.GetGlobalTransform() * (_mainDeckPosition.Size / 2f);
+        Vector2 deckCenter = fromDeck.GetGlobalTransform() * (fromDeck.Size / 2f);
         fakeCard.GlobalPosition = deckCenter - cardSize / 2f;
         fakeCard.RotationDegrees = -180f;
         fakeCard.Scale = new Vector2(0.5f, 0.5f);

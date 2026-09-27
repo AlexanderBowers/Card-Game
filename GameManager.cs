@@ -380,6 +380,7 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
     bool ITeachingHost.SetOverPending => _setOverPending;
     bool ITeachingHost.PromptShowing => _prompts.Showing;
     void ITeachingHost.ReleaseBot() => _bot.ProcessTurn();
+    Card ITeachingHost.SelectedFor(Player player) => SelectedFor(player);
     void ITeachingHost.CollectionComplete() => AnnounceCollectionComplete();
 
     // ------------------------------------------------------------------

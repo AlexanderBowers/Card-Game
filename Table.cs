@@ -94,9 +94,9 @@ public sealed class Table
     private Card _p1RecallLock;
     private Card _p2RecallLock;
 
-    /// How many cards are left in the shared deck. The counting aid the 55+ playtest group asked
-    /// for reads this; so does the draw log.
-    public int Remaining => _mainDeck.Count;
+    /// How many cards are left in this player's own deck (pass 43: one deck each). The draw log
+    /// reads it; so would a counting aid.
+    public int Remaining(Player owner) => DeckOf(owner).Count;
 
     // ------------------------------------------------------------------
     // Per-turn bookkeeping
@@ -126,7 +126,7 @@ public sealed class Table
         else _p2RecallLock = card;
     }
 
-    /// A fresh set: a fresh forty, and the next turn is this set's opening one.
+    /// A fresh set: a fresh forty for each player, and the next turn is this set's opening one.
     public void StartSet()
     {
         Shuffle();
@@ -139,21 +139,21 @@ public sealed class Table
         player.DealRandomModifiers(_host.Rng, HandSize, FlipValueChance, MaxModifierMagnitude);
 
     // ------------------------------------------------------------------
-    // The main deck (playtest feedback, 2026-09-15)
+    // The main decks (playtest feedback, 2026-09-15; one deck EACH since pass 43)
     //
     // It used to be a bare Next(1, 11) on every draw: an infinite stream with no memory, where
     // four 10s in a row is possible and the player has no way to tell bad luck from the game
     // cheating. It is now a real object - four copies each of 1 to 10, forty cards, shuffled - and
     // that is Pazaak's own main deck.
     //
-    // The reason a blackjack player asked for it is the whole point: a finite deck can be COUNTED.
-    // That is a real skill the 55+ group already owns, it costs the other end of the 5-to-85 range
-    // nothing (a five-year-old plays exactly as before), and the remaining count is on the deck art
-    // so the information is there to be used.
+    // A finite deck can be COUNTED, which is a real skill the 55+ group already owns and costs a
+    // five-year-old nothing.
     //
-    // ONE SHARED DECK, both players drawing from it. Two private decks would make counting nearly
-    // worthless, because half the information would never reach the table - and watching what they
-    // draw is most of what makes counting worth doing.
+    // Pass 43: each player has their OWN forty, on their own side of the table. The reason is
+    // online play: a deck of your own is where your customisation shows (its back, later perhaps
+    // more), and two players' decks cannot be one pile. Counting survives: every card you draw
+    // lands face up on your board, so your own deck is exactly as countable as the shared one was
+    // - you just count one deck instead of both players' draws out of one.
     //
     // SHUFFLED EVERY SET, not every match: Pazaak's rule, and it keeps each set a clean
     // counting problem rather than a match-long bookkeeping chore.
@@ -161,48 +161,62 @@ public sealed class Table
 
     private const int MainDeckCopies = 4; // of each value 1-10, so forty cards
 
-    private readonly List<int> _mainDeck = new List<int>();
+    private readonly List<int> _p1Deck = new List<int>();
+    private readonly List<int> _p2Deck = new List<int>();
+
+    private List<int> DeckOf(Player owner) => owner == P2 ? _p2Deck : _p1Deck;
 
     private void Shuffle()
     {
-        _mainDeck.Clear();
-        for (int value = 1; value <= 10; value++)
-            for (int copy = 0; copy < MainDeckCopies; copy++)
-                _mainDeck.Add(value);
+        ShuffleDeck(_p1Deck);
+        ShuffleDeck(_p2Deck);
 
-        // Fisher-Yates, off the table's one Random, the same stream every other deal uses.
-        for (int i = _mainDeck.Count - 1; i > 0; i--)
-        {
-            int j = _host.Rng.Next(i + 1);
-            int swap = _mainDeck[i];
-            _mainDeck[i] = _mainDeck[j];
-            _mainDeck[j] = swap;
-        }
-
-        // The staged opening for the tutorial's first set. Each value is REMOVED from the
-        // shuffled remainder before being appended, so the deck still holds exactly four of each
-        // and the rest of the set is as random as any other.
+        // The staged opening for the tutorial's first set. Teaching.Opening is written for the
+        // turn order P1, P2, P1, P2 drawing off the END of one pile, so its entries alternate
+        // between the two players: from the end, Player 1, Player 2, Player 1, Player 2. Each
+        // value is REMOVED from the shuffled remainder before being appended, so each deck still
+        // holds exactly four of every value and the rest of the set is as random as any other.
         if (_host.TutorialStaged && _host.State.IsFirstSet)
         {
-            foreach (int value in _host.TutorialOpening) _mainDeck.Remove(value);
-            _mainDeck.AddRange(_host.TutorialOpening);
+            IReadOnlyList<int> opening = _host.TutorialOpening;
+            for (int i = 0; i < opening.Count; i++)
+            {
+                bool forP1 = (opening.Count - 1 - i) % 2 == 0;
+                List<int> deck = forP1 ? _p1Deck : _p2Deck;
+                deck.Remove(opening[i]);
+                deck.Add(opening[i]);
+            }
         }
     }
 
-    /// The top card. The deck cannot actually run out at any target this game uses. Both players
-    /// draw from the SAME forty, so the adversarial worst case - the deck sorted smallest-first,
-    /// both players drawing until they bust - is 19 cards of 40 at a target of 25, and 200k
-    /// simulated sets across every ladder target never went past 17.
-    ///
-    /// The reshuffle is here anyway, because that arithmetic is a property of TODAY's targets and
-    /// a future rule change should not be able to turn it into a crash.
-    private int DrawValue()
+    private void ShuffleDeck(List<int> deck)
     {
-        if (_mainDeck.Count == 0) Shuffle();
+        deck.Clear();
+        for (int value = 1; value <= 10; value++)
+            for (int copy = 0; copy < MainDeckCopies; copy++)
+                deck.Add(value);
 
-        int last = _mainDeck.Count - 1;
-        int value = _mainDeck[last];
-        _mainDeck.RemoveAt(last);
+        // Fisher-Yates, off the table's one Random, the same stream every other deal uses.
+        for (int i = deck.Count - 1; i > 0; i--)
+        {
+            int j = _host.Rng.Next(i + 1);
+            int swap = deck[i];
+            deck[i] = deck[j];
+            deck[j] = swap;
+        }
+    }
+
+    /// The top card of this player's own deck. A deck cannot actually run out: one player drawing
+    /// until they bust takes at most a handful of cards from forty. The reshuffle is here anyway,
+    /// so a future rule change cannot turn that arithmetic into a crash.
+    private int DrawValue(Player owner)
+    {
+        List<int> deck = DeckOf(owner);
+        if (deck.Count == 0) ShuffleDeck(deck);
+
+        int last = deck.Count - 1;
+        int value = deck[last];
+        deck.RemoveAt(last);
         return value;
     }
     /// A fresh modifier hand for both players. Cards are spent for the whole match, so this runs
@@ -307,7 +321,7 @@ public sealed class Table
     {
         if (player.IsHolding) return;
 
-        int cardValue = DrawValue();
+        int cardValue = DrawValue(player);
         player.CurrentScore += cardValue;
 
         Card drawnMainCard = new Card(cardValue, CardType.Main, cardValue.ToString());
@@ -320,7 +334,7 @@ public sealed class Table
         player.LastDrawnCard = drawnMainCard;
 
         GD.Print($"{player.PlayerName} drew a {cardValue}. Score: {player.CurrentScore} "
-               + $"({_mainDeck.Count} left in the deck)");
+               + $"({DeckOf(player).Count} left in their deck)");
 
         _host.ShowDrawnCard(player, drawnMainCard, delay);
 

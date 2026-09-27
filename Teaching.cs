@@ -22,6 +22,9 @@ public interface ITeachingHost
 
     /// The card just dismissed was the last one in the collection.
     void CollectionComplete();
+
+    /// The card this player has picked up, if any (pass 49: the Modifier lesson follows it).
+    Card SelectedFor(Player player);
 }
 
 /// The two things that teach: the first-launch walkthrough with its spotlight, and the coach mark
@@ -113,6 +116,22 @@ public sealed class Teaching
 
     private bool _spotlightSettling;
 
+    /// A second, LOOK-only hole (pass 46): the tutorial's Modifier step points at the hand AND at
+    /// the score that a picked-up card previews. The four shades stay the input gate for the main
+    /// hole; this one is only see-through - the shades skip drawing inside it, but still stop
+    /// taps there, so nothing in it can be pressed. Rect in canvas space (x, y, w, h); zero size
+    /// means no second hole.
+    private ShaderMaterial _shadeMaterial;
+
+    private const string ShadeShader = @"shader_type canvas_item;
+uniform vec4 hole2 = vec4(0.0);
+varying vec2 world;
+void vertex() { world = (MODEL_MATRIX * vec4(VERTEX, 0.0, 1.0)).xy; }
+void fragment() {
+    if (hole2.z > 0.0 && world.x >= hole2.x && world.x <= hole2.x + hole2.z
+        && world.y >= hole2.y && world.y <= hole2.y + hole2.w) COLOR.a = 0.0;
+}";
+
     /// A hole cut in a dim, made of FOUR rects around the highlighted control rather than a
     /// shader. Cheap, no material, correct at every scale and orientation - and it degrades
     /// honestly: a wrong rect shows a misplaced hole rather than a black screen.
@@ -128,10 +147,12 @@ public sealed class Teaching
         _spotlightOverlay.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
 
         Color shade = new Color(0.02f, 0.05f, 0.1f, 0.72f);
+        _shadeMaterial = new ShaderMaterial { Shader = new Shader { Code = ShadeShader } };
+        _shadeMaterial.SetShaderParameter("hole2", Vector4.Zero);
         _spotlightShades = new ColorRect[4];
         for (int i = 0; i < _spotlightShades.Length; i++)
         {
-            ColorRect rect = new ColorRect { Color = shade, MouseFilter = Control.MouseFilterEnum.Stop };
+            ColorRect rect = new ColorRect { Color = shade, MouseFilter = Control.MouseFilterEnum.Stop, Material = _shadeMaterial };
             _spotlightOverlay.AddChild(rect);
             _spotlightShades[i] = rect;
         }
@@ -195,14 +216,21 @@ public sealed class Teaching
         return new Rect2(min, max - min);
     }
 
-    private void PlaceSpotlight(Control target, bool blockHole)
+    private static bool Placed(Control c) => c != null && c.IsInsideTree() && c.Visible && c.Size.X > 1f;
+
+    private void PlaceSpotlight(Control target, bool blockHole, Control lookOnly = null, float extraTop = 0f)
     {
         if (_spotlightOverlay == null) return;
 
         Vector2 vp = _root.GetViewport().GetVisibleRect().Size;
         Rect2 hole = (target != null && target.IsInsideTree() && target.Size.X > 1f)
-            ? ScreenRectOf(target).Grow(SpotlightPad)
+            ? ScreenRectOf(target).Grow(SpotlightPad).GrowIndividual(0f, extraTop, 0f, 0f)
             : new Rect2(vp / 2f, Vector2.Zero); // no target: a plain dim, no hole
+
+        Rect2? hole2 = Placed(lookOnly) ? ScreenRectOf(lookOnly).Grow(SpotlightPad) : null;
+        _shadeMaterial?.SetShaderParameter("hole2", hole2.HasValue
+            ? new Vector4(hole2.Value.Position.X, hole2.Value.Position.Y, hole2.Value.Size.X, hole2.Value.Size.Y)
+            : Vector4.Zero);
 
         float left = Mathf.Clamp(hole.Position.X, 0f, vp.X);
         float top = Mathf.Clamp(hole.Position.Y, 0f, vp.Y);
@@ -231,6 +259,23 @@ public sealed class Teaching
         float height = Mathf.Max(_spotlightCaption.GetCombinedMinimumSize().Y, vp.Y * 0.14f);
         float x = Mathf.Max(16f, (vp.X - width) / 2f);
         float y = (bottom + 16f + height <= vp.Y - 16f) ? bottom + 16f : Mathf.Max(16f, top - 16f - height);
+
+        // With a second hole the caption must clear that too (pass 46). Try beside each hole,
+        // under then over, and take the first spot that fits on screen and covers neither.
+        if (hole2.HasValue)
+        {
+            Rect2 h1 = new Rect2(left, top, right - left, bottom - top);
+            Rect2 h2 = hole2.Value;
+            float[] candidates = { h1.End.Y + 16f, h1.Position.Y - 16f - height, h2.End.Y + 16f, h2.Position.Y - 16f - height };
+            foreach (float cy in candidates)
+            {
+                Rect2 cap = new Rect2(x, cy, width, height);
+                if (cy < 16f || cy + height > vp.Y - 16f) continue;
+                if (cap.Intersects(h1) || cap.Intersects(h2)) continue;
+                y = cy;
+                break;
+            }
+        }
         SetRect(_spotlightCaption, x, y, width, height);
     }
 
@@ -247,7 +292,7 @@ public sealed class Teaching
         {
             case 0: return _ui.P1ScoreBlock;
             case 1: return _ui.DeckFootprint;
-            case 2: return _ui.P1Hand;
+            case 2: return LessonCardControl() ?? _ui.P1Hand; // pass 49: the one right card
             case 3: return _ui.P1ActionRow;
             case 4: return _ui.P1WinsRow;
             default: return null;
@@ -274,23 +319,41 @@ public sealed class Teaching
                 return $"This is your score. You are at {_host.Player1.CurrentScore}, and you are aiming "
                      + $"for {_host.State.TargetScore} without going over.";
             case 1:
-                return "Four of each card numbered 1 to 10. The number on the deck is how many "
-                     + "are left.";
+                // Pass 46: each player has their own deck now, and it carries no count.
+                return "Your deck: four of each card from 1 to 10, shuffled every set. Your "
+                     + "opponent draws from a deck of their own.";
             case 2:
-                return "Tap a Modifier to see its effect. Tap it again to Play.";
+                return "Tap a Modifier and your score shows what it would become. Tap it again "
+                     + "to Play it.";
             case 3:
-                // Reads the live score, so it is honest on a staged first match and on a replay.
-                return (_host.Player1.CurrentScore >= _host.State.TargetScore - 2)
-                    ? "You are on target. Hold stops you taking cards and locks your score in for "
-                    + "the rest of the set."
-                    : "Draw Card takes another card next turn. Hold stops you there and locks your "
-                    + "score in. Choose one.";
+                return HoldOrDrawText();
             case 4:
                 return $"Win {GameState.SetsToWinMatch} sets to take the match. These are yours "
                      + "so far. That is everything - good luck.";
             default:
                 return string.Empty;
         }
+    }
+
+    /// The Draw Card / Hold step reads the live score, so it is honest on the staged first match,
+    /// on a replay's real deal, and after whatever Modifier was just played. "On target" is said
+    /// only when it is true (pass 46: it used to be said anywhere within 2, e.g. at 19/20).
+    private string HoldOrDrawText()
+    {
+        int score = _host.Player1.CurrentScore;
+        int target = _host.State.TargetScore;
+
+        if (score == target)
+            return $"You are exactly on {target}. Hold stops you taking cards and locks your score "
+                 + "in for the rest of the set.";
+        if (score > target)
+            return $"You are over {target}. If the turn ends like this, you bust. Draw Card or "
+                 + "Hold to end the turn.";
+        if (score >= target - 2)
+            return $"You are at {score}, close to {target}. Hold locks that in for the rest of the "
+                 + $"set. Draw Card risks going over for a better score.";
+        return "Draw Card takes another card next turn. Hold stops you there and locks your "
+             + "score in. Choose one.";
     }
 
     /// True once the player has done the thing the current DO step asked for.
@@ -375,10 +438,78 @@ public sealed class Teaching
         if (!Running) return;
 
         bool doStep = TutorialIsDoStep(_tutorialIndex);
+        ApplyTutorialEmphasis(_tutorialIndex);
         _spotlightLabel.Text = TutorialTextFor(_tutorialIndex);
         _spotlightNext.Visible = !doStep;   // a DO step is finished by doing it, not by a button
-        PlaceSpotlight(TutorialTarget(_tutorialIndex), blockHole: !doStep);
+        Control target = TutorialTarget(_tutorialIndex);
+        // A picked-up card rises and grows out of its slot: open the hole upward to show all of it.
+        float extraTop = (_tutorialIndex == 2 && target != null && _host.SelectedFor(_host.Player1) != null)
+            ? target.Size.Y * 0.5f : 0f;
+        PlaceSpotlight(target, blockHole: !doStep, TutorialLookTarget(_tutorialIndex), extraTop);
     }
+
+    // ------------------------------------------------------------------
+    // One right answer (pass 49)
+    //
+    // When a step has one right answer, the tutorial points at it and nothing else: the answer
+    // pulses, and the wrong answer is out of reach.
+    // - The Modifier step: the one Modifier that takes you closest to the target without going
+    //   over (the staged first match: the +4, from 16 to 20). The hole is cut round that card
+    //   alone, so the rest of the hand cannot be tapped, and the score is lit beside it.
+    // - The Draw Card / Hold step, when you are exactly on the target: Hold pulses and Draw Card
+    //   is greyed out. On any other score both are fair choices, so neither is pushed.
+    // ------------------------------------------------------------------
+
+    /// The plain Modifier that lands closest to the target without going over, or null when none
+    /// improves on the current score (then the whole hand is fair game and nothing is singled out).
+    private Card BestModifier()
+    {
+        Player p = _host.Player1;
+        int target = _host.State.TargetScore;
+        Card best = null;
+        int bestScore = p.CurrentScore <= target ? p.CurrentScore : int.MinValue;
+        foreach (Card card in p.Modifiers)
+        {
+            if (card.Effect != CardEffect.None) continue;
+            int after = p.CurrentScore + card.Value;
+            if (after > target || after <= bestScore) continue;
+            best = card;
+            bestScore = after;
+        }
+        return best;
+    }
+
+    /// The card the Modifier step is about. Once it is picked up it is the SELECTED card (the
+    /// hole let nothing else be tapped), and the hole stays on it so tapping it again plays it.
+    private Control LessonCardControl()
+    {
+        Card lesson = _host.SelectedFor(_host.Player1) ?? BestModifier();
+        return lesson != null ? _ui.P1HandCardFor(lesson) : null;
+    }
+
+    private bool OnTargetExactly => _host.Player1.CurrentScore == _host.State.TargetScore;
+
+    private void ApplyTutorialEmphasis(int step)
+    {
+        Card pulseCard = step == 2 && _host.SelectedFor(_host.Player1) == null ? BestModifier() : null;
+        bool forceHold = step == 3 && OnTargetExactly;
+        SetEmphasis(pulseCard, forceHold);
+    }
+
+    private void SetEmphasis(Card pulseCard, bool forceHold)
+    {
+        if (_ui.TutorialPulseCard == pulseCard && _ui.TutorialPulseHold == forceHold && _ui.TutorialLockDraw == forceHold)
+            return;
+        _ui.TutorialPulseCard = pulseCard;
+        _ui.TutorialPulseHold = forceHold;
+        _ui.TutorialLockDraw = forceHold;
+        _ui.DeferRefresh(); // the table draws them; only asked for when something changed
+    }
+
+    /// A second thing a step points at, to look at only (pass 46). The Modifier step shows the
+    /// score as well as the hand: picking a card up previews the score it would make, and that
+    /// change is the lesson.
+    private Control TutorialLookTarget(int step) => step == 2 ? _ui.P1ScoreBlock : null;
 
     /// ...and then again once the layout has actually settled.
     ///
@@ -433,6 +564,7 @@ public sealed class Teaching
 
         Running = false;
         PendingTutorial = false;
+        SetEmphasis(null, false); // no pulse or locked Draw Card outlives the lesson
         if (_spotlightOverlay != null) _spotlightOverlay.Visible = false;
         RunData.Instance?.MarkTutorialSeen();
 

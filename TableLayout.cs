@@ -75,11 +75,19 @@ public partial class TableLayout : Control
     [Export] public Label P1ScoreFarValue;
     [Export] public Label P1ScoreFarTarget;
     [Export] public Control P1ScoreDivider;
+    /// Score badge: whose score it is, above the number - "YOU" on the end its owner reads,
+    /// "THEM" on the end turned round for the player across the table (pass 42).
+    [Export] public Label P1ScoreCaption;
+    [Export] public Label P1ScoreFarCaption;
     /// The OTHER player's score, beside this player's own ("Them  14"). Pass 36: this spot used to
     /// hold the status line; its messages now float as a toast.
     [Export] public Label P1OpponentScore;
     /// The box around it, styled like the player's own score box (and red the same way).
     [Export] public Control P1OpponentBox;
+    /// Score badges (portrait), face to face only: the opponent's score as a second badge on your
+    /// own half - "THEM" and the "/20" around OpponentScore (pass 43).
+    [Export] public Label P1OpponentCaption;
+    [Export] public Label P1OpponentTarget;
     [Export] public Control P1WinsRow;
     [Export] public Label P1WinsLabel;
     [Export] public Container P1Chips;
@@ -113,11 +121,17 @@ public partial class TableLayout : Control
     [Export] public Label P2ScoreFarValue;
     [Export] public Label P2ScoreFarTarget;
     [Export] public Control P2ScoreDivider;
+    /// Score badge: whose score it is, above the number (pass 42). Against the bot the near end
+    /// is read by Player 1, so it says "THEM".
+    [Export] public Label P2ScoreCaption;
+    [Export] public Label P2ScoreFarCaption;
     /// The OTHER player's score, beside this player's own ("Them  14"). Pass 36: this spot used to
     /// hold the status line; its messages now float as a toast.
     [Export] public Label P2OpponentScore;
     /// The box around it, styled like the player's own score box (and red the same way).
     [Export] public Control P2OpponentBox;
+    [Export] public Label P2OpponentCaption;
+    [Export] public Label P2OpponentTarget;
     [Export] public Control P2WinsRow;
     [Export] public Label P2WinsLabel;
     [Export] public Container P2Chips;
@@ -135,11 +149,16 @@ public partial class TableLayout : Control
     [ExportGroup("Middle")]
     [Export] public Label SetInfoLabel;
     [Export] public Label TargetLabel;
-    /// The face-down deck. In portrait it is turned on its side inside a holder (DeckFootprint).
+    /// Player 1's face-down deck, on Player 1's side (pass 43: each player draws from their own
+    /// forty). In portrait it sits inside a holder (DeckFootprint).
     [Export] public TextureRect Deck;
     /// What the tutorial's spotlight frames for the deck: the holder in portrait, the deck itself
     /// in landscape.
     [Export] public Control DeckFootprint;
+    /// Player 2's own deck, placed on Player 2's side like Player 1's is on theirs - so it turns
+    /// and mirrors with that side in every mode.
+    [Export] public TextureRect P2Deck;
+    [Export] public Control P2DeckFootprint;
     [Export] public Button MenuButton;
     /// The effect banner. Top-level, so it floats over the middle without taking room in it.
     [Export] public PanelContainer EffectToast;

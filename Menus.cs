@@ -311,7 +311,13 @@ public sealed class Menus
         _startMenuBox.AddChild(OverlayUi.MakeLabel(title, MenuTitleFont));
 
         RunData run = RunData.Instance;
-        bool runInProgress = run != null && run.RunActive && !run.RunComplete;
+        // Pass 47: the table behind the menu starts a run the moment the scene loads
+        // (GameManager.BeginRunMatch), so on first launch RunActive is already true and the menu
+        // used to offer "Continue - Match 1 of 10" over a climb nobody had played. A climb only
+        // counts as in progress once it has got somewhere - past the first rung, or into endless.
+        // At match 1, continuing and starting afresh are the same thing, so nothing is lost.
+        bool runInProgress = run != null && run.RunActive && !run.RunComplete
+                             && (run.StepIndex > 0 || run.Endless);
 
         Label blurb = OverlayUi.MakeLabel(
             runInProgress ? "A climb is in progress." : "Climb the ladder, or play someone across the table.",
@@ -683,95 +689,24 @@ public sealed class Menus
     // overlay with the rules; it can be opened at any time and changes no game state. In mirrored
     // 2-player mode a "Flip for other player" button turns the panel upside down for Player 2.
     // ------------------------------------------------------------------
-    // TWO texts, because the two modes have different learners (Alexander, 2026-09-15).
-    //
-    // In local 2-player somebody who already knows the game is sitting next to somebody who does
-    // not, and a person explains it far better than a panel does. That screen only has to carry
-    // the handful of rules the explainer might forget - so it is short on purpose, and making it
-    // longer would make it worse.
-    //
-    // Against the bot nobody is there to explain, so the game has to teach. The first-launch
-    // tutorial does that (claude/tutorial-and-how-to-play-spec.md); this text is the reference
-    // you come back to, and it deliberately does NOT enumerate the six effect cards - the ladder
-    // introduces them one rung at a time and explains each one where you meet it. A list of all
-    // six here would undo that, and it is exactly the "text-heavy wall" the tenets rule out.
+    // ONE text for every mode (pass 48, Alexander's rewrite). There used to be a long version for
+    // play against the bot as well; it was dropped. The first-launch tutorial teaches the table
+    // (claude/tutorial-and-how-to-play-spec.md), the ladder introduces each effect card where you
+    // meet it, and this is the short reference you come back to.
     private static readonly string HowToPlayShort =
         "GOAL\n" +
-        "Get as close to the target without going over. The target is on your score line - " +
-        $"\"You  17/20\". Win {GameState.SetsToWinMatch} sets to win the match.\n\n" +
+        $"Draw Cards to get close to the Target without going over. Closest player under the Target wins the Set.\nWin {GameState.SetsToWinMatch} Sets to win the Match.\n\n" +
         "EACH TURN\n" +
-        "Both players are dealt a card at the same time. You both decide at the same time too - " +
-        "nobody waits for anyone.\n\n" +
+        "Both players Draw a random Card of value 1-10. Each player decides whether they want to Draw another Card, Hold, or Play Modifier(s).\n\n" +
         "MODIFIERS\n" +
-        "Tap a Modifier to see its effect, then tap it again to play it. It adds its value to your " +
-        "score. You get four, and they have to last the whole match.\n\n" +
+        "Special Cards allowing you to get closer to the Target. Tap a Modifier to see its effects.\n" +
+        "Tap it again to play it. Each player gets four Modifiers per Match and are one-time use. They are not replenished between Sets.\n\n" +
         "DRAW CARD or HOLD\n" +
-        "Draw Card: you are done for this turn, and you take another card on the next one.\n" +
-        "Hold: you stop taking cards, and your score is locked for the rest of the set.\n\n" +
+        "Draw Card: Your turn ends and you will receive another Card at the beginning of the next Turn.\n" +
+        "Hold: Your Turn ends and locks in your Score for the remainder of the Set. \n\n" +
         "GOING OVER\n" +
-        "Over the target is only a warning until you press Draw Card or Hold - a minus Modifier can " +
-        "still save you. Draw while over, and you bust.\n\n" +
-        "That is the whole game. Everything else is a Modifier that explains itself when you meet it.";
-
-    private static readonly string HowToPlayFull =
-        "GOAL\n" +
-        "Get as close to the target as you can without going over. The target is on your own score " +
-        "line - \"You  17/20\" - and it CHANGES as you climb: 20 at first, then 23, then 18, and on " +
-        $"up. Win {GameState.SetsToWinMatch} sets to win the match.\n\n" +
-        "MATCH, SET, TURN\n" +
-        "A match is played in sets, and a set is played in turns. Win a set by finishing closer to " +
-        "the target than your opponent.\n\n" +
-        "THE DECK\n" +
-        "One deck of 40 cards, shared by both players: four each of 1 to 10. It is shuffled fresh " +
-        "every set, and the number on it is how many cards are left - so it can be counted.\n\n" +
-        "A TURN\n" +
-        "Each turn, every player who isn't holding is dealt one card at the same time. Both players " +
-        "then decide - at the same time, without waiting for each other - whether to play a " +
-        "Modifier, and then press Draw Card or Hold.\n" +
-        "When the target is 20 or more, the FIRST turn of a set gives everyone two cards. Two " +
-        "cards can never total more than 20, so that opening can never bust you.\n\n" +
-        "MODIFIERS\n" +
-        "You get 4 Modifiers at the start of a match, and they have to last every set of it - " +
-        "a Modifier spent in the first set is gone for the rest. Plain ones are worth -4 to +4 and " +
-        "add their value to your score.\n\n" +
-        "PLAYING A MODIFIER\n" +
-        "Tap a Modifier to pick it up. It lifts, and your score changes to what it would " +
-        "become - for example 17/20 turns into 20/20. Blue means you would still be at or under the " +
-        "target, orange means it would take you over. Nothing is spent yet: tap Play (or tap it again) to " +
-        "commit it, or Put back to change your mind.\n\n" +
-        "+/- MODIFIERS\n" +
-        "A Modifier marked +/- can be played either way round. Pick it up and press Flip Value " +
-        "to swap it between plus and minus - as often as you like - before playing it. " +
-        "A +3 becomes a -3, and back again.\n\n" +
-        "DRAW CARD\n" +
-        "You are done for this turn, and you take another card on the next one.\n\n" +
-        "HOLD\n" +
-        "You stop taking cards for the rest of the set. Your score is locked in.\n\n" +
-        "GOING OVER\n" +
-        "Going over the target is only a warning (\"Over target!\") - you can still play a " +
-        "minus Modifier to get back under. If you press Draw Card or Hold while still over the " +
-        "target, you bust and lose the set when the turn resolves.\n\n" +
-        "HOW A SET ENDS\n" +
-        "Once both players have pressed Draw Card or Hold, the turn resolves:\n" +
-        "- Anyone over the target busts. If both bust, the set is a tie and is replayed.\n" +
-        "- If both players are holding, the higher score wins the set. Equal scores tie and the set " +
-        "is replayed.\n" +
-        "- Otherwise the next turn is dealt to everyone who isn't holding.\n\n" +
-        "Filling all 9 board slots without busting is still a good place to be - hold!\n\n" +
-        "THE BOT\n" +
-        "It plays the same rules as you and decides at the same time as you do - you never wait for " +
-        "it. It gets sharper as you climb: the early opponents play their own Modifiers, " +
-        "the last ones play yours.\n\n" +
-        "THE CLIMB\n" +
-        "Ten matches, each against a tougher opponent at a different target. Winning pays medals; " +
-        "medals buy Modifiers in the market between matches; the Modifiers you own are slotted into " +
-        "a deck of 12, and 4 of those 12 are dealt to you each match. Losing a match ends the run - " +
-        "but nothing you own is ever taken away.\n\n" +
-        "SPECIAL MODIFIERS\n" +
-        "Most rungs of the climb introduce one new Modifier that does something other than add a " +
-        "number - changing a card, taking a score, undoing a play. Each one is explained the first " +
-        "time you meet it, and the market sells it to you straight afterwards. There is nothing to " +
-        "memorise here: you will always have met a Modifier before you can buy it.";
+        "When your Score is above the Target, you have the ability to play Modifier(s) to lower your Score before ending your turn. " +
+        "If your Turn ends while over the Target, your opponent wins the Set. If both players are over, the Set is a tie and repeated.";
 
     private Control _howToPlayOverlay;
 
@@ -855,17 +790,10 @@ public sealed class Menus
         buttons.AddChild(close);
     }
 
-    /// Which of the two texts this screen is showing. Against the bot, the long one; with two
-    /// people at one device, the short one. From the start menu - before a mode has been picked -
-    /// the short one too: somebody who has not started yet wants to know what the game IS, and the
-    /// tutorial will teach them the rest at the table.
-    private string HowToPlayForThisMode() =>
-        (_host.GameStarted && _host.VsBot) ? HowToPlayFull : HowToPlayShort;
-
     public void ShowHowToPlay()
     {
         if (_howToPlayOverlay == null) return;
-        if (_howToPlayRules != null) _howToPlayRules.Text = HowToPlayForThisMode();
+        if (_howToPlayRules != null) _howToPlayRules.Text = HowToPlayShort;
         _howToPlayFlipped = false;
         _howToPlayPanel.RotationDegrees = 0f;
         _howToPlayFlipButton.Visible = _ui.IsMirrored;

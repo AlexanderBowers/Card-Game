@@ -208,7 +208,7 @@ public static class AdMobBackend
         _consentSettled = true;
         Main(() =>
         {
-            MobileAds.Initialize();
+            PoingStudios.AdMob.Api.MobileAds.Initialize();
             LoadInterstitial();
             LoadRewarded();
         });
