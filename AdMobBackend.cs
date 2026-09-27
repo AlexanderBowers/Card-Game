@@ -202,15 +202,33 @@ public static class AdMobBackend
         SettleConsent();
     }
 
+    /// The SDK has reported that it finished initialising. Nothing may be loaded before this.
+    ///
+    /// THE CRASH this exists for (S25 Ultra, 2026-09-27, pass 50): `MobileAds.Initialize()` is
+    /// asynchronous in the GMA Next-Gen SDK the plugin ships. The loads used to run on the very
+    /// next line, the SDK threw "MobileAds.initialize must be called before using the Google Mobile
+    /// Ads SDK" on the Android main thread, and the app died on launch. It never showed in the
+    /// editor because the editor has no SDK (`Available` is false there).
+    private static bool _sdkReady;
+
+    private static OnInitializationCompleteListener _initListener; // held so it is not collected
+
     private static void SettleConsent()
     {
         if (_consentSettled) return;
         _consentSettled = true;
         Main(() =>
         {
-            PoingStudios.AdMob.Api.MobileAds.Initialize();
-            LoadInterstitial();
-            LoadRewarded();
+            _initListener = new OnInitializationCompleteListener
+            {
+                OnInitializationComplete = _ => Main(() =>
+                {
+                    _sdkReady = true;
+                    LoadInterstitial();
+                    LoadRewarded();
+                }),
+            };
+            PoingStudios.AdMob.Api.MobileAds.Initialize(_initListener);
         });
     }
 
@@ -223,7 +241,7 @@ public static class AdMobBackend
     // show the player a spinner in the middle of a round.
     private static void LoadInterstitial()
     {
-        if (!Available || !_consentSettled || _interstitial != null || _interstitialLoading) return;
+        if (!Available || !_sdkReady || _interstitial != null || _interstitialLoading) return;
         _interstitialLoading = true;
 
         InterstitialAdLoadCallback callback = new InterstitialAdLoadCallback
@@ -244,7 +262,7 @@ public static class AdMobBackend
 
     private static void LoadRewarded()
     {
-        if (!Available || !_consentSettled || _rewarded != null || _rewardedLoading) return;
+        if (!Available || !_sdkReady || _rewarded != null || _rewardedLoading) return;
         _rewardedLoading = true;
 
         RewardedAdLoadCallback callback = new RewardedAdLoadCallback
