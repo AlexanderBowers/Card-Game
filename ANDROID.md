@@ -96,7 +96,7 @@ Godot version moves.
 
 | | Plugin | Install |
 |---|---|---|
-| Ads | **AdMob** by Poing Studios, v5.1.0 | Editor → Asset Store → search `AdMob` → install → enable in *Project Settings → Plugins* |
+| Ads | **AdMob** by Poing Studios, v5.1.0 | **Installed and enabled** (2026-09-26): `addons/admob`, with the Godot 4.7.2 Android binaries in `addons/admob/android/bin` — committed on purpose, so CI needs no download. Upgrading: replace the folder from the GitHub release and the matching `android-template-v<godot>.zip`. |
 | Store | **Godot Google Play Billing** (Godot Foundation), v3.3.0 | Editor → AssetLib → search `Godot Google Play Billing` → **untick "Ignore asset root"** → install → enable in *Project Settings → Plugins* |
 
 Installing the AdMob plugin is all that is needed to switch the ad code on: `AimFor20.csproj`
@@ -107,6 +107,8 @@ otherwise. The billing plugin is reached by name at runtime, so it needs no buil
 
 ### 4c. AdMob
 
+- Until the real app id is set, the plugin uses **Google's test app id**. A release build with live
+  unit ids but the test app id serves nothing, so the app id and the `Live*` units go in together.
 - The **app id** (the one with a `~`) goes in *Project Settings → General → Admob → General →
   Android → App Id*. The plugin writes it into the manifest; do not hand-edit the manifest.
 - The **ad unit ids** (the ones with a `/`) are in `AdMobBackend.cs`, at the top. They are

@@ -129,7 +129,8 @@ public static class AdMobBackend
         if (_initialised || !Available) return;
         _initialised = true;
 
-        MobileAds.Initialize();
+        // Consent first, SDK second: Google's UMP guidance is to gather consent before the
+        // Mobile Ads SDK starts, so nothing it does on start-up precedes the answer.
         RequestConsent();
     }
 
@@ -182,7 +183,7 @@ public static class AdMobBackend
     private static void OnConsentFormLoaded(ConsentForm form)
     {
         _consentForm = form;
-        if (UserMessagingPlatform.ConsentInformation.GetConsentStatus() == ConsentStatus.Values.Required)
+        if (UserMessagingPlatform.ConsentInformation.GetConsentStatus() == ConsentInformation.ConsentStatus.Required)
         {
             form.Show(OnConsentFormDismissed);
             return;
@@ -207,6 +208,7 @@ public static class AdMobBackend
         _consentSettled = true;
         Main(() =>
         {
+            MobileAds.Initialize();
             LoadInterstitial();
             LoadRewarded();
         });

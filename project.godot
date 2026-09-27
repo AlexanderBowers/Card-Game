@@ -37,6 +37,10 @@ window/handheld/orientation=6
 
 project/assembly_name="AimFor20"
 
+[editor_plugins]
+
+enabled=PackedStringArray("res://addons/admob/plugin.cfg")
+
 [gui]
 
 theme/custom="res://ui_theme.tres"

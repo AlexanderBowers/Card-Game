@@ -1,0 +1,2 @@
+# Binaries are committed on purpose so CI and fresh checkouts build without a download.
+# (Poing ships this file with "/bin" ignored.)
