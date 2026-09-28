@@ -53,24 +53,28 @@ public static class AdMobBackend
     private const string TestIosInterstitial = "ca-app-pub-3940256099942544/4411468910";
     private const string TestIosRewarded = "ca-app-pub-3940256099942544/1712485313";
 
-    /// The real units. Empty means "no account yet" and the test units are used everywhere.
-    private const string LiveAndroidInterstitial = "";
-    private const string LiveAndroidRewarded = "";
+    /// The real units (AdMob console, publisher pub-9876378155655051, pass 51). Empty means
+    /// "no unit yet" for that platform, and that one unit falls back to its test unit.
+    private const string LiveAndroidInterstitial = "ca-app-pub-9876378155655051/2167587586";
+    private const string LiveAndroidRewarded = "ca-app-pub-9876378155655051/7670447275";
     private const string LiveIosInterstitial = "";
     private const string LiveIosRewarded = "";
 
-    /// A debug build never serves a live ad, even once the real ids are in.
-    private static bool UseTestAds => OS.IsDebugBuild() || LiveAndroidInterstitial.Length == 0;
-
     private static bool IsIos => OS.GetName() == "iOS";
 
+    /// Chooses per unit. A debug build never serves a live ad, and any unit whose live id is
+    /// still empty uses its own test unit - so a release build can never end up with an empty id
+    /// (the old single `UseTestAds` flag keyed everything off the Android interstitial).
+    private static string Pick(string live, string test) =>
+        OS.IsDebugBuild() || string.IsNullOrEmpty(live) ? test : live;
+
     private static string InterstitialUnitId =>
-        UseTestAds ? (IsIos ? TestIosInterstitial : TestAndroidInterstitial)
-                   : (IsIos ? LiveIosInterstitial : LiveAndroidInterstitial);
+        IsIos ? Pick(LiveIosInterstitial, TestIosInterstitial)
+              : Pick(LiveAndroidInterstitial, TestAndroidInterstitial);
 
     private static string RewardedUnitId =>
-        UseTestAds ? (IsIos ? TestIosRewarded : TestAndroidRewarded)
-                   : (IsIos ? LiveIosRewarded : LiveAndroidRewarded);
+        IsIos ? Pick(LiveIosRewarded, TestIosRewarded)
+              : Pick(LiveAndroidRewarded, TestAndroidRewarded);
 
     /// Runs an action on the main thread. See the threading note above.
     private static void Main(Action action)
@@ -224,12 +228,35 @@ public static class AdMobBackend
                 OnInitializationComplete = _ => Main(() =>
                 {
                     _sdkReady = true;
+                    ApplyAudienceLimits();
                     LoadInterstitial();
                     LoadRewarded();
                 }),
             };
             PoingStudios.AdMob.Api.MobileAds.Initialize(_initListener);
         });
+    }
+
+    /// Max ad content rating, enforced in code as well as in the AdMob console (Blocking
+    /// controls) - keep the two matching. PG chosen over G for fill (pass 51). Play target
+    /// audience is 13+, so nothing is tagged child-directed.
+    private const string MaxAdRating = RequestConfiguration.MaxAdContentRatingPG;
+
+    private static void ApplyAudienceLimits()
+    {
+        try
+        {
+            PoingStudios.AdMob.Api.MobileAds.SetRequestConfiguration(new RequestConfiguration
+            {
+                MaxAdContentRating = MaxAdRating,
+                ChildDirectedTreatment = RequestConfiguration.TagForChildDirectedTreatment.False,
+                UnderAgeOfConsent = RequestConfiguration.TagForUnderAgeOfConsent.False,
+            });
+        }
+        catch (Exception e)
+        {
+            GD.PushWarning($"AdMob: could not apply the request configuration ({e.Message}).");
+        }
     }
 
     // ------------------------------------------------------------------
