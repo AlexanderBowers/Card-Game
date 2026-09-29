@@ -143,11 +143,15 @@ public sealed class Prompts
                 adReady
                     ? $"Watch a short ad for a card that puts you on {landing}.\n"
                       + "Or take a random card from your deck - it might not help."
-                    : "Take a random card from your deck.\nIt might be enough. It might not.",
+                    : "Get a random card from your deck.\nIt might save you. It might not.",
                 16, OverlayUi.Muted));
 
             if (adReady) AddRescueButton($"Watch ad - land on {landing}", 48, WatchRescueAd);
-            AddRescueButton("No thanks - random card", adReady ? 40 : 48, GiveRandomRescue);
+            // With an ad on offer the random card is the "skip" choice; without one it is the only
+            // choice, so the button just says what it does (S25 playtest, 2026-09-28: "No thanks"
+            // read as declining the very card it hands you).
+            AddRescueButton(adReady ? "Skip ad - random card" : "Take a random card",
+                adReady ? 40 : 48, GiveRandomRescue);
         }
 
         _root.MoveChild(_rescueOverlay, _root.GetChildCount() - 1);
