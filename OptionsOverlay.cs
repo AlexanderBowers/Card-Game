@@ -22,6 +22,7 @@ public partial class OptionsOverlay : Control
     private Button _closeButton;
     private Control _storeSection;      // the heading and the row, so both hide when there is no store
     private VBoxContainer _storeRows;   // refilled on every Open: what it says depends on what is owned
+    private Control _privacySection;    // "Privacy Choices": only where the consent SDK requires it
     private Action _onClosed;
     private bool _built;
 
@@ -81,6 +82,15 @@ public partial class OptionsOverlay : Control
         _storeRows.AddThemeConstantOverride("separation", 8);
         store.AddChild(_storeRows);
 
+        // --- Privacy (GDPR / US state laws). Players who were shown the consent form must be able
+        // to change their answer later; the SDK says who they are.
+        VBoxContainer privacy = new VBoxContainer();
+        privacy.AddThemeConstantOverride("separation", 10);
+        box.AddChild(privacy);
+        _privacySection = privacy;
+        privacy.AddChild(SectionLabel("Privacy"));
+        privacy.AddChild(StoreButton("Privacy Choices", () => AdService.ShowPrivacyOptions(null)));
+
         // --- Battery. Little to save today; the switches are here for when the art is heavier.
         box.AddChild(SectionLabel("Battery"));
         _animations = Toggle("Card animations", GameSettings.SetCardAnimations);
@@ -114,6 +124,7 @@ public partial class OptionsOverlay : Control
         _debugButtons?.SetPressedNoSignal(GameSettings.ShowDebugButtons);
         if (_closeButton != null) _closeButton.CustomMinimumSize = WideButton;
         FillStore(); // sized here too, because WideButton follows the viewport
+        if (_privacySection != null) _privacySection.Visible = AdService.PrivacyOptionsRequired;
 
         Node parent = GetParent();
         if (parent != null) parent.MoveChild(this, parent.GetChildCount() - 1);

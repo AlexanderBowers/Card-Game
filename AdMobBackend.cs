@@ -76,6 +76,36 @@ public static class AdMobBackend
         IsIos ? Pick(LiveIosRewarded, TestIosRewarded)
               : Pick(LiveAndroidRewarded, TestAndroidRewarded);
 
+    // ------------------------------------------------------------------
+    // Consent testing (debug builds only)
+    // ------------------------------------------------------------------
+    /// The S25's hashed device id for UMP, which is NOT the AdMob test-device id. Run a debug build
+    /// once with the phone on USB, then `adb logcat | findstr ConsentDebugSettings` (Windows) - the
+    /// SDK prints "Use new ConsentDebugSettings.Builder().addTestDeviceHashedId("...")". Paste the
+    /// quoted id here. Without it, "Consent: EEA test" does nothing on a real phone.
+    private const string ConsentTestDeviceHashedId = "";
+
+    private const string ConsentDebugPath = "user://consent_debug.cfg";
+
+    /// Debug switch: pretend this phone is in the EEA so the GDPR form shows. Saved, and applied at
+    /// the NEXT launch - consent is gathered once, at start-up.
+    public static bool DebugConsentEea
+    {
+        get
+        {
+            if (!OS.IsDebugBuild()) return false;
+            ConfigFile cfg = new ConfigFile();
+            return cfg.Load(ConsentDebugPath) == Error.Ok && (bool)cfg.GetValue("consent", "eea", false);
+        }
+        set
+        {
+            if (!OS.IsDebugBuild()) return;
+            ConfigFile cfg = new ConfigFile();
+            cfg.SetValue("consent", "eea", value);
+            cfg.Save(ConsentDebugPath);
+        }
+    }
+
     /// Runs an action on the main thread. See the threading note above.
     private static void Main(Action action)
     {
@@ -98,6 +128,12 @@ public static class AdMobBackend
     public static void ShowInterstitial(Action onDone) => Main(() => onDone?.Invoke());
 
     public static void ShowRewarded(Action<bool> onEarned) => Main(() => onEarned?.Invoke(false));
+
+    public static bool PrivacyOptionsRequired => false;
+
+    public static void ShowPrivacyOptions(Action onDone) => Main(() => onDone?.Invoke());
+
+    public static void DebugResetConsent() { }
 #else
     // ------------------------------------------------------------------
     // The real thing
@@ -157,6 +193,14 @@ public static class AdMobBackend
             {
                 TagForUnderAgeOfConsent = false,
             };
+            if (DebugConsentEea && ConsentTestDeviceHashedId.Length > 0)
+            {
+                request.ConsentDebugSettings = new ConsentDebugSettings
+                {
+                    DebugGeography = DebugGeography.Eea,
+                    TestDeviceHashedIds = new System.Collections.Generic.List<string> { ConsentTestDeviceHashedId },
+                };
+            }
             UserMessagingPlatform.ConsentInformation.Update(request, OnConsentUpdated, OnConsentUpdateFailed);
         }
         catch (Exception e)
@@ -235,6 +279,49 @@ public static class AdMobBackend
             };
             PoingStudios.AdMob.Api.MobileAds.Initialize(_initListener);
         });
+    }
+
+    // ------------------------------------------------------------------
+    // Privacy options (GDPR: consent must be as easy to withdraw as to give)
+    // ------------------------------------------------------------------
+    /// True when UMP says this player needs a way back into their consent choices - in practice,
+    /// players in the EEA/UK/Switzerland and the US states the console message targets. Options
+    /// shows its "Privacy Choices" button only then.
+    public static bool PrivacyOptionsRequired =>
+        _consentSettled
+        && UserMessagingPlatform.ConsentInformation.GetPrivacyOptionsRequirementStatus()
+           == ConsentInformation.PrivacyOptionsRequirementStatus.Required;
+
+    /// Re-opens the consent form. `onDone` runs exactly once, whatever the form does.
+    public static void ShowPrivacyOptions(Action onDone)
+    {
+        bool finished = false;
+        void Finish()
+        {
+            if (finished) return;
+            finished = true;
+            Main(() => onDone?.Invoke());
+        }
+        try
+        {
+            UserMessagingPlatform.ShowPrivacyOptionsForm(error =>
+            {
+                if (error != null) GD.Print($"AdMob: privacy options form failed ({error.Message}).");
+                Finish();
+            });
+        }
+        catch (Exception e)
+        {
+            GD.PushWarning($"AdMob: privacy options form could not open ({e.Message}).");
+            Finish();
+        }
+    }
+
+    /// Debug: forget the stored consent answer, so the next launch asks again from scratch.
+    public static void DebugResetConsent()
+    {
+        if (!OS.IsDebugBuild() || !Available) return;
+        UserMessagingPlatform.ConsentInformation.Reset();
     }
 
     /// Max ad content rating, enforced in code as well as in the AdMob console (Blocking

@@ -973,6 +973,28 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
         NoAdsText();
         noAds.Pressed += () => { PurchaseService.DebugSetOwned(!PurchaseService.OwnsNoAds); NoAdsText(); };
         adRow.AddChild(noAds);
+
+        // Consent testing, on a third row: both take effect on the NEXT launch, when consent is
+        // gathered.
+        HBoxContainer consentRow = new HBoxContainer { Alignment = BoxContainer.AlignmentMode.Center };
+        consentRow.AddThemeConstantOverride("separation", 6);
+        column.AddChild(consentRow);
+        _debugRows.Add(consentRow);
+        consentRow.Visible = GameSettings.ShowDebugButtons;
+
+        Button eea = new Button();
+        void EeaText() => eea.Text = AdMobBackend.DebugConsentEea ? "Consent: EEA test" : "Consent: real";
+        EeaText();
+        eea.Pressed += () => { AdMobBackend.DebugConsentEea = !AdMobBackend.DebugConsentEea; EeaText(); };
+        consentRow.AddChild(eea);
+
+        Button resetConsent = new Button { Text = "Reset consent" };
+        resetConsent.Pressed += () =>
+        {
+            AdMobBackend.DebugResetConsent();
+            GD.Print("DEBUG: consent reset - relaunch to be asked again");
+        };
+        consentRow.AddChild(resetConsent);
     }
 
     /// Drops the run one rung either way and walks straight into that match, so a stage can be

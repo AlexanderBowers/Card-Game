@@ -48,6 +48,12 @@ public static class AdService
     /// load" paths without pulling the network cable.
     public static bool DebugSimulateNoFill { get; set; }
 
+    /// GDPR / US-state privacy choices: the Options screen offers "Privacy Choices" only when the
+    /// consent SDK says this player needs it (AdMobBackend.PrivacyOptionsRequired).
+    public static bool PrivacyOptionsRequired => AdMobBackend.PrivacyOptionsRequired;
+
+    public static void ShowPrivacyOptions(Action onDone) => AdMobBackend.ShowPrivacyOptions(onDone);
+
     /// Ads are a mobile thing. Steam / desktop players get the No Ads behaviour for free (spec §5).
     /// Debug builds count as mobile so the flows can be tested from the editor.
     public static bool PlatformHasAds => OS.HasFeature("mobile") || OS.IsDebugBuild();
