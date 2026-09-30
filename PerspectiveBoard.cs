@@ -67,16 +67,34 @@ public partial class PerspectiveBoard : GridContainer
     /// with the board's material.
     private void OnNodeAdded(Node node)
     {
-        if (node is CanvasItem item && IsAncestorOf(node)) item.UseParentMaterial = true;
+        if (node is CanvasItem item && IsAncestorOf(node)) Adopt(item);
     }
 
-    private static void ShareMaterial(Node node)
+    private void ShareMaterial(Node node)
     {
         foreach (Node child in node.GetChildren())
         {
-            if (child is CanvasItem item) item.UseParentMaterial = true;
+            if (child is CanvasItem item) Adopt(item);
             ShareMaterial(child);
         }
+    }
+
+    /// Pass 57: a card's shine overlay keeps its own (additive) material, which carries the same
+    /// warp as the board's - so it is fed the board's uniforms instead of borrowing its material.
+    public const string OwnMaterialGroup = "board_own_material";
+
+    private readonly System.Collections.Generic.List<ShaderMaterial> _followers =
+        new System.Collections.Generic.List<ShaderMaterial>();
+
+    private void Adopt(CanvasItem item)
+    {
+        if (item.IsInGroup(OwnMaterialGroup) && item.Material is ShaderMaterial own)
+        {
+            own.SetShaderParameter("on_board", true);
+            if (!_followers.Contains(own)) _followers.Add(own);
+            return;
+        }
+        item.UseParentMaterial = true;
     }
 
     /// The board's rect in canvas space - from its corners, so a board turned round with Player
@@ -100,6 +118,17 @@ public partial class PerspectiveBoard : GridContainer
         _material.SetShaderParameter("far_scale", Tilt ? FarScale : 1f);
         _material.SetShaderParameter("depth", Tilt ? Depth : 1f);
         _material.SetShaderParameter("far_at_top", FarAtTop);
+
+        // Shine overlays on this board's cards; a freed card's material is dropped here.
+        _followers.RemoveAll(m => m == null || !GodotObject.IsInstanceValid(m) || m.GetReferenceCount() <= 1);
+        foreach (ShaderMaterial m in _followers)
+        {
+            m.SetShaderParameter("board_pos", r.Position);
+            m.SetShaderParameter("board_size", r.Size);
+            m.SetShaderParameter("far_scale", Tilt ? FarScale : 1f);
+            m.SetShaderParameter("depth", Tilt ? Depth : 1f);
+            m.SetShaderParameter("far_at_top", FarAtTop);
+        }
     }
 
     /// Where a point on the flat board is actually drawn - the same sum as the shader. The card

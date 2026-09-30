@@ -127,6 +127,8 @@ public sealed class TableUi
         _sfxLock = CreateSfx("res://assets/sfx/hold_lock.wav");
         _sfxOnTarget = CreateSfx("res://assets/sfx/on_target.wav");
         _sfxImpact = CreateSfx("res://assets/sfx/modifier_impact.wav");
+        _shineShader = GD.Load<Shader>("res://card_shine.gdshader");
+        _root.AddChild(new ShineDriver { Name = "ShineDriver" });
     }
 
     // ------------------------------------------------------------------
@@ -245,6 +247,7 @@ public sealed class TableUi
     private AudioStreamPlayer _sfxLock;      // Hold: the padlock snapping shut
     private AudioStreamPlayer _sfxOnTarget;  // a picked-up Modifier lands exactly on the target
     private AudioStreamPlayer _sfxImpact;    // a Modifier slammed down from the hand
+    private Shader _shineShader;
 
     private AudioStreamPlayer CreateSfx(string path)
     {
@@ -1847,6 +1850,33 @@ public sealed class TableUi
             highlight.AddThemeStyleboxOverride("panel", outline);
             view.AddChild(highlight);
             highlight.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
+
+            // Pass 57: held in the hand it floats - a soft shadow under it, and a slow sway, so
+            // it reads as a card between your fingers rather than a selected tile.
+            StyleBoxFlat shadowStyle = new StyleBoxFlat
+            {
+                BgColor = new Color(0, 0, 0, 0.0f),
+                ShadowColor = new Color(0, 0, 0, 0.45f),
+                ShadowSize = 18,
+                ShadowOffset = new Vector2(6, 14),
+            };
+            shadowStyle.SetCornerRadiusAll(12);
+            Panel shadow = new Panel { MouseFilter = Control.MouseFilterEnum.Ignore, ShowBehindParent = true };
+            shadow.AddThemeStyleboxOverride("panel", shadowStyle);
+            view.AddChild(shadow);
+            shadow.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
+
+            if (GameSettings.CardAnimations)
+            {
+                view.TreeEntered += () =>
+                {
+                    Tween sway = view.CreateTween().SetLoops();
+                    sway.TweenProperty(view, "rotation_degrees", 1.6f, 1.1f)
+                        .SetTrans(Tween.TransitionType.Sine).SetEase(Tween.EaseType.InOut);
+                    sway.TweenProperty(view, "rotation_degrees", -1.6f, 1.1f)
+                        .SetTrans(Tween.TransitionType.Sine).SetEase(Tween.EaseType.InOut);
+                };
+            }
         }
 
         return button;
@@ -2325,7 +2355,51 @@ public sealed class TableUi
                 corner.RotationDegrees = 180f;
             };
         }
+        AddShine(view, card);
         return view;
+    }
+
+    // ------------------------------------------------------------------
+    // Shine (pass 57, after Pokemon TCG Pocket)
+    //
+    // Every card gets a gloss streak that slides as the phone tilts (card_shine.gdshader,
+    // ShineDriver). Special cards also get holo foil: effect cards full strength, rescue cards and
+    // "+/-" cards lighter. A painted foil mask (<face>_foil.png beside the face, ART_PIPELINE.md)
+    // limits the foil to the parts the artist chose; without one the whole face shimmers.
+    // ------------------------------------------------------------------
+    private float FoilStrengthFor(Card card)
+    {
+        if (card.Effect != CardEffect.None) return 0.85f;
+        if (card.IsRescue) return 0.6f;
+        if (card.CanFlipValue) return 0.3f;
+        return 0f;
+    }
+
+    private void AddShine(TextureRect view, Card card)
+    {
+        if (_shineShader == null || view.Texture == null) return;
+
+        ShaderMaterial mat = new ShaderMaterial { Shader = _shineShader };
+        mat.SetShaderParameter("card_face", view.Texture);
+        mat.SetShaderParameter("foil_strength", FoilStrengthFor(card));
+        mat.SetShaderParameter("gloss_strength", 0.18f);
+        string facePath = view.Texture.ResourcePath;
+        if (!string.IsNullOrEmpty(facePath) && facePath.EndsWith(".png"))
+        {
+            string maskPath = facePath.Substring(0, facePath.Length - 4) + "_foil.png";
+            if (ResourceLoader.Exists(maskPath)) mat.SetShaderParameter("foil_mask", GD.Load<Texture2D>(maskPath));
+        }
+
+        ColorRect shine = new ColorRect
+        {
+            Name = "Shine",
+            Color = Colors.White,
+            Material = mat,
+            MouseFilter = Control.MouseFilterEnum.Ignore,
+        };
+        shine.AddToGroup(PerspectiveBoard.OwnMaterialGroup);
+        view.AddChild(shine);
+        shine.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
     }
 
     /// Redraws the face of a card that is already on a board, after something changed its Value.

@@ -54,3 +54,14 @@ theme/custom="res://ui_theme.tres"
 renderer/rendering_method="mobile"
 textures/vram_compression/import_etc2_astc=true
 environment/defaults/default_clear_color=Color(0.1, 0.14, 0.16, 1)
+
+[input_devices]
+
+sensors/enable_gravity=true
+
+[shader_globals]
+
+card_tilt={
+"type": "vec2",
+"value": Vector2(0, 0)
+}
