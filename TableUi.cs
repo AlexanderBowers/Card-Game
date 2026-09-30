@@ -1912,8 +1912,12 @@ public sealed class TableUi
     }
 
     /// "bronze", "silver", ... for the rank in play, or null outside a run.
+    /// Endless mode has its own set (pass 60): a night-sky table and an iridescent opponent deck,
+    /// rather than borrowing the Obsidian stage it is parked on.
     private string RankKey =>
-        _host.InRun && RunData.Instance != null ? RunData.Instance.CurrentRank.Name.ToLowerInvariant() : null;
+        !_host.InRun || RunData.Instance == null ? null
+        : RunData.Instance.Endless ? "endless"
+        : RunData.Instance.CurrentRank.Name.ToLowerInvariant();
 
     private Texture2D RankArt(string prefix) => RankKey == null ? null : Art($"{prefix}_{RankKey}.png");
 

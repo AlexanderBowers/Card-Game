@@ -50,6 +50,8 @@ LOOKS = {
     "gold":     dict(face="#fbf5e3", panel="#f7ecc9", rim="#d9a62e", ink="#6b4a0e"),
     "ruby":     dict(face="#fbeff0", panel="#f6dfe2", rim="#b3263a", ink="#7a1426"),
     "obsidian": dict(face="#f0edf6", panel="#e4def0", rim="#3d2f5c", ink="#3a2466"),
+    # Endless: its own set - a deep night frame with an iridescent (thin-film) trim.
+    "endless":  dict(face="#f4f2ff", panel="#e8e4ff", rim="#2a1670", ink="#4b2bb8", iridescent=True),
     # Modifiers.
     "plus":     dict(face="#eef5ff", panel="#dbe9ff", rim="#3f7fe0", ink="#1f4fa8"),
     "minus":    dict(face="#fff0f0", panel="#ffdede", rim="#d8474f", ink="#a51f2c"),
@@ -131,6 +133,14 @@ def mat(name, color, rough=0.45, metal=0.0, coat=0.0, emit=None):
         p.inputs["Coat Weight"].default_value = coat
         p.inputs["Coat Roughness"].default_value = 0.08
     return m
+
+
+def rgba_sock(sockets, name):
+    """ShaderNodeMix has float, vector and colour sockets that share one name: pick the colour one."""
+    for sock in sockets:
+        if sock.name == name and sock.type == "RGBA":
+            return sock
+    return sockets[name]
 
 
 def face_mat(name, color):
@@ -313,9 +323,41 @@ def pattern_face(name, color, tint):
     fac.inputs[1].default_value = 0.07
     nt.links.new(thr.outputs[0], fac.inputs[0])
     nt.links.new(fac.outputs[0], mix.inputs["Factor"])
-    nt.links.new(ramp_out, mix.inputs["A"])
-    mix.inputs["B"].default_value = tint
-    nt.links.new(mix.outputs["Result"], p.inputs["Base Color"])
+    nt.links.new(ramp_out, rgba_sock(mix.inputs, "A"))
+    rgba_sock(mix.inputs, "B").default_value = tint
+    nt.links.new(rgba_sock(mix.outputs, "Result"), p.inputs["Base Color"])
+    return m
+
+
+def iridescent(m, thickness=520.0):
+    """Holographic metal: a pastel rainbow running diagonally across the piece. (Thin-film alone
+    reads as plain silver under a straight-down orthographic camera - the angle never changes.)"""
+    nt = m.node_tree
+    p = nt.nodes["Principled BSDF"]
+    tex = nt.nodes.new("ShaderNodeTexCoord")
+    sep = nt.nodes.new("ShaderNodeSeparateXYZ")
+    nt.links.new(tex.outputs["Object"], sep.inputs[0])
+    add = nt.nodes.new("ShaderNodeMath")
+    add.operation = "ADD"
+    nt.links.new(sep.outputs["X"], add.inputs[0])
+    nt.links.new(sep.outputs["Y"], add.inputs[1])
+    wrap = nt.nodes.new("ShaderNodeMath")
+    wrap.operation = "FRACT"
+    scale = nt.nodes.new("ShaderNodeMath")
+    scale.operation = "MULTIPLY"
+    scale.inputs[1].default_value = 0.16
+    nt.links.new(add.outputs[0], scale.inputs[0])
+    nt.links.new(scale.outputs[0], wrap.inputs[0])
+    ramp = nt.nodes.new("ShaderNodeValToRGB")
+    stops = ["#f2a7ff", "#9fd8ff", "#a8ffd8", "#fff3a0", "#ffb3c7", "#f2a7ff"]
+    ramp.color_ramp.elements[0].color = srgb(stops[0])
+    ramp.color_ramp.elements[1].color = srgb(stops[-1])
+    for i, c in enumerate(stops[1:-1], start=1):
+        e = ramp.color_ramp.elements.new(i / (len(stops) - 1))
+        e.color = srgb(c)
+    nt.links.new(wrap.outputs[0], ramp.inputs["Fac"])
+    nt.links.new(ramp.outputs["Color"], p.inputs["Base Color"])
+    p.inputs["Thin Film Thickness"].default_value = thickness
     return m
 
 
@@ -324,6 +366,8 @@ def base_card(look, rim_metal=1.0):
     frame = frame_mat("Frame", srgb(L["rim"]))
     face = pattern_face("Face", srgb(L["face"]), srgb(L["rim"]))
     trim = mat("Trim", srgb(TRIM), rough=0.22, metal=1.0)
+    if L.get("iridescent"):
+        trim = iridescent(mat("Trim", srgb("#e8e8f0"), rough=0.18, metal=1.0), 560.0)
     # The card body is the frame colour; the face sits on it, framed by a thin gold trim.
     slab("Card", CARD_W, CARD_H, CORNER, 0.0, THICK, frame, bevel=0.04)
     fw, fh, fr = CARD_W - 2 * FRAME, CARD_H - 2 * FRAME, CORNER - FRAME * 0.55
@@ -414,14 +458,25 @@ BACK_LOOKS = {
     "gold":     dict(face="#3a2f12", rim="#d9a62e", metal="#f0c95a"),
     "ruby":     dict(face="#3a1018", rim="#b3263a", metal="#e7b25a"),
     "obsidian": dict(face="#1a1428", rim="#3d2f5c", metal="#b89cf0"),
+    "endless":  dict(face="#150e3e", rim="#2a1670", metal="#e8e8f0", iridescent=True),
 }
 
 
 def build_back(style="default"):
     B = BACK_LOOKS[style]
     LOOKS["back"] = dict(face=B["face"], panel=B["face"], rim=B["rim"], ink=B["metal"])
+    LOOKS["back"]["iridescent"] = B.get("iridescent", False)
     L = base_card("back")
     gold = mat("Gold", srgb(B["metal"]), rough=0.25, metal=1.0)
+    if B.get("iridescent"):
+        # Endless: the ring and an infinity sign, in iridescent metal.
+        iri = iridescent(mat("Iri", srgb(B["metal"]), rough=0.14, metal=1.0), 560.0)
+        slab("EmblemRing", 2.9, 2.9, 1.45, THICK, 0.03, iri, bevel=0.01, hole=(2.5, 2.5, 1.25))
+        text("Inf", "\u221e", 2.1, (0, -0.05, THICK + 0.012), iri, font=FONT_TITLE)
+        for sx in (-1, 1):
+            for sy in (-1, 1):
+                pip((sx * 1.9, sy * 2.85, THICK + 0.02), 0.13, iri)
+        return
     # Emblem: a ring with "20" inside.
     ring = slab("EmblemRing", 2.9, 2.9, 1.45, THICK, 0.03, gold, bevel=0.01, hole=(2.5, 2.5, 1.25))
     text("Twenty", "20", 1.45, (0, 0, THICK + 0.012), gold)
@@ -582,6 +637,7 @@ MATS = {
     "gold":     ("#4a3a14", "#d9a62e", "lacquer"),
     "ruby":     ("#4a1420", "#d9a62e", "velvet"),
     "obsidian": ("#17121f", "#8e6ad8", "glass"),
+    "endless":  ("#120f2e", "#e8e8f0", "void"),
 }
 
 
@@ -599,11 +655,36 @@ def surface_mat(color, kind):
         "lacquer": (2.0, 0.03, 0.40, 0.0),
         "velvet":  (120.0, 0.18, 0.85, 0.0),
         "glass":   (3.0, 0.06, 0.42, 0.0),
+        "void":    (1.4, 0.02, 0.55, 0.0),
     }[kind]
     noise.inputs["Scale"].default_value = settings[0]
     noise.inputs["Detail"].default_value = 6.0
     bump.inputs["Strength"].default_value = settings[1]
     p.inputs["Roughness"].default_value = settings[2]
+    if kind == "void":
+        # A night sky of slow colour: indigo drifting to violet and teal, with faint star specks.
+        ramp = nt.nodes.new("ShaderNodeValToRGB")
+        noise.inputs["Scale"].default_value = 3.5
+        noise.inputs["Detail"].default_value = 8.0
+        ramp.color_ramp.elements[0].position = 0.32
+        ramp.color_ramp.elements[0].color = srgb("#07061a")
+        ramp.color_ramp.elements[1].position = 0.70
+        ramp.color_ramp.elements[1].color = srgb("#0c4a63")
+        mid = ramp.color_ramp.elements.new(0.5)
+        mid.color = srgb("#3b1d86")
+        nt.links.new(noise.outputs["Fac"], ramp.inputs["Fac"])
+        stars = nt.nodes.new("ShaderNodeTexVoronoi")
+        stars.inputs["Scale"].default_value = 90.0
+        thr = nt.nodes.new("ShaderNodeMath")
+        thr.operation = "LESS_THAN"
+        thr.inputs[1].default_value = 0.035
+        nt.links.new(stars.outputs["Distance"], thr.inputs[0])
+        mixs = nt.nodes.new("ShaderNodeMix")
+        mixs.data_type = "RGBA"
+        nt.links.new(thr.outputs[0], mixs.inputs["Factor"])
+        nt.links.new(ramp.outputs["Color"], rgba_sock(mixs.inputs, "A"))
+        rgba_sock(mixs.inputs, "B").default_value = (0.8, 0.82, 1.0, 1)
+        nt.links.new(rgba_sock(mixs.outputs, "Result"), p.inputs["Base Color"])
     if kind == "velvet":
         p.inputs["Sheen Weight"].default_value = 0.6
     if kind in ("glass", "lacquer"):
@@ -645,6 +726,8 @@ def build_playmat(rank, portrait):
     table.scale = (w + 0.4, h + 0.4, 1)
     table.data.materials.append(surface_mat(color, kind))
     metal = mat("Inlay", srgb(inlay), rough=0.3, metal=1.0)
+    if kind == "void":
+        metal = iridescent(mat("Inlay", srgb(inlay), rough=0.15, metal=1.0), 560.0)
     m = 0.45
     slab("Inlay", w - 2 * m, h - 2 * m, 0.6, 0.0, 0.015, metal, bevel=0.005,
          hole=(w - 2 * m - 0.07, h - 2 * m - 0.07, 0.56))
@@ -658,7 +741,7 @@ def build_playmat(rank, portrait):
     d = bpy.data.lights.new("Pool", "AREA")
     d.shape = "ELLIPSE"
     d.size, d.size_y = w * 0.9, h * 0.9
-    d.energy = 1300 if kind != "glass" else 1000
+    d.energy = {"glass": 1000, "void": 700}.get(kind, 1300)
     o = bpy.data.objects.new("Pool", d)
     o.location = (0, 0, 6)
     scene.collection.objects.link(o)
@@ -668,12 +751,13 @@ def build_playmat(rank, portrait):
 # The card list
 # ----------------------------------------------------------------------------------------------
 RANKS = ["bronze", "silver", "gold", "ruby", "obsidian"]
+THEMES = RANKS + ["endless"]   # endless is the Endless mode's own set; not a rank, not in the shop
 
 
 def cards(which):
     out = []
     if which in ("all", "main"):
-        for r in RANKS:
+        for r in THEMES:
             for v in range(1, 11):
                 out.append((f"cards/main/main_{v}_{r}", lambda v=v, r=r: build_main(v, r)))
     if which in ("all", "mods"):
@@ -689,13 +773,13 @@ def cards(which):
         for e in EFFECTS:
             out.append((f"cards/effect_{e}", lambda e=e: build_effect(e)))
     if which in ("all", "mats"):
-        for r in RANKS:
+        for r in THEMES:
             for portrait in (True, False):
                 orient = "portrait" if portrait else "landscape"
                 out.append((f"playmats/playmat_{r}_{orient}", lambda r=r, p=portrait: build_playmat(r, p)))
     if which in ("all", "backs"):
         out.append(("card_back", build_back))
-        for r in RANKS:
+        for r in THEMES:
             out.append((f"backs/card_back_{r}", lambda r=r: build_back(r)))
     return out
 
