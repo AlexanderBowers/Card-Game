@@ -169,7 +169,7 @@ void fragment() {
         OverlayUi.StylePanel(_spotlightCaption, 18, bubble: true);
         _spotlightOverlay.AddChild(_spotlightCaption);
 
-        VBoxContainer box = new VBoxContainer();
+        VBoxContainer box = new VBoxContainer { Alignment = BoxContainer.AlignmentMode.Center };
         box.AddThemeConstantOverride("separation", 12);
         _spotlightCaption.AddChild(box);
 
@@ -256,7 +256,9 @@ void fragment() {
         float width = Mathf.Min(vp.X * 0.72f, vp.X - 32f);
         _spotlightLabel.CustomMinimumSize = new Vector2(Mathf.Max(80f, width - 40f), 0f);
 
-        float height = Mathf.Max(_spotlightCaption.GetCombinedMinimumSize().Y, vp.Y * 0.14f);
+        // The floor was 14% of the screen, which left a one-line coach mark as a tall box of
+        // empty space in portrait. The real height takes over on the next (deferred) refresh.
+        float height = Mathf.Max(_spotlightCaption.GetCombinedMinimumSize().Y, vp.Y * 0.08f);
         float x = Mathf.Max(16f, (vp.X - width) / 2f);
         float y = (bottom + 16f + height <= vp.Y - 16f) ? bottom + 16f : Mathf.Max(16f, top - 16f - height);
 
@@ -596,8 +598,12 @@ void fragment() {
 
     /// Where the highlight goes: the middle panel's banner when the card was played AT you (the
     /// banner is the thing that just narrated it), your own hand when it is a card you now hold.
+    ///
+    /// Release playtest (2026-09-29): the banner is the middle panel's toast, which in the current
+    /// layouts is not where the card is - the highlight sat on the stage label while the card it
+    /// explained was up on the opponent's board. Point at the card itself.
     private Control CoachTarget(CoachMark mark) =>
-        mark.FromOpponent ? _ui.EffectBanner : _p1ModifierContainer;
+        mark.FromOpponent ? (_ui.BoardCardView(mark.Card) ?? _ui.EffectBanner) : _p1ModifierContainer;
 
     public void QueueCoachMark(Card card, bool fromOpponent)
     {

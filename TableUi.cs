@@ -349,7 +349,22 @@ public sealed class TableUi
         foreach (Button plain in new[] { L.P1Hold, L.P2Hold, L.P1PutBack, L.P2PutBack })
             if (plain != null) OverlayUi.StyleButton(plain);
         foreach (Button flip in new[] { L.P1FlipValue, L.P2FlipValue })
-            if (flip != null) OverlayUi.StyleButton(flip, ring: InkFlip);
+        {
+            if (flip == null) continue;
+            OverlayUi.StyleButton(flip, ring: InkFlip);
+            // The house pill has 24px of padding each side, which in portrait's narrow Wins spot
+            // left too little room for "Value" and it broke mid-word ("Valu / e"). Thin padding,
+            // and wrap only between words.
+            foreach (string state in new[] { "normal", "hover", "pressed", "disabled", "focus", "hover_pressed" })
+            {
+                if (!flip.HasThemeStyleboxOverride(state)) continue;
+                StyleBox box = (StyleBox)flip.GetThemeStylebox(state).Duplicate();
+                box.ContentMarginLeft = 8;
+                box.ContentMarginRight = 8;
+                flip.AddThemeStyleboxOverride(state, box);
+            }
+            flip.AutowrapMode = TextServer.AutowrapMode.Word;
+        }
 
         // Play / Put back land on Draw Card / Hold's spots (see ConfirmCopiesAction).
         MatchConfirmRow(L.P1DrawCard, L.P1Hold, L.P1Play, L.P1PutBack);
@@ -469,8 +484,9 @@ public sealed class TableUi
 
             if (!child.HasMeta(AuthoredLeftMeta))
             {
-                child.SetMeta(AuthoredLeftMeta, child.OffsetLeft);
-                child.SetMeta(AuthoredRightMeta, child.OffsetRight);
+                float centred = child.HasMeta(CentreShiftMeta) ? child.GetMeta(CentreShiftMeta).AsSingle() : 0f;
+                child.SetMeta(AuthoredLeftMeta, child.OffsetLeft - centred);
+                child.SetMeta(AuthoredRightMeta, child.OffsetRight - centred);
                 child.SetMeta(AuthoredTopMeta, child.OffsetTop);
                 child.SetMeta(AuthoredBottomMeta, child.OffsetBottom);
                 child.SetMeta(AuthoredGrowMeta, (int)child.GrowHorizontal);
@@ -514,6 +530,14 @@ public sealed class TableUi
                     child.OffsetTop -= lift;
                     child.OffsetBottom -= lift;
                 }
+            }
+            // A board re-centred for portrait's third row keeps that shift (CentreBoardColumns).
+            // Only the vertical axis is ever mirrored in portrait, so it applies unchanged.
+            if (child.HasMeta(CentreShiftMeta))
+            {
+                float shift = child.GetMeta(CentreShiftMeta).AsSingle();
+                child.OffsetLeft += flip == FlipX ? -shift : shift;
+                child.OffsetRight += flip == FlipX ? -shift : shift;
             }
             child.SetMeta(FlippedMeta, flip);
         }
@@ -638,6 +662,28 @@ public sealed class TableUi
             foreach (Node inner in slot.GetChildren())
                 if (inner is TextureRect view) ApplyCardSize(view, size);
         }
+        CentreBoardColumns(board, size);
+    }
+
+    /// A GridContainer lays its cells out from its left edge, so when portrait's third row
+    /// shrinks every card the three columns bunched up on the left (S25 release playtest,
+    /// 2026-09-29). Slide the board right by half the width it gave up, so the columns stay
+    /// centred where the full-size ones were. The shift is remembered, so it is undone exactly,
+    /// and ApplyMirror re-applies it after putting the authored rect back.
+    private const string CentreShiftMeta = "centreShift";
+
+    private void CentreBoardColumns(Control board, Vector2 size)
+    {
+        if (board is not GridContainer grid || !board.HasMeta(BaseCardMeta)) return;
+        int cols = Mathf.Max(1, grid.Columns);
+        float gap = board.GetThemeConstant("h_separation");
+        Vector2 full = board.GetMeta(BaseCardMeta).AsVector2();
+        float want = ((cols * full.X + (cols - 1) * gap) - (cols * size.X + (cols - 1) * gap)) / 2f;
+        float had = board.HasMeta(CentreShiftMeta) ? board.GetMeta(CentreShiftMeta).AsSingle() : 0f;
+        if (Mathf.IsEqualApprox(want, had)) return;
+        board.OffsetLeft += want - had;
+        board.OffsetRight += want - had;
+        board.SetMeta(CentreShiftMeta, want);
     }
 
     /// Opens and closes portrait's third row (a change re-sizes every card on that board).
@@ -893,7 +939,10 @@ public sealed class TableUi
             _dangerBoxStyle[box] = danger;
         }
 
-        bool over = _host.GameStarted && player.CurrentScore > State.TargetScore;
+        // Follows the number the box is SHOWING: with a Modifier picked up that is the preview, so
+        // a minus card that brings you back under the target clears the red along with the digits.
+        int shown = PreviewedScore(player) ?? player.CurrentScore;
+        bool over = _host.GameStarted && shown > State.TargetScore;
         StyleBox want = over ? _dangerBoxStyle[box] : authored;
         if (want != null) panel.AddThemeStyleboxOverride("panel", want);
     }
@@ -2015,6 +2064,10 @@ public sealed class TableUi
             if (GodotObject.IsInstanceValid(board)) RefreshBoardSlots(board); // may close row 3
         }));
     }
+
+    /// The view of a card on either board, for the coach mark to point at.
+    public Control BoardCardView(Card card) =>
+        FindCardView(card, L?.P2Board) ?? FindCardView(card, L?.P1Board);
 
     /// The view showing this exact card, or null. Cards live one-per-slot (FillBoardWithSlots),
     /// so this is a walk of nine slots rather than a search.

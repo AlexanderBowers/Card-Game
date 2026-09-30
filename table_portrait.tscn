@@ -1322,10 +1322,10 @@ vertical_alignment = 1
 
 [node name="DeckHolder" type="Control" parent="Canvas/P1Side"]
 layout_mode = 0
-offset_left = 576.0
-offset_top = 107.0
-offset_right = 708.0
-offset_bottom = 286.0
+offset_left = 594.0
+offset_top = 113.0
+offset_right = 716.0
+offset_bottom = 280.0
 mouse_filter = 2
 
 [node name="Deck" type="TextureRect" parent="Canvas/P1Side/DeckHolder"]
@@ -1342,10 +1342,10 @@ stretch_mode = 5
 
 [node name="DeckHolder" type="Control" parent="Canvas/P2Side"]
 layout_mode = 0
-offset_left = 576.0
-offset_top = 107.0
-offset_right = 708.0
-offset_bottom = 286.0
+offset_left = 594.0
+offset_top = 113.0
+offset_right = 716.0
+offset_bottom = 280.0
 mouse_filter = 2
 
 [node name="Deck" type="TextureRect" parent="Canvas/P2Side/DeckHolder"]

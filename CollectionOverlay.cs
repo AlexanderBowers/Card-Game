@@ -43,7 +43,7 @@ public partial class CollectionOverlay : Control
 
         box.AddChild(OverlayUi.MakeLabel("Collection", 30));
         box.AddChild(OverlayUi.MakeLabel(
-            "Every Modifier you have held, bought, or had played against you.", 15, OverlayUi.Muted));
+            "A Modifier joins your collection once you hold it, buy it, or have it played against you.", 15, OverlayUi.Muted));
 
         _grid = new GridContainer { Columns = Columns };
         _grid.AddThemeConstantOverride("h_separation", Gap);
