@@ -541,8 +541,52 @@ def token(cx, cy, r, color, label, ink="#ffffff", z=THICK + 0.02):
     return ob
 
 
+def lighten(hexcol, t):
+    h = hexcol.lstrip("#")
+    c = [int(h[i:i + 2], 16) for i in (0, 2, 4)]
+    c = [round(x + (255 - x) * t) for x in c]
+    return "#%02x%02x%02x" % tuple(c)
+
+
+def sparkle(cx, cy, size, material, z):
+    """A four-point glint: two thin bevelled bars crossed at right angles."""
+    for rot in (0.0, math.pi / 2):
+        bpy.ops.mesh.primitive_cube_add(size=1, location=(cx, cy, z))
+        d = bpy.context.active_object
+        d.scale = (size, size * 0.16, 0.02)
+        d.rotation_euler.z = rot
+        bv = d.modifiers.new("Bevel", "BEVEL"); bv.width = size * 0.07; bv.segments = 3
+        bpy.ops.object.shade_smooth()
+        d.data.materials.append(material)
+
+
+def medallion(color, cy=-0.45):
+    """The stage every emblem stands on: a pale sunburst disc in the card's colour, a metal ring
+    round it, and a couple of glints - so the emblem reads as a crest, not shapes on paper."""
+    z = THICK + 0.01
+    disc = face_mat("Disc", srgb(lighten(color, 0.82)))
+    slab("Disc", 3.9, 3.9, 1.95, z, 0.01, disc, bevel=0.004).location.y = cy
+    rays = mat("Rays", srgb(lighten(color, 0.62)), rough=0.5)
+    for i in range(12):
+        a = i * math.pi / 6
+        bpy.ops.mesh.primitive_cube_add(size=1, location=(math.cos(a) * 1.15, cy + math.sin(a) * 1.15, z + 0.012))
+        r = bpy.context.active_object
+        r.scale = (1.3, 0.16, 0.004)
+        r.rotation_euler.z = a
+        r.data.materials.append(rays)
+    ring = mat("Ring", srgb(color), rough=0.25, metal=0.85, coat=0.4)
+    slab("Ring", 4.05, 4.05, 2.02, z + 0.005, 0.03, ring, bevel=0.01, hole=(3.8, 3.8, 1.9)).location.y = cy
+    glint = mat("Glint", srgb("#fffaf0"), rough=0.3)
+    gp = glint.node_tree.nodes["Principled BSDF"]
+    gp.inputs["Emission Color"].default_value = srgb("#fff3c4")
+    gp.inputs["Emission Strength"].default_value = 1.6
+    sparkle(1.55, cy + 1.55, 0.42, glint, z + 0.25)
+    sparkle(-1.7, cy - 1.35, 0.3, glint, z + 0.25)
+
+
 def effect_card(title, color):
     L = base_card("effect")
+    medallion(color)
     ink = ink_mat(color, "TitleInk")
     # Title banner across the top of the face.
     banner = mat("Banner", srgb(color), rough=0.35, coat=0.5)
@@ -634,7 +678,7 @@ MATS = {
     #           surface       inlay       kind      (noise scale, bump, roughness)
     "bronze":   ("#1f4a36", "#b0703a", "felt"),
     "silver":   ("#27404d", "#a9b6c2", "slate"),
-    "gold":     ("#4a3a14", "#d9a62e", "lacquer"),
+    "gold":     ("#6a3f0c", "#e6b54a", "lacquer"),
     "ruby":     ("#4a1420", "#d9a62e", "velvet"),
     "obsidian": ("#17121f", "#8e6ad8", "glass"),
     "endless":  ("#120f2e", "#e8e8f0", "void"),
@@ -661,6 +705,19 @@ def surface_mat(color, kind):
     noise.inputs["Detail"].default_value = 6.0
     bump.inputs["Strength"].default_value = settings[1]
     p.inputs["Roughness"].default_value = settings[2]
+    if kind == "lacquer":
+        # Lacquered wood: long soft grain bands, darker streaks in the amber.
+        grain = nt.nodes.new("ShaderNodeTexWave")
+        grain.wave_type = "BANDS"
+        grain.bands_direction = "Y"
+        grain.inputs["Scale"].default_value = 7.0
+        grain.inputs["Distortion"].default_value = 2.5
+        grain.inputs["Detail"].default_value = 4.0
+        ramp = nt.nodes.new("ShaderNodeValToRGB")
+        ramp.color_ramp.elements[0].color = srgb("#58330a")
+        ramp.color_ramp.elements[1].color = srgb(color)
+        nt.links.new(grain.outputs["Fac"], ramp.inputs["Fac"])
+        nt.links.new(ramp.outputs["Color"], p.inputs["Base Color"])
     if kind == "void":
         # A night sky of slow colour: indigo drifting to violet and teal, with faint star specks.
         ramp = nt.nodes.new("ShaderNodeValToRGB")

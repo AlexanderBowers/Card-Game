@@ -207,6 +207,21 @@ public sealed class Menus
     private const float MenuBannerAngle = -9f;   // degrees; the Pocket "Battle" / "VS." slant
     private const float MenuLogoSize = 170f;
 
+    private TextureRect _menuMat;
+
+    /// The menu sits on YOUR board (pass 61): the one chosen in the Shop, so buying a board shows
+    /// straight away on the front door. Falls back to the original mat if a render is missing.
+    private void RefreshMenuMat()
+    {
+        if (_menuMat == null || _startMenuOverlay == null) return;
+        Vector2 size = _startMenuOverlay.Size;
+        bool portrait = size.Y > size.X;
+        string board = RunData.Instance?.SelectedBoard ?? "bronze";
+        string path = $"res://assets/aimfor20_art/playmats/playmat_{board}_{(portrait ? "portrait" : "landscape")}.png";
+        Texture2D chosen = ResourceLoader.Exists(path) ? GD.Load<Texture2D>(path) : null;
+        _menuMat.Texture = chosen ?? (portrait ? MenuMatPortrait : MenuMatLandscape);
+    }
+
     public void BuildStartMenu()
     {
         _startMenuOverlay = new Control { Visible = false, MouseFilter = Control.MouseFilterEnum.Stop };
@@ -238,11 +253,12 @@ public sealed class Menus
         _startMenuOverlay.AddChild(bandWide);
         _startMenuOverlay.AddChild(band);
 
+        _menuMat = mat;
         void Relayout()
         {
             Vector2 size = _startMenuOverlay.Size;
             if (size.X <= 0 || size.Y <= 0) return;
-            mat.Texture = size.Y > size.X ? MenuMatPortrait : MenuMatLandscape;
+            RefreshMenuMat();
 
             // Longer than the diagonal, so the ends never show whatever the aspect.
             float length = size.Length() * 1.2f;
@@ -286,6 +302,7 @@ public sealed class Menus
     /// a climb to continue, which rung it is on, and what the player has banked.
     private void FillStartMenu()
     {
+        RefreshMenuMat(); // a board bought or chosen in the Shop shows on the way back
         OverlayUi.ClearChildren(_startMenuBox);
         _newRunArmed = false;
 
