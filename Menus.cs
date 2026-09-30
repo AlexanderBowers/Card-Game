@@ -318,7 +318,7 @@ public sealed class Menus
             _startMenuBox.AddChild(new TextureRect
             {
                 Texture = MenuLogo,
-                CustomMinimumSize = new Vector2(MenuLogoSize, MenuLogoSize),
+                CustomMinimumSize = new Vector2(MenuLogoSize * 2f, MenuLogoSize), // the "±20" logo is 2:1
                 ExpandMode = TextureRect.ExpandModeEnum.IgnoreSize,
                 StretchMode = TextureRect.StretchModeEnum.KeepAspectCentered,
                 SizeFlagsHorizontal = Control.SizeFlags.ShrinkCenter,
