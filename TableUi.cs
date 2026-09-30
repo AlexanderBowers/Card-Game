@@ -952,15 +952,15 @@ public sealed class TableUi
             _dangerBoxStyle[box] = danger;
 
             // On target (release playtest, 2026-09-29): green, with a soft glow round it.
-            StyleBox onTarget = (StyleBox)authored?.Duplicate();
-            if (onTarget is StyleBoxFlat green)
+            StyleBox onTargetStyle = (StyleBox)authored?.Duplicate();
+            if (onTargetStyle is StyleBoxFlat green)
             {
                 green.BgColor = OnTargetFill;
                 green.BorderColor = OnTargetEdge;
                 green.ShadowColor = OnTargetGlow;
                 green.ShadowSize = 14;
             }
-            _onTargetBoxStyle[box] = onTarget;
+            _onTargetBoxStyle[box] = onTargetStyle;
         }
 
         // Follows the number the box is SHOWING: with a Modifier picked up that is the preview, so
@@ -1991,8 +1991,8 @@ public sealed class TableUi
         {
             foreach (string name in CardLabelNames)
             {
-                Label label = view.GetNodeOrNull<Label>(name);
-                if (label != null) label.Visible = false;
+                Label painted = view.GetNodeOrNull<Label>(name);
+                if (painted != null) painted.Visible = false;
             }
             return;
         }
