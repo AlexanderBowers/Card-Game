@@ -1916,6 +1916,9 @@ public sealed class TableUi
         // IS how you tell it from an ordinary modifier. Nothing else uses the lower label now.
         bool flipValueFace = view.HasNode("FlipValueBottom");
         bool pipped = view.HasMeta("pips");
+        // Release playtest (2026-09-29): a Modifier's middle is its SIGN drawn as a shape, with
+        // pips for the amount - the big centre number was too big. The corners keep the number.
+        bool signed = view.HasMeta(SignedPipsMeta);
 
         // An effect card's face is a mark rather than one number ("->+4", "-1"), so it needs a
         // smaller font than a card showing a single digit or two.
@@ -1929,14 +1932,14 @@ public sealed class TableUi
         {
             label.AddThemeFontSizeOverride("font_size", fontSize);
             label.AnchorBottom = flipValueFace ? 0.5f : 1f; // top half, or the whole card
-            label.Visible = !pipped;                   // the pips ARE the number when they are on
+            label.Visible = !pipped && !signed;        // the pips ARE the number when they are on
         }
 
         Label flipped = view.GetNodeOrNull<Label>("LabelMinus");
         if (flipped != null)
         {
             flipped.AddThemeFontSizeOverride("font_size", fontSize);
-            flipped.Visible = flipValueFace;
+            flipped.Visible = flipValueFace && !signed;
             flipped.RotationDegrees = 0f; // upright for its owner; the CORNERS face the other way
         }
 
@@ -1946,7 +1949,7 @@ public sealed class TableUi
         // (Alexander, S25 Ultra, 2026-09-15). The halves are the two-way reading there.
         //
         int cornerFont = Mathf.Max(10, Mathf.RoundToInt(
-            size.Y * (pipped ? PippedCornerFontScale : CornerFontScale)));
+            size.Y * (pipped ? PippedCornerFontScale : signed ? SignedCornerFontScale : CornerFontScale)));
         foreach (string name in CardCornerNames)
         {
             Label corner = view.GetNodeOrNull<Label>(name);
@@ -1958,29 +1961,137 @@ public sealed class TableUi
         // A pip is a Panel with a fully rounded StyleBoxFlat, and a corner radius is an integer
         // number of pixels - so a resized dot has to be re-made rather than scaled to stay round.
         if (pipped) BuildPips(view, view.GetMeta("pips").AsInt32(), size);
+        if (signed) BuildSignedFace(view, size, flipValueFace);
+    }
+
+    // ------------------------------------------------------------------
+    // Signed faces (release playtest, 2026-09-29)
+    //
+    // "+ and - cards need the dots. Keep the + or - in the centre, with dots instead of numbers."
+    // A plain Modifier shows its sign as a shape in the upper middle and its amount as pips under
+    // it. A "+/-" card does the same in each half: the sign on the left, the pips on the right,
+    // blue + over red -. The corners still carry the number on a plain Modifier.
+    //
+    // The sign is drawn from bars rather than typed, so it matches the pips (same ink, same
+    // rounded ends) and never depends on the font having a proper minus.
+    // ------------------------------------------------------------------
+    private const string SignedPipsMeta = "signedPips";
+
+    private const float SignedCornerFontScale = 0.36f;
+
+    private static void BuildSignedFace(TextureRect view, Vector2 size, bool flipValueFace)
+    {
+        int count = view.GetMeta(SignedPipsMeta).AsInt32();
+        foreach (string old in new[] { "Pips", "PipsTop", "PipsBottom", "Sign", "SignTop", "SignBottom" })
+        {
+            Node existing = view.GetNodeOrNull(old);
+            if (existing == null) continue;
+            view.RemoveChild(existing);
+            existing.QueueFree();
+        }
+
+        if (!flipValueFace)
+        {
+            Color ink = view.HasMeta("ink") ? view.GetMeta("ink").AsColor() : InkMain;
+            bool plus = !view.HasMeta("signNegative");
+            BuildSign(view, "Sign", plus, new Rect2(0.30f, 0.20f, 0.40f, 0.26f), size.Y * 0.20f, ink);
+            BuildPips(view, count, size, new Rect2(0.28f, 0.50f, 0.44f, 0.34f), "Pips", ink);
+            return;
+        }
+
+        // Each half follows the modulate its number label was given (the half not in play is dimmed).
+        Color topTint = view.GetNodeOrNull<Label>("Label")?.Modulate ?? Colors.White;
+        Color bottomTint = view.GetNodeOrNull<Label>("LabelMinus")?.Modulate ?? Colors.White;
+        float half = size.Y * 0.16f;
+        Control a = BuildSign(view, "SignTop", true, new Rect2(0.08f, 0.06f, 0.36f, 0.40f), half, InkPlus);
+        Control b = BuildPips(view, count, size, new Rect2(0.46f, 0.08f, 0.44f, 0.36f), "PipsTop", InkPlus);
+        Control c = BuildSign(view, "SignBottom", false, new Rect2(0.08f, 0.54f, 0.36f, 0.40f), half, InkMinus);
+        Control d = BuildPips(view, count, size, new Rect2(0.46f, 0.56f, 0.44f, 0.36f), "PipsBottom", InkMinus);
+        foreach (Control top in new[] { a, b }) if (top != null) top.Modulate = topTint;
+        foreach (Control bottom in new[] { c, d }) if (bottom != null) bottom.Modulate = bottomTint;
+    }
+
+    /// A + or - made of rounded bars, centred in the given anchor rect of the card.
+    private static Control BuildSign(TextureRect view, string name, bool plus, Rect2 anchors, float length, Color ink)
+    {
+        Control host = new Control { Name = name, MouseFilter = Control.MouseFilterEnum.Ignore };
+        view.AddChild(host);
+        host.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
+        host.AnchorLeft = anchors.Position.X;
+        host.AnchorTop = anchors.Position.Y;
+        host.AnchorRight = anchors.End.X;
+        host.AnchorBottom = anchors.End.Y;
+
+        CenterContainer centre = new CenterContainer { MouseFilter = Control.MouseFilterEnum.Ignore };
+        host.AddChild(centre);
+        centre.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
+
+        float l = Mathf.Max(8f, length);
+        float t = Mathf.Max(3f, Mathf.Round(l * 0.26f));
+        Control glyph = new Control { CustomMinimumSize = new Vector2(l, l), MouseFilter = Control.MouseFilterEnum.Ignore };
+        centre.AddChild(glyph);
+
+        StyleBoxFlat bar = new StyleBoxFlat { BgColor = ink };
+        bar.SetCornerRadiusAll(Mathf.Max(1, Mathf.RoundToInt(t / 2f)));
+
+        Panel across = new Panel { MouseFilter = Control.MouseFilterEnum.Ignore };
+        across.AddThemeStyleboxOverride("panel", bar);
+        across.Position = new Vector2(0f, (l - t) / 2f);
+        across.Size = new Vector2(l, t);
+        glyph.AddChild(across);
+
+        if (plus)
+        {
+            Panel up = new Panel { MouseFilter = Control.MouseFilterEnum.Ignore };
+            up.AddThemeStyleboxOverride("panel", bar);
+            up.Position = new Vector2((l - t) / 2f, 0f);
+            up.Size = new Vector2(t, l);
+            glyph.AddChild(up);
+        }
+        return host;
+    }
+
+    /// Marks a Modifier view for the signed face. Plain +n/-n and "+/-" cards only: a main card
+    /// has its own pips, and an effect card's face is a mark rather than an amount.
+    private static void MarkSignedFace(TextureRect view, Card card)
+    {
+        int magnitude = Mathf.Abs(card.Value);
+        if (card.Type == CardType.Main || card.Effect != CardEffect.None || magnitude < 1 || magnitude > 10)
+        {
+            if (view.HasMeta(SignedPipsMeta)) view.RemoveMeta(SignedPipsMeta);
+            return;
+        }
+        view.SetMeta(SignedPipsMeta, magnitude);
+        if (card.Value < 0) view.SetMeta("signNegative", true);
+        else if (view.HasMeta("signNegative")) view.RemoveMeta("signNegative");
     }
 
     /// The dots in the middle of a main-deck card, in two columns the way a real card lays them
     /// out: ceil(n/2) rows of two, with a single centred dot on the last row when n is odd.
-    private static void BuildPips(TextureRect view, int count, Vector2 size)
+    /// Where a main-deck card's pips go. Narrower and shorter than it was: the corner numbers
+    /// grew into the space this used to take, and a pip overlapping a digit is worse than a
+    /// smaller pip.
+    private static readonly Rect2 MainPipArea = new Rect2(0.30f, 0.26f, 0.40f, 0.48f);
+
+    private static Control BuildPips(TextureRect view, int count, Vector2 size,
+                                     Rect2? area = null, string name = "Pips", Color? inkOverride = null)
     {
-        Control existing = view.GetNodeOrNull<Control>("Pips");
+        Control existing = view.GetNodeOrNull<Control>(name);
         if (existing != null)
         {
             view.RemoveChild(existing);
             existing.QueueFree();
         }
-        if (count < 1 || count > 10) return;
+        if (count < 1 || count > 10) return null;
 
-        Control host = new Control { Name = "Pips", MouseFilter = Control.MouseFilterEnum.Ignore };
+        Rect2 r = area ?? MainPipArea;
+        Control host = new Control { Name = name, MouseFilter = Control.MouseFilterEnum.Ignore };
         view.AddChild(host);
         host.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
-        // Narrower and shorter than it was: the corner numbers grew into the space this used to
-        // take, and a pip overlapping a digit is worse than a smaller pip.
-        host.AnchorLeft = 0.30f;
-        host.AnchorRight = 0.70f;
-        host.AnchorTop = 0.26f;
-        host.AnchorBottom = 0.74f;
+        host.AnchorLeft = r.Position.X;
+        host.AnchorRight = r.End.X;
+        host.AnchorTop = r.Position.Y;
+        host.AnchorBottom = r.End.Y;
 
         float dot = Mathf.Max(4f, size.Y * 0.058f); // pass 25: the corner number is the number now
         int gap = Mathf.Max(2, Mathf.RoundToInt(dot * 0.7f));
@@ -1994,7 +2105,7 @@ public sealed class TableUi
         host.AddChild(rows);
         rows.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
 
-        Color ink = view.HasMeta("ink") ? view.GetMeta("ink").AsColor() : InkMain;
+        Color ink = inkOverride ?? (view.HasMeta("ink") ? view.GetMeta("ink").AsColor() : InkMain);
         StyleBoxFlat pip = new StyleBoxFlat { BgColor = ink };
         pip.SetCornerRadiusAll(Mathf.Max(2, Mathf.RoundToInt(dot / 2f)));
 
@@ -2022,6 +2133,7 @@ public sealed class TableUi
                 row.AddChild(dotNode);
             }
         }
+        return host;
     }
 
     /// Half the card's colour when that orientation is not the one currently chosen.
@@ -2135,8 +2247,12 @@ public sealed class TableUi
             ApplyCardSize(view, size);
         }
 
-        // Pips, and only on main-deck cards: they pip the 1-10 an ordinary playing card pips, and
-        // a modifier is signed - there is no such thing as minus three dots.
+        // A Modifier's signed face: its sign as a shape and pips for the amount (after the "+/-"
+        // face exists, so it can draw into both halves).
+        MarkSignedFace(view, card);
+        if (view.HasMeta(SignedPipsMeta)) ApplyCardSize(view, size);
+
+        // Pips on main-deck cards: they pip the 1-10 an ordinary playing card pips.
         if (PipsOnMainCards && card.Type == CardType.Main)
         {
             view.SetMeta("pips", card.Value);
@@ -2183,6 +2299,11 @@ public sealed class TableUi
         {
             view.SetMeta("pips", card.Value);
             BuildPips(view, card.Value, BoardCardSizeFor(board));
+        }
+        if (view.HasMeta(SignedPipsMeta))
+        {
+            MarkSignedFace(view, card);
+            if (view.HasMeta(SignedPipsMeta)) BuildSignedFace(view, BoardCardSizeFor(board), view.HasNode("FlipValueBottom"));
         }
     }
 
