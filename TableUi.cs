@@ -126,6 +126,7 @@ public sealed class TableUi
         _sfxPlace = CreateSfx("res://assets/kenney/sfx/cardPlace1.ogg");
         _sfxLock = CreateSfx("res://assets/sfx/hold_lock.wav");
         _sfxOnTarget = CreateSfx("res://assets/sfx/on_target.wav");
+        _sfxImpact = CreateSfx("res://assets/sfx/modifier_impact.wav");
     }
 
     // ------------------------------------------------------------------
@@ -243,6 +244,7 @@ public sealed class TableUi
     private AudioStreamPlayer _sfxPlace;
     private AudioStreamPlayer _sfxLock;      // Hold: the padlock snapping shut
     private AudioStreamPlayer _sfxOnTarget;  // a picked-up Modifier lands exactly on the target
+    private AudioStreamPlayer _sfxImpact;    // a Modifier slammed down from the hand
 
     private AudioStreamPlayer CreateSfx(string path)
     {
@@ -1344,15 +1346,28 @@ public sealed class TableUi
 
         RenderingServer.SetDefaultClearColor(table);
         if (L == null) return;
-        if (L.Background != null) L.Background.SelfModulate = _playmatTint;
+        // A rank's own painted playmat (playmats/playmat_<rank>_<portrait|landscape>.png) replaces the
+        // tinted shared one; without it the shared mat is tinted as before.
+        if (L.Background != null)
+        {
+            // The layout's own mat is remembered on the node, to go back to from a painted one.
+            if (!L.Background.HasMeta("authoredMat")) L.Background.SetMeta("authoredMat", L.Background.Texture);
+            Texture2D authored = L.Background.GetMeta("authoredMat").As<Texture2D>();
+            Texture2D mat = RankKey == null ? null : Art($"playmats/playmat_{RankKey}_{(L.Portrait ? "portrait" : "landscape")}.png");
+            L.Background.Texture = mat ?? authored;
+            L.Background.SelfModulate = mat != null ? Colors.White : _playmatTint;
+        }
         // Both decks share Player 1's back for now (the gilded back is a profile reward, so it
         // shows in local 2-player too). Pass 43 gave each player their own deck so that, with
         // online play, each side can show its owner's customised back.
         foreach (TextureRect deck in new[] { L.Deck, L.P2Deck })
         {
             if (deck == null) continue;
-            if (_cardBack != null) deck.Texture = _cardBack;
-            deck.SelfModulate = DeckBackTint;
+            // A rank's own back (backs/card_back_<rank>.png), unless the gilded back is earned and on.
+            Texture2D back = GildedDeck ? null : RankArt("backs/card_back");
+            if (back != null) deck.Texture = back;
+            else if (_cardBack != null) deck.Texture = _cardBack;
+            deck.SelfModulate = back != null ? Colors.White : DeckBackTint;
         }
     }
 
@@ -1841,12 +1856,41 @@ public sealed class TableUi
     // ------------------------------------------------------------------
     // Card views
     // ------------------------------------------------------------------
+    // ------------------------------------------------------------------
+    // Art drop-ins (ART_PIPELINE.md)
+    //
+    // Finished art is picked up by FILE NAME, so a render from Blender/Krita goes live by being
+    // saved in the right place - no code change. Anything missing falls back to what the game
+    // draws today (the tinted shared face, the text mark), so art can arrive one piece at a time.
+    // ------------------------------------------------------------------
+    private readonly Dictionary<string, Texture2D> _artCache = new Dictionary<string, Texture2D>();
+
+    /// The texture at assets/aimfor20_art/<relative>, or null if it has not been made yet.
+    private Texture2D Art(string relative)
+    {
+        if (_artCache.TryGetValue(relative, out Texture2D cached)) return cached;
+        string path = ArtDir + relative;
+        Texture2D tex = ResourceLoader.Exists(path) ? GD.Load<Texture2D>(path) : null;
+        _artCache[relative] = tex;
+        return tex;
+    }
+
+    /// "bronze", "silver", ... for the rank in play, or null outside a run.
+    private string RankKey =>
+        _host.InRun && RunData.Instance != null ? RunData.Instance.CurrentRank.Name.ToLowerInvariant() : null;
+
+    private Texture2D RankArt(string prefix) => RankKey == null ? null : Art($"{prefix}_{RankKey}.png");
+
+    /// An effect card's own illustrated face: cards/effect_copy.png, cards/effect_tradetotals.png...
+    private Texture2D EffectArt(CardEffect effect) => Art($"cards/effect_{effect.ToString().ToLowerInvariant()}.png");
+
     private Texture2D FaceFor(Card card)
     {
-        if (card.Type == CardType.Main) return _faceMain;
+        if (card.Type == CardType.Main) return RankArt("cards/card_main") ?? _faceMain;
         // Before the sign test: a Shave carries Value 1 and would otherwise wear the blue "plus"
         // face, which is the opposite of what it does.
-        if (card.Effect != CardEffect.None) return _faceEffect;
+        if (card.Effect != CardEffect.None) return EffectArt(card.Effect) ?? _faceEffect;
+        if (card.IsRescue) return Art("cards/rescue.png") ?? (card.Value < 0 ? _faceMinus : _facePlus);
         if (card.Value < 0) return _faceMinus;
         return _facePlus;
     }
@@ -2224,10 +2268,12 @@ public sealed class TableUi
 
         // Standard cards carry the rank's tint, so the deck you are playing with visibly changes
         // as you climb. SelfModulate, not Modulate: the number on top stays white.
-        if (card.Type == CardType.Main) view.SelfModulate = _rankCardTint;
+        // A rank's own painted face (cards/card_main_<rank>.png) is shown as painted.
+        if (card.Type == CardType.Main) view.SelfModulate = RankArt("cards/card_main") != null ? Colors.White : _rankCardTint;
 
         // A rescue card is not one the player owns, and may carry a value no bought card can.
-        if (card.IsRescue && card.Effect == CardEffect.None) view.SelfModulate = RescueTint;
+        if (card.IsRescue && card.Effect == CardEffect.None)
+            view.SelfModulate = Art("cards/rescue.png") != null ? Colors.White : RescueTint;
 
         // An effect card is a Modifier, so this never fights the rank tint above.
         if (card.Effect != CardEffect.None)
@@ -2235,6 +2281,14 @@ public sealed class TableUi
             view.SelfModulate = EffectTint;
             view.SetMeta("effectCard", true); // ApplyCardSize gives its longer mark a smaller font
             ApplyCardSize(view, size);        // re-run now that the meta is set
+
+            // An illustrated effect card carries its own picture and name: no text mark on top.
+            if (EffectArt(card.Effect) != null)
+                foreach (string name in CardLabelNames)
+                {
+                    Label label = view.GetNodeOrNull<Label>(name);
+                    if (label != null) label.Visible = false;
+                }
         }
 
         // The +/- face would rewrite both labels and hide the effect entirely, so only an
@@ -2375,6 +2429,11 @@ public sealed class TableUi
     {
         if (_cardViewScene == null) return;
 
+        // A Modifier comes from its owner's HAND, not the deck (release playtest, 2026-09-29:
+        // "playing a Modifier uses the same animation as drawing a card"). Find where it sits in
+        // the hand now, before the refresh that follows rebuilds the hand without it.
+        HandSpot? fromHand = card.Type != CardType.Main ? HandSpotOf(card) : null;
+
         TextureRect cardNode = CreateCardView(card, BoardCardSizeFor(parentContainer));
 
         // Drop the card into the next empty slot; if the board is somehow full, let the grid grow.
@@ -2395,8 +2454,198 @@ public sealed class TableUi
 
         // Defer the animation by one frame so Godot has time to calculate its final Grid position
         Vector2 flightSize = BoardCardSizeFor(parentContainer);
+        if (fromHand.HasValue)
+        {
+            HandSpot spot = fromHand.Value;
+            Defer(() => AnimateModifierPlay(card, cardNode, delay, flightSize, spot, parentContainer));
+            return;
+        }
         Control fromDeck = DeckFor(parentContainer);
         Defer(() => AnimateCardDrop(cardNode, delay, flightSize, fromDeck));
+    }
+
+    // ------------------------------------------------------------------
+    // Playing a Modifier (release playtest, 2026-09-29)
+    //
+    // Drawing is a face-down card sliding off the deck. Playing a Modifier is a decision, so it
+    // should feel like one: the card lifts out of the hand face up, swings over the board,
+    // hangs there for a beat, then slams down - a thump, a squash, a ring on the table and the
+    // board jolting under it. About half a second from tap to impact.
+    // ------------------------------------------------------------------
+    private readonly struct HandSpot
+    {
+        public readonly Vector2 Centre;
+        public readonly Vector2 Size;
+        public readonly float Rotation;
+
+        public HandSpot(Vector2 centre, Vector2 size, float rotation)
+        {
+            Centre = centre;
+            Size = size;
+            Rotation = rotation;
+        }
+    }
+
+    /// Where a card is drawn in either hand right now - through the full transform, because a
+    /// side may be turned round and a picked-up card is lifted and scaled. Falls back to the
+    /// middle of the owner's hand when the card's own view cannot be found.
+    private HandSpot? HandSpotOf(Card card)
+    {
+        foreach (Control hand in new Control[] { L?.P1Hand, L?.P2Hand })
+        {
+            if (hand == null) continue;
+            TextureRect view = FindViewIn(hand, card);
+            if (view == null) continue;
+            Transform2D t = view.GetGlobalTransform();
+            Vector2 centre = t * (view.Size / 2f);
+            Vector2 size = view.Size * t.Scale.Abs();
+            view.Modulate = new Color(1, 1, 1, 0); // it has left the hand: no double while it flies
+            return new HandSpot(centre, size, Mathf.RadToDeg(t.Rotation));
+        }
+        return null;
+    }
+
+    private static TextureRect FindViewIn(Node parent, Card card)
+    {
+        foreach (Node child in parent.GetChildren())
+        {
+            if (child is TextureRect view && view.HasMeta("cardId") && view.GetMeta("cardId").AsInt32() == card.Id)
+                return view;
+            TextureRect deeper = FindViewIn(child, card);
+            if (deeper != null) return deeper;
+        }
+        return null;
+    }
+
+    private void AnimateModifierPlay(Card card, Control realCard, float delay, Vector2 cardSize,
+                                     HandSpot from, Control board)
+    {
+        if (!GodotObject.IsInstanceValid(realCard)) return;
+        if (!GameSettings.CardAnimations)
+        {
+            RevealWithoutFlight(realCard);
+            _sfxImpact?.Play();
+            return;
+        }
+
+        // The card itself, face up, flying - not a face-down stand-in.
+        TextureRect flier = CreateCardView(card, cardSize);
+        flier.MouseFilter = Control.MouseFilterEnum.Ignore;
+        flier.Size = cardSize;
+        flier.PivotOffset = cardSize / 2f;
+        _root.AddChild(flier);
+
+        Vector2 startScale = new Vector2(from.Size.X / Mathf.Max(1f, cardSize.X), from.Size.Y / Mathf.Max(1f, cardSize.Y));
+        flier.GlobalPosition = from.Centre - cardSize / 2f;
+        flier.Scale = startScale;
+        flier.RotationDegrees = from.Rotation;
+
+        Vector2 target = realCard.GetGlobalTransform() * (realCard.Size / 2f);
+        float targetRotation = Mathf.RadToDeg(realCard.GetGlobalTransform().Rotation);
+        Vector2 landScale = Vector2.One;
+        if (FindBoardOf(realCard) is PerspectiveBoard tilted)
+        {
+            Vector2 flat = target;
+            target = tilted.Warp(flat);
+            float w = tilted.Tilt ? tilted.WidthScaleAt(flat) : 1f;
+            landScale = new Vector2(w, tilted.Tilt ? tilted.Depth : 1f);
+        }
+
+        // Lift out of the hand toward the table, then hang above the slot, bigger (closer to you).
+        Vector2 toward = (target - from.Centre).Normalized();
+        Vector2 lifted = from.Centre + toward * 60f;
+        Vector2 hover = target - toward * 24f;
+        Vector2 big = landScale * 1.38f;
+        float tiltIn = targetRotation + (toward.X >= 0f ? 7f : -7f); // a little swing into the throw
+        bool effect = card.Effect != CardEffect.None;
+
+        Tween tween = _root.GetTree().CreateTween();
+        if (delay > 0f) tween.TweenInterval(delay);
+
+        // 1. Lift (0.12s)
+        tween.TweenCallback(Callable.From(() => _sfxSlide?.Play()));
+        tween.SetParallel(true);
+        tween.TweenProperty(flier, "global_position", lifted - cardSize / 2f, 0.12f)
+             .SetTrans(Tween.TransitionType.Quad).SetEase(Tween.EaseType.Out);
+        tween.TweenProperty(flier, "scale", startScale * 1.15f, 0.12f)
+             .SetTrans(Tween.TransitionType.Quad).SetEase(Tween.EaseType.Out);
+
+        // 2. Swing over the slot (0.20s)
+        tween.Chain().TweenProperty(flier, "global_position", hover - cardSize / 2f, 0.20f)
+             .SetTrans(Tween.TransitionType.Cubic).SetEase(Tween.EaseType.InOut);
+        tween.TweenProperty(flier, "scale", big, 0.20f)
+             .SetTrans(Tween.TransitionType.Cubic).SetEase(Tween.EaseType.Out);
+        tween.TweenProperty(flier, "rotation_degrees", tiltIn, 0.20f)
+             .SetTrans(Tween.TransitionType.Cubic).SetEase(Tween.EaseType.Out);
+
+        // 3. A beat in the air, then the slam (0.07s, accelerating)
+        tween.Chain().TweenInterval(0.05f);
+        tween.Chain().TweenProperty(flier, "global_position", target - cardSize / 2f, 0.07f)
+             .SetTrans(Tween.TransitionType.Quad).SetEase(Tween.EaseType.In);
+        tween.TweenProperty(flier, "scale", landScale * 0.92f, 0.07f)
+             .SetTrans(Tween.TransitionType.Quad).SetEase(Tween.EaseType.In);
+        tween.TweenProperty(flier, "rotation_degrees", targetRotation, 0.07f)
+             .SetTrans(Tween.TransitionType.Quad).SetEase(Tween.EaseType.In);
+
+        // 4. Impact: the real card takes over, squashed, and springs back.
+        tween.Chain().TweenCallback(Callable.From(() =>
+        {
+            flier.QueueFree();
+            _sfxPlace?.Play();
+            _sfxImpact?.Play();
+            if (!GodotObject.IsInstanceValid(realCard)) return;
+            realCard.Modulate = Colors.White;
+            realCard.PivotOffset = realCard.Size / 2f;
+            realCard.Scale = new Vector2(1.08f, 0.9f);
+            Tween settle = realCard.CreateTween();
+            settle.TweenProperty(realCard, "scale", Vector2.One, 0.22f)
+                  .SetTrans(Tween.TransitionType.Back).SetEase(Tween.EaseType.Out);
+            ImpactRing(target, cardSize * landScale, effect);
+            JoltBoard(board, effect ? 9f : 6f);
+        }));
+    }
+
+    /// A rounded outline that bursts out from under the card and fades - the shockwave.
+    private void ImpactRing(Vector2 centre, Vector2 size, bool effect)
+    {
+        StyleBoxFlat ringStyle = new StyleBoxFlat
+        {
+            DrawCenter = false,
+            BorderColor = effect ? new Color(1f, 0.82f, 0.35f, 0.95f) : new Color(1f, 1f, 1f, 0.85f),
+        };
+        ringStyle.SetBorderWidthAll(4);
+        ringStyle.SetCornerRadiusAll(Mathf.RoundToInt(size.X * 0.14f));
+        Panel ring = new Panel { MouseFilter = Control.MouseFilterEnum.Ignore, Size = size, PivotOffset = size / 2f };
+        ring.AddThemeStyleboxOverride("panel", ringStyle);
+        _root.AddChild(ring);
+        ring.GlobalPosition = centre - size / 2f;
+
+        Tween t = ring.CreateTween().SetParallel();
+        t.TweenProperty(ring, "scale", new Vector2(1.55f, 1.55f), 0.32f)
+         .SetTrans(Tween.TransitionType.Quad).SetEase(Tween.EaseType.Out);
+        t.TweenProperty(ring, "modulate:a", 0f, 0.32f)
+         .SetTrans(Tween.TransitionType.Quad).SetEase(Tween.EaseType.In);
+        t.Chain().TweenCallback(Callable.From(ring.QueueFree));
+    }
+
+    /// The board jumps under the card: a few quick, shrinking nudges, then exactly back.
+    private void JoltBoard(Control board, float strength)
+    {
+        if (board == null || !GodotObject.IsInstanceValid(board)) return;
+        if (board.HasMeta("jolting")) return; // one at a time; a second would drift the rest spot
+        board.SetMeta("jolting", true);
+        Vector2 rest = board.Position;
+        Tween t = board.CreateTween();
+        float[] ys = { strength, -strength * 0.6f, strength * 0.3f, 0f };
+        foreach (float y in ys)
+            t.TweenProperty(board, "position", rest + new Vector2(0f, y), 0.045f)
+             .SetTrans(Tween.TransitionType.Sine).SetEase(Tween.EaseType.InOut);
+        t.TweenCallback(Callable.From(() =>
+        {
+            if (!GodotObject.IsInstanceValid(board)) return;
+            board.Position = rest;
+            board.RemoveMeta("jolting");
+        }));
     }
 
     /// Each player draws from their own deck (pass 43), so a card flies from the deck on its
