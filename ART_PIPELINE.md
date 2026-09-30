@@ -9,6 +9,44 @@ the next launch; anything not made yet falls back to what the game draws today.
 
 ---
 
+## 0. The generator (pass 58) — every card is a render
+
+`tools/cardgen/cardgen.py` builds each card as a small 3D object in Blender and renders it: a
+bevelled rounded slab in the card's colour, a gold trim, a bright face with a faint guilloche
+watermark, embossed numbers (Fredoka Bold), domed enamel pips, bar-built + / − signs, and for
+effect cards a title banner and a 3D emblem. One fixed light rig, Cycles, 560 × 760 transparent PNG.
+It also renders the five rank backs and the ten playmats (5 ranks × portrait/landscape).
+
+The game loads these pictures whole (`TableUi.PrerenderedFace`) and draws nothing on top except the
+shine. Anything without a render falls back to the old drawn face.
+
+Run it with Blender's Python module (no Blender install needed):
+
+```
+pip install bpy            # Python 3.11
+cd tools/cardgen
+python cardgen.py --only main_7_bronze          # one card, to check a change
+python cardgen.py --set main --out ../../assets/aimfor20_art    # a group: main, mods, effects, backs, mats, all
+```
+
+Or open Blender 5.x, Scripting tab, and run it there. Edit `LOOKS` (colours), `build_*`
+(layouts), `build_effect` (emblems) and re-render; Krita paint-over is optional polish on top.
+`tools/` has a `.gdignore`, so Godot never imports the fonts or script.
+
+File names the game reads:
+- `cards/main/main_<1-10>_<rank>.png`
+- `cards/mods/plus_<1-6>.png`, `minus_<1-6>.png`, `flip_<1-6>_<plus|minus>.png` (the half in play is in colour)
+- `cards/mods/rescue_<plus|minus>_<1-11>.png`
+- `cards/effect_<copy|tradetotals|tradehands|shave|recall|veto>.png`
+- `card_back.png`, `backs/card_back_<rank>.png`
+- `playmats/playmat_<rank>_<portrait|landscape>.png`
+
+Import settings: project defaults give new textures mipmaps and high-quality VRAM compression
+(ASTC on phones), and canvas textures filter with linear mipmaps, so a 560 × 760 card stays crisp
+when drawn at 84 × 114.
+
+---
+
 ## 1. What makes Pocket feel premium (and what that means for us)
 
 | Pocket does | So we… |

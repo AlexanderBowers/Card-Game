@@ -1986,6 +1986,17 @@ public sealed class TableUi
     {
         view.CustomMinimumSize = size;
 
+        // A pre-rendered face already carries its numbers, pips and signs: nothing is drawn on it.
+        if (view.HasMeta(PrerenderedMeta))
+        {
+            foreach (string name in CardLabelNames)
+            {
+                Label label = view.GetNodeOrNull<Label>(name);
+                if (label != null) label.Visible = false;
+            }
+            return;
+        }
+
         // A "+/-" card is always drawn two-way - blue +n above, red -n below - because that split
         // IS how you tell it from an ordinary modifier. Nothing else uses the lower label now.
         bool flipValueFace = view.HasNode("FlipValueBottom");
@@ -2281,8 +2292,43 @@ public sealed class TableUi
         bottom.Modulate = plusChosen ? DimmedHalf : Colors.White;
     }
 
+    // ------------------------------------------------------------------
+    // Pre-rendered faces (pass 58, tools/cardgen)
+    //
+    // Every card is rendered whole in Blender - frame, numbers, pips, signs - so the game only
+    // loads the picture. The key names the exact face: the value, the sign a "+/-" card is set to,
+    // the rank for a main card. Anything without a render falls back to the drawn face.
+    // ------------------------------------------------------------------
+    private const string PrerenderedMeta = "prerendered";
+
+    private Texture2D PrerenderedFace(Card card)
+    {
+        int n = Mathf.Abs(card.Value);
+        string sign = card.Value < 0 ? "minus" : "plus";
+        if (card.Type == CardType.Main)
+            return n is >= 1 and <= 10 ? Art($"cards/main/main_{n}_{RankKey ?? "bronze"}.png") : null;
+        if (card.Effect != CardEffect.None) return EffectArt(card.Effect);
+        if (n < 1) return null;
+        if (card.CanFlipValue) return Art($"cards/mods/flip_{n}_{sign}.png");
+        if (card.IsRescue) return Art($"cards/mods/rescue_{sign}_{n}.png");
+        return Art($"cards/mods/{sign}_{n}.png");
+    }
+
     public TextureRect CreateCardView(Card card, Vector2 size)
     {
+        Texture2D rendered = PrerenderedFace(card);
+        if (rendered != null)
+        {
+            TextureRect ready = (TextureRect)_cardViewScene.Instantiate();
+            ready.Texture = rendered;
+            ready.SetMeta("cardId", card.Id);
+            ready.SetMeta(PrerenderedMeta, true);
+            if (card.Effect != CardEffect.None) ready.SetMeta("effectCard", true);
+            ApplyCardSize(ready, size);
+            AddShine(ready, card);
+            return ready;
+        }
+
         TextureRect view = (TextureRect)_cardViewScene.Instantiate();
         view.Texture = FaceFor(card);
         view.SetMeta("cardId", card.Id); // so RefreshCardFace can find this view again
@@ -2409,6 +2455,18 @@ public sealed class TableUi
     {
         TextureRect view = FindCardView(card, board);
         if (view == null) return;
+
+        if (view.HasMeta(PrerenderedMeta))
+        {
+            Texture2D face = PrerenderedFace(card);
+            if (face != null)
+            {
+                view.Texture = face;
+                if (view.GetNodeOrNull<ColorRect>("Shine")?.Material is ShaderMaterial shine)
+                    shine.SetShaderParameter("card_face", face);
+            }
+            return;
+        }
 
         // A flip card keeps its own face - only an ordinary card's face follows its sign.
         if (!view.HasNode("FlipValueBottom")) view.Texture = FaceFor(card);
