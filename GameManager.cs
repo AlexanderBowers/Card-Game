@@ -1060,7 +1060,8 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
     {
         if (_setOverPending) return string.Empty;
 
-        if (player.IsHolding) return "Holding";
+        // Holding is shown by the padlock on the score box (TableUi.UpdateHoldLock), not in words.
+        if (player.IsHolding) return string.Empty;
         if (player.HasEndedTurn) return string.Empty;
 
         // A card is picked up: spell the arithmetic out. This is the game's teaching moment, so

@@ -124,6 +124,8 @@ public sealed class TableUi
         _chipEmpty = GD.Load<Texture2D>(ArtDir + "ui/chip_empty.png");
         _sfxSlide = CreateSfx("res://assets/kenney/sfx/cardSlide1.ogg");
         _sfxPlace = CreateSfx("res://assets/kenney/sfx/cardPlace1.ogg");
+        _sfxLock = CreateSfx("res://assets/sfx/hold_lock.wav");
+        _sfxOnTarget = CreateSfx("res://assets/sfx/on_target.wav");
     }
 
     // ------------------------------------------------------------------
@@ -239,6 +241,8 @@ public sealed class TableUi
 
     private AudioStreamPlayer _sfxSlide;
     private AudioStreamPlayer _sfxPlace;
+    private AudioStreamPlayer _sfxLock;      // Hold: the padlock snapping shut
+    private AudioStreamPlayer _sfxOnTarget;  // a picked-up Modifier lands exactly on the target
 
     private AudioStreamPlayer CreateSfx(string path)
     {
@@ -389,6 +393,7 @@ public sealed class TableUi
 
         // Whatever is already on the table - a rotation mid-set - drawn straight in, no flight.
         BuildStatusToasts();
+        ResetScoreFeedback();
         TurnRound(L.P1ScoreFarEnd);
         TurnRound(L.P2ScoreFarEnd);
         if (L.P1ScoreThem != null) L.P1ScoreThem.Visible = false; // the box is one line now
@@ -765,10 +770,13 @@ public sealed class TableUi
         UpdateTargetLabel();
 
         RefreshOpponentLines();
-        ApplyScoreDanger(L.P1ScoreBox, P1);
-        ApplyScoreDanger(L.P2ScoreBox, P2);
+        ApplyScoreDanger(L.P1ScoreBox, P1, preview: true);
+        ApplyScoreDanger(L.P2ScoreBox, P2, preview: true);
         ApplyScoreDanger(L.P1OpponentBox, P2); // the opponent's score, boxed and red the same way
         ApplyScoreDanger(L.P2OpponentBox, P1);
+        UpdateHoldLock(L.P1ScoreBox, P1);
+        UpdateHoldLock(L.P2ScoreBox, P2);
+        _scoreFeedbackPrimed = true; // from here on, changes animate and make their sound
         UpdateStatusToast(0, P1, _p1StatusToast);
         UpdateStatusToast(1, P2, _p2StatusToast);
 
@@ -920,7 +928,7 @@ public sealed class TableUi
     private static readonly Color DangerFill = new Color(0.5f, 0.06f, 0.08f, 0.88f);
     private static readonly Color DangerEdge = new Color(1f, 0.45f, 0.42f, 0.95f);
 
-    private void ApplyScoreDanger(Control box, Player player)
+    private void ApplyScoreDanger(Control box, Player player, bool preview = false)
     {
         if (box is not PanelContainer panel || player == null) return;
 
@@ -937,14 +945,163 @@ public sealed class TableUi
                 flat.BorderColor = DangerEdge;
             }
             _dangerBoxStyle[box] = danger;
+
+            // On target (release playtest, 2026-09-29): green, with a soft glow round it.
+            StyleBox onTarget = (StyleBox)authored?.Duplicate();
+            if (onTarget is StyleBoxFlat green)
+            {
+                green.BgColor = OnTargetFill;
+                green.BorderColor = OnTargetEdge;
+                green.ShadowColor = OnTargetGlow;
+                green.ShadowSize = 14;
+            }
+            _onTargetBoxStyle[box] = onTarget;
         }
 
         // Follows the number the box is SHOWING: with a Modifier picked up that is the preview, so
         // a minus card that brings you back under the target clears the red along with the digits.
-        int shown = PreviewedScore(player) ?? player.CurrentScore;
-        bool over = _host.GameStarted && shown > State.TargetScore;
-        StyleBox want = over ? _dangerBoxStyle[box] : authored;
+        // The opponent boxes show the real score, so they never use the preview.
+        int? previewed = preview ? PreviewedScore(player) : null;
+        int shown = previewed ?? player.CurrentScore;
+        bool started = _host.GameStarted;
+        bool over = started && shown > State.TargetScore;
+        bool onTarget = started && previewed.HasValue && previewed.Value == State.TargetScore;
+
+        StyleBox want = over ? _dangerBoxStyle[box] : onTarget ? _onTargetBoxStyle[box] : authored;
         if (want != null) panel.AddThemeStyleboxOverride("panel", want);
+
+        bool was = _onTargetShown.TryGetValue(box, out bool w) && w;
+        _onTargetShown[box] = onTarget;
+        if (onTarget && !was && _scoreFeedbackPrimed) CelebrateOnTarget(box);
+    }
+
+    // ------------------------------------------------------------------
+    // Feedback on the score box (release playtest, 2026-09-29)
+    //
+    // On target: a picked-up Modifier that would land you EXACTLY on the target turns the box
+    // green with a glow, pulses it once and plays a light chime - the "yes, that one" moment.
+    //
+    // Hold: a padlock snaps onto the box's corner with a click and the box dims a little. It stays
+    // until the set ends. It replaces the "Holding" toast, which read as an afterthought.
+    // ------------------------------------------------------------------
+    private readonly Dictionary<Control, StyleBox> _onTargetBoxStyle = new Dictionary<Control, StyleBox>();
+    private readonly Dictionary<Control, bool> _onTargetShown = new Dictionary<Control, bool>();
+    private readonly Dictionary<Control, Control> _holdLocks = new Dictionary<Control, Control>();
+
+    /// False straight after a layout is bound (first launch, or a rotation mid-set): whatever is
+    /// already true is drawn as it is, without replaying the click or the chime.
+    private bool _scoreFeedbackPrimed;
+
+    private static readonly Color OnTargetFill = new Color(0.07f, 0.36f, 0.20f, 0.92f);
+    private static readonly Color OnTargetEdge = new Color(0.55f, 1.00f, 0.68f, 1.00f);
+    private static readonly Color OnTargetGlow = new Color(0.40f, 1.00f, 0.55f, 0.55f);
+    private static readonly Color PreviewOnTargetColor = new Color(0.72f, 1.00f, 0.78f);
+
+    private static readonly Color LockGold = new Color(0.96f, 0.78f, 0.30f);
+    private static readonly Color LockShade = new Color(0.55f, 0.40f, 0.10f);
+    private static readonly Color HeldDim = new Color(0.78f, 0.78f, 0.82f);
+    private static readonly Vector2 LockSize = new Vector2(40f, 50f);
+
+    private void ResetScoreFeedback()
+    {
+        _scoreFeedbackPrimed = false;
+        _onTargetShown.Clear();
+        _onTargetBoxStyle.Clear();
+        _authoredBoxStyle.Clear();
+        _dangerBoxStyle.Clear();
+        _holdLocks.Clear(); // the old layout's locks went with its nodes
+    }
+
+    private void CelebrateOnTarget(Control box)
+    {
+        _sfxOnTarget?.Play();
+        box.PivotOffset = box.Size / 2f;
+        Tween pulse = box.CreateTween();
+        pulse.TweenProperty(box, "scale", new Vector2(1.12f, 1.12f), 0.10f)
+             .SetTrans(Tween.TransitionType.Sine).SetEase(Tween.EaseType.Out);
+        pulse.TweenProperty(box, "scale", Vector2.One, 0.20f)
+             .SetTrans(Tween.TransitionType.Sine).SetEase(Tween.EaseType.In);
+    }
+
+    private void UpdateHoldLock(Control box, Player player)
+    {
+        if (box == null || player == null || box.GetParent() is not Control parent) return;
+        bool holding = _host.GameStarted && player.IsHolding && !State.IsGameOver;
+
+        if (!_holdLocks.TryGetValue(box, out Control padlock) || !GodotObject.IsInstanceValid(padlock))
+        {
+            padlock = BuildPadlock();
+            parent.AddChild(padlock);
+            parent.MoveChild(padlock, box.GetIndex() + 1); // drawn over the box, under the rest
+            _holdLocks[box] = padlock;
+        }
+
+        // The box's top-right corner, overlapping it: the lock is ON the score, not beside it.
+        padlock.Position = box.Position + new Vector2(box.Size.X - LockSize.X * 0.6f, -LockSize.Y * 0.4f);
+        box.Modulate = holding ? HeldDim : Colors.White;
+
+        if (holding == padlock.Visible) return;
+        padlock.Visible = holding;
+        if (!holding || !_scoreFeedbackPrimed) return;
+
+        _sfxLock?.Play();
+        padlock.PivotOffset = LockSize / 2f;
+        padlock.Scale = new Vector2(1.8f, 1.8f);
+        padlock.Modulate = new Color(1, 1, 1, 0);
+        Tween snap = padlock.CreateTween().SetParallel();
+        snap.TweenProperty(padlock, "scale", Vector2.One, 0.22f)
+            .SetTrans(Tween.TransitionType.Back).SetEase(Tween.EaseType.Out);
+        snap.TweenProperty(padlock, "modulate:a", 1f, 0.10f);
+    }
+
+    /// A padlock from three flat shapes - a shackle (an arch of border only), a body and a
+    /// keyhole - so it needs no art and stays crisp at any scale. Swap for a texture later if
+    /// the art pass wants one.
+    private static Control BuildPadlock()
+    {
+        Control root = new Control
+        {
+            Name = "HoldLock",
+            Size = LockSize,
+            CustomMinimumSize = LockSize,
+            MouseFilter = Control.MouseFilterEnum.Ignore,
+            Visible = false,
+        };
+
+        StyleBoxFlat shackleStyle = new StyleBoxFlat { DrawCenter = false, BorderColor = LockShade };
+        shackleStyle.BorderWidthLeft = shackleStyle.BorderWidthRight = shackleStyle.BorderWidthTop = 6;
+        shackleStyle.BorderWidthBottom = 0;
+        shackleStyle.CornerRadiusTopLeft = shackleStyle.CornerRadiusTopRight = 13;
+        Panel shackle = new Panel { MouseFilter = Control.MouseFilterEnum.Ignore };
+        shackle.AddThemeStyleboxOverride("panel", shackleStyle);
+        shackle.Position = new Vector2(8f, 0f);
+        shackle.Size = new Vector2(24f, 26f);
+        root.AddChild(shackle);
+
+        StyleBoxFlat bodyStyle = new StyleBoxFlat
+        {
+            BgColor = LockGold,
+            BorderColor = LockShade,
+            ShadowColor = new Color(0, 0, 0, 0.45f),
+            ShadowSize = 4,
+        };
+        bodyStyle.SetBorderWidthAll(2);
+        bodyStyle.SetCornerRadiusAll(7);
+        Panel body = new Panel { MouseFilter = Control.MouseFilterEnum.Ignore };
+        body.AddThemeStyleboxOverride("panel", bodyStyle);
+        body.Position = new Vector2(0f, 20f);
+        body.Size = new Vector2(40f, 30f);
+        root.AddChild(body);
+
+        StyleBoxFlat holeStyle = new StyleBoxFlat { BgColor = LockShade };
+        holeStyle.SetCornerRadiusAll(4);
+        Panel keyhole = new Panel { MouseFilter = Control.MouseFilterEnum.Ignore };
+        keyhole.AddThemeStyleboxOverride("panel", holeStyle);
+        keyhole.Position = new Vector2(16f, 28f);
+        keyhole.Size = new Vector2(8f, 14f);
+        root.AddChild(keyhole);
+
+        return root;
     }
 
     // ------------------------------------------------------------------
@@ -1204,6 +1361,12 @@ public sealed class TableUi
 
     private static readonly Color PreviewOverColor = new Color(1.00f, 0.55f, 0.30f);
 
+    /// Exactly on the target is its own colour, matching the green box around it.
+    private Color PreviewColorFor(int value) =>
+        value > State.TargetScore ? PreviewOverColor
+        : value == State.TargetScore ? PreviewOnTargetColor
+        : PreviewUnderColor;
+
     // ------------------------------------------------------------------
     // Score badges (pass 40, portrait)
     //
@@ -1255,8 +1418,7 @@ public sealed class TableUi
             if (previewed.HasValue && started)
             {
                 value.Text = previewed.Value.ToString();
-                value.AddThemeColorOverride("font_color",
-                    previewed.Value > State.TargetScore ? PreviewOverColor : PreviewUnderColor);
+                value.AddThemeColorOverride("font_color", PreviewColorFor(previewed.Value));
             }
             else
             {
@@ -1362,8 +1524,7 @@ public sealed class TableUi
         {
             int value = previewed.Value;
             lines.YouValue.Text = _host.GameStarted ? $"{value}/{State.TargetScore}" : "-";
-            lines.YouValue.AddThemeColorOverride("font_color",
-                value > State.TargetScore ? PreviewOverColor : PreviewUnderColor);
+            lines.YouValue.AddThemeColorOverride("font_color", PreviewColorFor(value));
         }
         else
         {
