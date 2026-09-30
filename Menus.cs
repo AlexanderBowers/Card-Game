@@ -399,6 +399,8 @@ public sealed class Menus
         AddMenuButton("Options", null, () => _host.OpenOptions());
         if (run != null)
             AddMenuButton($"Collection   {run.CollectionFound}/{RunData.CollectionKeys.Length}", null, OpenCollection);
+        if (run != null)
+            AddMenuButton($"Shop   {run.Medals} medals", null, OpenShop);
 
         // Quit everywhere but iOS (Alexander, 2026-09-16: "start menu should have quit game").
         // Android allows an app to close itself; Apple's review guidelines reject a quit button,
@@ -487,6 +489,22 @@ public sealed class Menus
 
     /// Fixed rather than scaled with the table: six across has to fit a phone held upright.
     private static readonly Vector2 CollectionCardSize = TableUi.BaseCardSize * 0.65f;
+
+    // ------------------------------------------------------------------
+    // The Shop: decks and boards (playtest, 2026-09-30)
+    // ------------------------------------------------------------------
+    private CosmeticShopOverlay _shopOverlay;
+
+    private void OpenShop()
+    {
+        if (_shopOverlay == null)
+        {
+            _shopOverlay = new CosmeticShopOverlay();
+            _root.AddChild(_shopOverlay);
+        }
+        // Closing refreshes the menu (the medal count on its button) and the table (deck + board).
+        _shopOverlay.Open(() => { FillStartMenu(); _ui.ApplyRankTheme(); });
+    }
 
     private void OpenCollection()
     {

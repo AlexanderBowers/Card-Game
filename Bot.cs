@@ -111,7 +111,13 @@ public sealed class Bot
 
     public enum Skill
     {
-        /// Bronze, Silver (stages 1-4). One card per turn, blind to your hand. The opponent that
+        /// Bronze (stages 1-2). Playtest (2026-09-30): "far too difficult - it should hold earlier
+        /// and appear generally dumb to make the player feel smart". It holds low, sometimes
+        /// forgets to chase a score you have locked in, and often doesn't bother with a Modifier
+        /// it could have played. The first opponent exists to let a new player win and see why.
+        Novice,
+
+        /// Silver (stages 3-4). One card per turn, blind to your hand. The opponent that
         /// teaches the game: it never surprises you while you are still learning what a +/- does.
         Basic,
 
@@ -134,6 +140,17 @@ public sealed class Bot
     /// spending a card to gain one is a swap for its own sake.
     private const int MaxModifiersToTradeAway = 1;
 
+    /// Only Gold and up play more than one card a turn.
+    private static bool Chains(Skill skill) => skill == Skill.Chains || skill == Skill.Reads;
+
+    // Novice tuning. Holds this far under the target (plus up to one more, at random).
+    private const int NoviceHoldBelowTarget = 4;
+    // How often it forgets to chase a score you have locked in, and just holds where it is.
+    private const double NoviceForgetsToChase = 0.45;
+    // How often it passes on a Modifier that would have helped (less often when it is bust).
+    private const double NoviceSkipsModifier = 0.45;
+    private const double NoviceSkipsRescue = 0.3;
+
     private Skill CurrentSkill()
     {
         RunData run = _table.Run;
@@ -144,7 +161,8 @@ public sealed class Bot
             case 4: return Skill.Reads;
             case 3:
             case 2: return Skill.Chains;
-            default: return Skill.Basic;
+            case 1: return Skill.Basic;
+            default: return Skill.Novice;
         }
     }
 
@@ -173,11 +191,11 @@ public sealed class Bot
         //   its position - capped, and with the same pause between each, so the player can follow
         //   a chain rather than watch a hand evaporate.
         Skill skill = CurrentSkill();
-        int maxCards = (skill == Skill.Basic) ? 1 : MaxAiChainedCards;
+        int maxCards = Chains(skill) ? MaxAiChainedCards : 1;
 
         for (int played = 0; played < maxCards; played++)
         {
-            if (!TryPlayModifierCard(mayChain: skill != Skill.Basic)) break;
+            if (!TryPlayModifierCard(mayChain: Chains(skill))) break;
 
             //Wait 1.5 seconds to let the player see each card land
             if (!await _table.Pause(1.5)) return;
@@ -206,12 +224,15 @@ public sealed class Bot
         }
 
         int holdThreshold = Math.Max(10, target - 2);
+        bool novice = skill == Skill.Novice;
+        if (novice) holdThreshold = Math.Max(10, target - NoviceHoldBelowTarget - _table.Rng.Next(0, 2));
 
         // Chasing a score the player has already locked in: play to BEAT it, not to match it.
         // The first build set the threshold to Player 1's score itself, so against a locked 19 the
         // bot held at 19 - a tie, which is replayed rather than won. That is not a difficulty
         // setting, it is the bot declining a win it could take, so it is fixed at every tier.
-        if (You.IsHolding && You.CurrentScore <= target)
+        if (You.IsHolding && You.CurrentScore <= target
+            && !(novice && Me.CurrentScore >= holdThreshold && _table.Rng.NextDouble() < NoviceForgetsToChase))
         {
             holdThreshold = Math.Min(target, You.CurrentScore + 1);
         }
@@ -292,7 +313,7 @@ public sealed class Bot
                 // Busted, and their legal total ends the problem outright - unless my own hand was
                 // going to get me under anyway, in which case keep this for a turn where nothing
                 // else will. Asked against my own skill, since from Gold up I can chain my way back.
-                if (CanGetUnder(Me, Me.CurrentScore, target, mayChain: CurrentSkill() != Skill.Basic)) continue;
+                if (CanGetUnder(Me, Me.CurrentScore, target, mayChain: Chains(CurrentSkill()))) continue;
                 return _table.PlayEffectCard(Me, card);
             }
 
@@ -325,7 +346,7 @@ public sealed class Bot
                 // would already have done the job, in which case keep the Copy for a turn where
                 // nothing else will. Asked against my OWN skill, since from Gold up I can chain
                 // two cards to climb back under.
-                if (CanGetUnder(Me, Me.CurrentScore, target, mayChain: CurrentSkill() != Skill.Basic)) continue;
+                if (CanGetUnder(Me, Me.CurrentScore, target, mayChain: Chains(CurrentSkill()))) continue;
                 return _table.PlayEffectCard(Me, card);
             }
 
@@ -581,6 +602,10 @@ public sealed class Bot
     {
         int target = State.TargetScore;
         int score = Me.CurrentScore;
+
+        if (CurrentSkill() == Skill.Novice
+            && _table.Rng.NextDouble() < (score > target ? NoviceSkipsRescue : NoviceSkipsModifier))
+            return false;
 
         // How high it wants to be before it stops improving: near the target normally, or one PAST
         // Player 1 when it is chasing a score Player 1 has already locked in - drawing level with

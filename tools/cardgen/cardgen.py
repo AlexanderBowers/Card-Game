@@ -369,7 +369,9 @@ def build_modifier(value, rescue=False):
     L = base_card(look)
     ink = ink_mat(L["ink"])
     label = ("+" if value > 0 else "-") + str(abs(value))
-    corners(label, ink, size=1.2)
+    # Playtest (2026-09-30): corner numbers on Modifiers were too small. As big as a main card's
+    # for two characters; a three-character rescue ("-11") steps down so it stays inside the face.
+    corners(label, ink, size=1.62 if len(label) <= 2 else 1.3)
     z = THICK + 0.02
     n = abs(value)
     if n <= 6:

@@ -762,11 +762,76 @@ public partial class RunData : Node
         CollectorBack = false;
         Inventory.Clear();
         SideDeck.Clear();
+        OwnedDecks.Clear(); OwnedDecks.Add("bronze");
+        OwnedBoards.Clear(); OwnedBoards.Add("bronze");
+        SelectedDeck = SelectedBoard = "bronze";
         if (FileAccess.FileExists(SavePath)) DirAccess.RemoveAbsolute(ProjectSettings.GlobalizePath(SavePath));
         Save();
     }
 
     public void SpendMedals(int amount) { Medals = Math.Max(0, Medals - amount); Save(); }
+
+    // ------------------------------------------------------------------
+    // Decks and boards (playtest, 2026-09-30)
+    //
+    // The player's deck (card back + the look of their 1-10 cards) and board (the table outside
+    // the ladder) are theirs: chosen on the main menu and never changed by a stage. Each stage
+    // plays on its own table, and the opponent uses the stage's deck. One of each per rank; Bronze
+    // is owned from the start, the rest are bought with medals in the Shop - and only once the
+    // player has beaten a stage of that rank.
+    // ------------------------------------------------------------------
+    public static readonly string[] CosmeticKeys = { "bronze", "silver", "gold", "ruby", "obsidian" };
+
+    /// Medals to buy a rank's deck or board. Bronze is free and owned from the start.
+    public static int CosmeticPrice(string key) => key switch
+    {
+        "silver" => 15,
+        "gold" => 25,
+        "ruby" => 40,
+        "obsidian" => 60,
+        _ => 0,
+    };
+
+    public HashSet<string> OwnedDecks { get; } = new HashSet<string> { "bronze" };
+    public HashSet<string> OwnedBoards { get; } = new HashSet<string> { "bronze" };
+    public string SelectedDeck { get; private set; } = "bronze";
+    public string SelectedBoard { get; private set; } = "bronze";
+
+    private static int CosmeticRank(string key) => Array.IndexOf(CosmeticKeys, key);
+
+    /// The stage that has to be beaten before this rank's deck and board can be bought: the
+    /// rank's first stage (its Challenger). Bronze needs nothing.
+    public static string UnlockStageName(string key)
+    {
+        int rank = CosmeticRank(key);
+        return rank <= 0 ? null : Ladder[Math.Min(rank * 2, Ladder.Length - 1)].Opponent;
+    }
+
+    /// Beaten the rank's first stage = reached the rung after it at least once.
+    public bool CosmeticUnlocked(string key)
+    {
+        int rank = CosmeticRank(key);
+        return rank == 0 || (rank > 0 && FurthestStep >= rank * 2 + 1);
+    }
+
+    public bool BuyCosmetic(string key, bool board)
+    {
+        HashSet<string> owned = board ? OwnedBoards : OwnedDecks;
+        int price = CosmeticPrice(key);
+        if (CosmeticRank(key) < 0 || owned.Contains(key) || !CosmeticUnlocked(key) || Medals < price) return false;
+        Medals -= price;
+        owned.Add(key);
+        if (board) SelectedBoard = key; else SelectedDeck = key; // bought to be used
+        Save();
+        return true;
+    }
+
+    public void SelectCosmetic(string key, bool board)
+    {
+        if (!(board ? OwnedBoards : OwnedDecks).Contains(key)) return;
+        if (board) SelectedBoard = key; else SelectedDeck = key;
+        Save();
+    }
 
     /// Adds a bought card to the collection and returns its index - which is its permanent id,
     /// because the collection is append-only (there is no selling).
@@ -867,9 +932,18 @@ public partial class RunData : Node
             });
         }
 
+        Godot.Collections.Array ownedDecks = new Godot.Collections.Array();
+        foreach (string key in OwnedDecks) ownedDecks.Add(key);
+        Godot.Collections.Array ownedBoards = new Godot.Collections.Array();
+        foreach (string key in OwnedBoards) ownedBoards.Add(key);
+
         Godot.Collections.Dictionary data = new Godot.Collections.Dictionary
         {
-            { "version", 8 },
+            { "version", 9 },
+            { "ownedDecks", ownedDecks },
+            { "ownedBoards", ownedBoards },
+            { "deck", SelectedDeck },
+            { "board", SelectedBoard },
             { "active", RunActive },
             { "medals", Medals },
             { "step", StepIndex },
@@ -899,6 +973,15 @@ public partial class RunData : Node
         file.StoreString(Json.Stringify(data));
     }
 
+    private static void LoadOwned(Godot.Collections.Dictionary data, string name, HashSet<string> into)
+    {
+        into.Clear();
+        into.Add("bronze");
+        if (!data.TryGetValue(name, out Variant list) || list.VariantType != Variant.Type.Array) return;
+        foreach (Variant entry in list.AsGodotArray())
+            if (Array.IndexOf(CosmeticKeys, entry.AsString()) >= 0) into.Add(entry.AsString());
+    }
+
     public void Load()
     {
         if (!FileAccess.FileExists(SavePath)) return;
@@ -916,6 +999,12 @@ public partial class RunData : Node
         StepIndex = data.TryGetValue("step", out Variant step) ? step.AsInt32() : 0;
         FurthestStep = data.TryGetValue("furthest", out Variant furthest) ? furthest.AsInt32() : StepIndex;
         TutorialSeen = data.TryGetValue("tutorialSeen", out Variant taught) && taught.AsBool();
+
+        // Version 9: decks and boards. An older save owns Bronze of each and uses it.
+        LoadOwned(data, "ownedDecks", OwnedDecks);
+        LoadOwned(data, "ownedBoards", OwnedBoards);
+        SelectedDeck = data.TryGetValue("deck", out Variant deck) && OwnedDecks.Contains(deck.AsString()) ? deck.AsString() : "bronze";
+        SelectedBoard = data.TryGetValue("board", out Variant board) && OwnedBoards.Contains(board.AsString()) ? board.AsString() : "bronze";
         Endless = data.TryGetValue("endless", out Variant endless) && endless.AsBool();
         EndlessStreak = data.TryGetValue("endlessStreak", out Variant streak) ? streak.AsInt32() : 0;
         EndlessBest = data.TryGetValue("endlessBest", out Variant best) ? best.AsInt32() : 0;

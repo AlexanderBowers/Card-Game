@@ -733,7 +733,7 @@ public sealed class TableUi
         {
             Control slot = FindFreeSlot(board);
             if (slot == null) break;
-            TextureRect view = CreateCardView(card, BoardCardSizeFor(board));
+            TextureRect view = CreateCardView(card, BoardCardSizeFor(board), board == L?.P2Board);
             slot.AddChild(view);
             view.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
             RefreshBoardSlots(board);
@@ -1356,22 +1356,28 @@ public sealed class TableUi
             // The layout's own mat is remembered on the node, to go back to from a painted one.
             if (!L.Background.HasMeta("authoredMat")) L.Background.SetMeta("authoredMat", L.Background.Texture);
             Texture2D authored = L.Background.GetMeta("authoredMat").As<Texture2D>();
-            Texture2D mat = RankKey == null ? null : Art($"playmats/playmat_{RankKey}_{(L.Portrait ? "portrait" : "landscape")}.png");
+            // In a ladder stage the table is the STAGE's; anywhere else it is the player's own board.
+            string boardKey = RankKey ?? RunData.Instance?.SelectedBoard ?? "bronze";
+            Texture2D mat = Art($"playmats/playmat_{boardKey}_{(L.Portrait ? "portrait" : "landscape")}.png");
             L.Background.Texture = mat ?? authored;
             L.Background.SelfModulate = mat != null ? Colors.White : _playmatTint;
         }
         // Both decks share Player 1's back for now (the gilded back is a profile reward, so it
         // shows in local 2-player too). Pass 43 gave each player their own deck so that, with
         // online play, each side can show its owner's customised back.
-        foreach (TextureRect deck in new[] { L.Deck, L.P2Deck })
-        {
-            if (deck == null) continue;
-            // A rank's own back (backs/card_back_<rank>.png), unless the gilded back is earned and on.
-            Texture2D back = GildedDeck ? null : RankArt("backs/card_back");
-            if (back != null) deck.Texture = back;
-            else if (_cardBack != null) deck.Texture = _cardBack;
-            deck.SelfModulate = back != null ? Colors.White : DeckBackTint;
-        }
+        // Your deck is yours: its back is your chosen deck's (or the gilded back, once earned and
+        // switched on). The opponent in a ladder stage uses the stage's deck; in local 2-player
+        // both players share yours.
+        SetDeckBack(L.Deck, GildedDeck ? null : Art($"backs/card_back_{PlayerDeckKey}.png"));
+        SetDeckBack(L.P2Deck, Art($"backs/card_back_{DeckKeyFor(true)}.png"));
+    }
+
+    private void SetDeckBack(TextureRect deck, Texture2D back)
+    {
+        if (deck == null) return;
+        if (back != null) deck.Texture = back;
+        else if (_cardBack != null) deck.Texture = _cardBack;
+        deck.SelfModulate = back != null ? Colors.White : DeckBackTint;
     }
 
     /// Blue: the picked-up Modifier keeps you at or under the target. Orange: it would take you over.
@@ -2301,12 +2307,19 @@ public sealed class TableUi
     // ------------------------------------------------------------------
     private const string PrerenderedMeta = "prerendered";
 
-    private Texture2D PrerenderedFace(Card card)
+    /// The player's chosen deck - "bronze", "silver"... (RunData.SelectedDeck).
+    private static string PlayerDeckKey => RunData.Instance?.SelectedDeck ?? "bronze";
+
+    /// Whose deck a main card on this side is drawn from: the opponent in a ladder stage uses the
+    /// STAGE's deck; everyone else (you, and both players in local 2-player) uses yours.
+    private string DeckKeyFor(bool opponentSide) => opponentSide && RankKey != null ? RankKey : PlayerDeckKey;
+
+    private Texture2D PrerenderedFace(Card card, bool opponentSide = false)
     {
         int n = Mathf.Abs(card.Value);
         string sign = card.Value < 0 ? "minus" : "plus";
         if (card.Type == CardType.Main)
-            return n is >= 1 and <= 10 ? Art($"cards/main/main_{n}_{RankKey ?? "bronze"}.png") : null;
+            return n is >= 1 and <= 10 ? Art($"cards/main/main_{n}_{DeckKeyFor(opponentSide)}.png") : null;
         if (card.Effect != CardEffect.None) return EffectArt(card.Effect);
         if (n < 1) return null;
         if (card.CanFlipValue) return Art($"cards/mods/flip_{n}_{sign}.png");
@@ -2314,9 +2327,11 @@ public sealed class TableUi
         return Art($"cards/mods/{sign}_{n}.png");
     }
 
-    public TextureRect CreateCardView(Card card, Vector2 size)
+    public TextureRect CreateCardView(Card card, Vector2 size) => CreateCardView(card, size, false);
+
+    public TextureRect CreateCardView(Card card, Vector2 size, bool opponentSide)
     {
-        Texture2D rendered = PrerenderedFace(card);
+        Texture2D rendered = PrerenderedFace(card, opponentSide);
         if (rendered != null)
         {
             TextureRect ready = (TextureRect)_cardViewScene.Instantiate();
@@ -2458,7 +2473,7 @@ public sealed class TableUi
 
         if (view.HasMeta(PrerenderedMeta))
         {
-            Texture2D face = PrerenderedFace(card);
+            Texture2D face = PrerenderedFace(card, board == L?.P2Board);
             if (face != null)
             {
                 view.Texture = face;
@@ -2566,7 +2581,7 @@ public sealed class TableUi
         // the hand now, before the refresh that follows rebuilds the hand without it.
         HandSpot? fromHand = card.Type != CardType.Main ? HandSpotOf(card) : null;
 
-        TextureRect cardNode = CreateCardView(card, BoardCardSizeFor(parentContainer));
+        TextureRect cardNode = CreateCardView(card, BoardCardSizeFor(parentContainer), parentContainer == L?.P2Board);
 
         // Drop the card into the next empty slot; if the board is somehow full, let the grid grow.
         // In portrait the seventh card opens the third row, and RefreshBoardSlots below re-sizes
@@ -2661,7 +2676,7 @@ public sealed class TableUi
         }
 
         // The card itself, face up, flying - not a face-down stand-in.
-        TextureRect flier = CreateCardView(card, cardSize);
+        TextureRect flier = CreateCardView(card, cardSize, board == L?.P2Board);
         flier.MouseFilter = Control.MouseFilterEnum.Ignore;
         flier.Size = cardSize;
         flier.PivotOffset = cardSize / 2f;
@@ -2806,13 +2821,13 @@ public sealed class TableUi
         // 1. A face-down card that flies from the deck to the slot
         TextureRect fakeCard = new TextureRect
         {
-            Texture = _cardBack,
+            Texture = (fromDeck as TextureRect)?.Texture ?? _cardBack,
             ExpandMode = TextureRect.ExpandModeEnum.IgnoreSize,
             StretchMode = TextureRect.StretchModeEnum.KeepAspectCentered,
             Size = cardSize,
             PivotOffset = cardSize / 2f,
             MouseFilter = Control.MouseFilterEnum.Ignore,
-            SelfModulate = DeckBackTint,
+            SelfModulate = (fromDeck as TextureRect)?.SelfModulate ?? DeckBackTint,
         };
         _root.AddChild(fakeCard); // on the scene root so it draws above everything
 

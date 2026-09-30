@@ -1,0 +1,200 @@
+using Godot;
+using System;
+
+/// <summary>
+/// The Shop, opened from the main menu (playtest, 2026-09-30): decks and boards bought with
+/// medals.
+///
+/// A DECK is the player's card back plus the look of their 1-10 cards; a BOARD is the table they
+/// play on outside the ladder (local 2-player, and later online and endless). One of each per
+/// rank. Bronze is owned from the start; the rest unlock for purchase once the player has beaten
+/// that rank's first stage, and cost RunData.CosmeticPrice medals. What the player picks here is
+/// the only way their deck or board changes - a stage never changes it.
+///
+/// Reads and writes RunData's cosmetic fields only; closing hands back to the menu, which
+/// refreshes the table theme.
+/// </summary>
+public partial class CosmeticShopOverlay : Control
+{
+    private const string ArtDir = "res://assets/aimfor20_art/";
+    private static readonly Vector2 CardPreview = new Vector2(64, 87);
+    private static readonly Vector2 BoardPreview = new Vector2(66, 117);
+
+    private Action _onClosed;
+    private bool _showBoards;
+    private bool _built;
+
+    private Label _medals;
+    private Button _decksTab;
+    private Button _boardsTab;
+    private VBoxContainer _rows;
+
+    public void Build()
+    {
+        if (_built) return;
+        _built = true;
+
+        Visible = false;
+        MouseFilter = MouseFilterEnum.Stop;
+        SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
+        OverlayUi.AddDim(this);
+
+        VBoxContainer box = OverlayUi.AddPanel(this, contentMargin: 22, separation: 10);
+        box.AddChild(OverlayUi.MakeLabel("Shop", 32));
+        _medals = OverlayUi.MakeLabel("", 20, OverlayUi.MedalGold);
+        box.AddChild(_medals);
+
+        HBoxContainer tabs = new HBoxContainer { Alignment = BoxContainer.AlignmentMode.Center };
+        tabs.AddThemeConstantOverride("separation", 10);
+        _decksTab = TabButton("Decks", () => { _showBoards = false; Refresh(); });
+        _boardsTab = TabButton("Boards", () => { _showBoards = true; Refresh(); });
+        tabs.AddChild(_decksTab);
+        tabs.AddChild(_boardsTab);
+        box.AddChild(tabs);
+
+        // Five rows can outgrow a landscape phone, so they scroll inside a fixed-height window.
+        ScrollContainer scroll = new ScrollContainer
+        {
+            HorizontalScrollMode = ScrollContainer.ScrollMode.Disabled,
+            CustomMinimumSize = new Vector2(430, 460),
+        };
+        box.AddChild(scroll);
+        _rows = new VBoxContainer { SizeFlagsHorizontal = SizeFlags.ExpandFill };
+        _rows.AddThemeConstantOverride("separation", 8);
+        scroll.AddChild(_rows);
+
+        Button close = new Button { Text = "Close", CustomMinimumSize = new Vector2(200, 44) };
+        OverlayUi.StyleButton(close);
+        close.Pressed += Close;
+        CenterContainer closeRow = new CenterContainer();
+        closeRow.AddChild(close);
+        box.AddChild(closeRow);
+    }
+
+    public void Open(Action onClosed = null)
+    {
+        Build();
+        _onClosed = onClosed;
+        Node parent = GetParent();
+        if (parent != null) parent.MoveChild(this, parent.GetChildCount() - 1);
+        Visible = true;
+        Refresh();
+    }
+
+    private void Close()
+    {
+        Visible = false;
+        Action done = _onClosed;
+        _onClosed = null;
+        done?.Invoke();
+    }
+
+    private Button TabButton(string text, Action onPressed)
+    {
+        Button b = new Button { Text = text, CustomMinimumSize = new Vector2(150, 44), FocusMode = FocusModeEnum.None };
+        b.Pressed += onPressed;
+        return b;
+    }
+
+    private void Refresh()
+    {
+        RunData run = RunData.Instance;
+        if (run == null) { Close(); return; }
+
+        _medals.Text = $"{run.Medals} medals";
+        OverlayUi.StyleButton(_decksTab, primary: !_showBoards);
+        OverlayUi.StyleButton(_boardsTab, primary: _showBoards);
+
+        OverlayUi.ClearChildren(_rows);
+        foreach (string key in RunData.CosmeticKeys)
+            _rows.AddChild(Row(run, key));
+    }
+
+    private Control Row(RunData run, string key)
+    {
+        bool board = _showBoards;
+        string name = char.ToUpperInvariant(key[0]) + key.Substring(1) + (board ? " Board" : " Deck");
+
+        PanelContainer frame = new PanelContainer();
+        StyleBoxFlat style = new StyleBoxFlat
+        {
+            BgColor = new Color(1, 1, 1, 0.55f),
+            BorderColor = new Color(0.17f, 0.21f, 0.29f, 0.12f),
+        };
+        style.SetBorderWidthAll(1);
+        style.SetCornerRadiusAll(12);
+        style.SetContentMarginAll(8);
+        frame.AddThemeStyleboxOverride("panel", style);
+
+        HBoxContainer row = new HBoxContainer();
+        row.AddThemeConstantOverride("separation", 10);
+        frame.AddChild(row);
+
+        // What it looks like: a deck is its back beside a 7; a board is the table itself.
+        HBoxContainer preview = new HBoxContainer();
+        preview.AddThemeConstantOverride("separation", 4);
+        if (board)
+        {
+            preview.AddChild(Picture($"playmats/playmat_{key}_portrait.png", BoardPreview));
+        }
+        else
+        {
+            preview.AddChild(Picture($"backs/card_back_{key}.png", CardPreview));
+            preview.AddChild(Picture($"cards/main/main_7_{key}.png", CardPreview));
+        }
+        row.AddChild(preview);
+
+        VBoxContainer info = new VBoxContainer { SizeFlagsHorizontal = SizeFlags.ExpandFill, Alignment = BoxContainer.AlignmentMode.Center };
+        Label title = OverlayUi.MakeLabel(name, 20, OverlayUi.Ink);
+        title.HorizontalAlignment = HorizontalAlignment.Left;
+        info.AddChild(title);
+
+        bool owned = (board ? run.OwnedBoards : run.OwnedDecks).Contains(key);
+        bool inUse = (board ? run.SelectedBoard : run.SelectedDeck) == key;
+        bool unlocked = run.CosmeticUnlocked(key);
+        int price = RunData.CosmeticPrice(key);
+
+        string note = owned ? (inUse ? "In use" : "Owned")
+                    : unlocked ? $"{price} medals"
+                    : $"Beat the {RunData.UnlockStageName(key)} to unlock";
+        Label sub = OverlayUi.MakeLabel(note, 14, owned || unlocked ? OverlayUi.Muted : OverlayUi.Warning);
+        sub.HorizontalAlignment = HorizontalAlignment.Left;
+        sub.AutowrapMode = TextServer.AutowrapMode.WordSmart;
+        info.AddChild(sub);
+        row.AddChild(info);
+
+        Button action = new Button { CustomMinimumSize = new Vector2(96, 44), FocusMode = FocusModeEnum.None };
+        if (owned)
+        {
+            action.Text = inUse ? "Using" : "Use";
+            action.Disabled = inUse;
+            action.Pressed += () => { run.SelectCosmetic(key, board); Refresh(); };
+            OverlayUi.StyleButton(action);
+        }
+        else
+        {
+            action.Text = unlocked ? "Buy" : "Locked";
+            action.Disabled = !unlocked || run.Medals < price;
+            action.Pressed += () => { run.BuyCosmetic(key, board); Refresh(); };
+            OverlayUi.StyleButton(action, primary: unlocked && run.Medals >= price);
+        }
+        CenterContainer actionBox = new CenterContainer();
+        actionBox.AddChild(action);
+        row.AddChild(actionBox);
+        return frame;
+    }
+
+    private static Control Picture(string relative, Vector2 size)
+    {
+        string path = ArtDir + relative;
+        TextureRect pic = new TextureRect
+        {
+            Texture = ResourceLoader.Exists(path) ? GD.Load<Texture2D>(path) : null,
+            ExpandMode = TextureRect.ExpandModeEnum.IgnoreSize,
+            StretchMode = TextureRect.StretchModeEnum.KeepAspectCentered,
+            CustomMinimumSize = size,
+            MouseFilter = MouseFilterEnum.Ignore,
+        };
+        return pic;
+    }
+}
