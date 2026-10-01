@@ -385,8 +385,11 @@ public static class CardEffects
                 opponent.CurrentScore -= theirs.Value;
                 opponent.ActiveCardsOnBoard.Remove(theirs);
                 opponent.LastPlayedModifier = null;
+                // Playing it put it on their spent pile (Player.PlayModifierCard); a burned card
+                // must leave that pile too, or their Recall could bring it straight back.
+                opponent.SpentCards.Remove(theirs);
 
-                // Destroyed, not returned - and deliberately NOT added to SpentCards either, so a
+                // Destroyed, not returned - and deliberately NOT left in SpentCards either, so a
                 // Recall cannot bring back a card that a Veto burned. Returning it to their hand
                 // would let them replay it the same turn and Veto would net to zero, which is the
                 // whole reason this card is a destruction rather than an undo.
