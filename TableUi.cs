@@ -76,6 +76,12 @@ public interface ITableUiHost
 ///  - scales the whole UI so the layout fills the screen (FitToWindow);
 ///  - and paints the game onto it: cards, scores, chips, which buttons are live.
 ///
+/// Four helpers each own one part of the picture, so this class stays about the layout:
+///  - CardViews: what a card looks like (faces, pips, shine) - also used by the shop and prompts;
+///  - CardMotion: cards flying from the deck or the hand onto a board;
+///  - ScoreDisplay: the scores, the red/green boxes and the hold padlock;
+///  - Toasts: the status toasts and the effect banner.
+///
 /// The line against Table.cs, in the other direction: Table knows where the cards are, TableUi
 /// knows what they look like. Nothing in here decides anything - no score changes, no card is
 /// spent, no turn ends. Presses go out through ITableUiHost and come back as new state to draw.
@@ -1027,9 +1033,6 @@ public sealed class TableUi
         if (hold != null) hold.Scale = Vector2.One;
     }
 
-    private static Vector2 Bigger(Vector2 a, Vector2 b) =>
-        new Vector2(Mathf.Max(a.X, b.X), Mathf.Max(a.Y, b.Y));
-
     // ------------------------------------------------------------------
     // The middle panel
     // ------------------------------------------------------------------
@@ -1169,9 +1172,9 @@ public sealed class TableUi
         return button;
     }
 
-
     // ------------------------------------------------------------------
-    // Card views
+    // Cards on the boards: putting a view into a slot, redrawing it, burning it. What the view
+    // looks like is CardViews'; the flight there is CardMotion's.
     // ------------------------------------------------------------------
 
     private static Color PlaymatTintFor(Color table)
