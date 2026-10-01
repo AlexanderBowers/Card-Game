@@ -238,7 +238,6 @@ public sealed class TableUi
     private AudioStreamPlayer _sfxLock;      // Hold: the padlock snapping shut
     private AudioStreamPlayer _sfxOnTarget;  // a picked-up Modifier lands exactly on the target
     private AudioStreamPlayer _sfxImpact;    // a Modifier slammed down from the hand
-    private Shader _shineShader;
 
     private AudioStreamPlayer CreateSfx(string path)
     {
