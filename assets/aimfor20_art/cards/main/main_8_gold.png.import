@@ -2,9 +2,9 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://x0eakqwpnlqk"
-path.bptc="res://.godot/imported/card_back.png-f1dc7d305e41223b9122d525c6cdf212.bptc.ctex"
-path.astc="res://.godot/imported/card_back.png-f1dc7d305e41223b9122d525c6cdf212.astc.ctex"
+uid="uid://c8gosd4r6wtcs"
+path.bptc="res://.godot/imported/main_8_gold.png-5faa9cda9cf1f9ad40e47852a27bb1c5.bptc.ctex"
+path.astc="res://.godot/imported/main_8_gold.png-5faa9cda9cf1f9ad40e47852a27bb1c5.astc.ctex"
 metadata={
 "imported_formats": ["s3tc_bptc", "etc2_astc"],
 "vram_texture": true
@@ -12,8 +12,8 @@ metadata={
 
 [deps]
 
-source_file="res://assets/aimfor20_art/card_back.png"
-dest_files=["res://.godot/imported/card_back.png-f1dc7d305e41223b9122d525c6cdf212.bptc.ctex", "res://.godot/imported/card_back.png-f1dc7d305e41223b9122d525c6cdf212.astc.ctex"]
+source_file="res://assets/aimfor20_art/cards/main/main_8_gold.png"
+dest_files=["res://.godot/imported/main_8_gold.png-5faa9cda9cf1f9ad40e47852a27bb1c5.bptc.ctex", "res://.godot/imported/main_8_gold.png-5faa9cda9cf1f9ad40e47852a27bb1c5.astc.ctex"]
 
 [params]
 

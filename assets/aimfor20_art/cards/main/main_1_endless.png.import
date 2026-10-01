@@ -2,9 +2,9 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://x0eakqwpnlqk"
-path.bptc="res://.godot/imported/card_back.png-f1dc7d305e41223b9122d525c6cdf212.bptc.ctex"
-path.astc="res://.godot/imported/card_back.png-f1dc7d305e41223b9122d525c6cdf212.astc.ctex"
+uid="uid://cl4cj4tfq0psf"
+path.bptc="res://.godot/imported/main_1_endless.png-19159749fd1473312a69c0128fd1d209.bptc.ctex"
+path.astc="res://.godot/imported/main_1_endless.png-19159749fd1473312a69c0128fd1d209.astc.ctex"
 metadata={
 "imported_formats": ["s3tc_bptc", "etc2_astc"],
 "vram_texture": true
@@ -12,8 +12,8 @@ metadata={
 
 [deps]
 
-source_file="res://assets/aimfor20_art/card_back.png"
-dest_files=["res://.godot/imported/card_back.png-f1dc7d305e41223b9122d525c6cdf212.bptc.ctex", "res://.godot/imported/card_back.png-f1dc7d305e41223b9122d525c6cdf212.astc.ctex"]
+source_file="res://assets/aimfor20_art/cards/main/main_1_endless.png"
+dest_files=["res://.godot/imported/main_1_endless.png-19159749fd1473312a69c0128fd1d209.bptc.ctex", "res://.godot/imported/main_1_endless.png-19159749fd1473312a69c0128fd1d209.astc.ctex"]
 
 [params]
 

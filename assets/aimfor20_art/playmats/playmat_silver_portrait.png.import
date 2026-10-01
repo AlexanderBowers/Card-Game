@@ -2,9 +2,9 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://x0eakqwpnlqk"
-path.bptc="res://.godot/imported/card_back.png-f1dc7d305e41223b9122d525c6cdf212.bptc.ctex"
-path.astc="res://.godot/imported/card_back.png-f1dc7d305e41223b9122d525c6cdf212.astc.ctex"
+uid="uid://4wtqxbr76m1f"
+path.bptc="res://.godot/imported/playmat_silver_portrait.png-4eea53dd425d59adf44b916cfe89c5a5.bptc.ctex"
+path.astc="res://.godot/imported/playmat_silver_portrait.png-4eea53dd425d59adf44b916cfe89c5a5.astc.ctex"
 metadata={
 "imported_formats": ["s3tc_bptc", "etc2_astc"],
 "vram_texture": true
@@ -12,8 +12,8 @@ metadata={
 
 [deps]
 
-source_file="res://assets/aimfor20_art/card_back.png"
-dest_files=["res://.godot/imported/card_back.png-f1dc7d305e41223b9122d525c6cdf212.bptc.ctex", "res://.godot/imported/card_back.png-f1dc7d305e41223b9122d525c6cdf212.astc.ctex"]
+source_file="res://assets/aimfor20_art/playmats/playmat_silver_portrait.png"
+dest_files=["res://.godot/imported/playmat_silver_portrait.png-4eea53dd425d59adf44b916cfe89c5a5.bptc.ctex", "res://.godot/imported/playmat_silver_portrait.png-4eea53dd425d59adf44b916cfe89c5a5.astc.ctex"]
 
 [params]
 

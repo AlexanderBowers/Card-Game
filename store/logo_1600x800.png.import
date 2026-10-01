@@ -2,9 +2,9 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://x0eakqwpnlqk"
-path.bptc="res://.godot/imported/card_back.png-f1dc7d305e41223b9122d525c6cdf212.bptc.ctex"
-path.astc="res://.godot/imported/card_back.png-f1dc7d305e41223b9122d525c6cdf212.astc.ctex"
+uid="uid://cwi27kq4p7lj2"
+path.bptc="res://.godot/imported/logo_1600x800.png-5fbc1b91b2c4f9250707987b4c88bf47.bptc.ctex"
+path.astc="res://.godot/imported/logo_1600x800.png-5fbc1b91b2c4f9250707987b4c88bf47.astc.ctex"
 metadata={
 "imported_formats": ["s3tc_bptc", "etc2_astc"],
 "vram_texture": true
@@ -12,8 +12,8 @@ metadata={
 
 [deps]
 
-source_file="res://assets/aimfor20_art/card_back.png"
-dest_files=["res://.godot/imported/card_back.png-f1dc7d305e41223b9122d525c6cdf212.bptc.ctex", "res://.godot/imported/card_back.png-f1dc7d305e41223b9122d525c6cdf212.astc.ctex"]
+source_file="res://store/logo_1600x800.png"
+dest_files=["res://.godot/imported/logo_1600x800.png-5fbc1b91b2c4f9250707987b4c88bf47.bptc.ctex", "res://.godot/imported/logo_1600x800.png-5fbc1b91b2c4f9250707987b4c88bf47.astc.ctex"]
 
 [params]
 

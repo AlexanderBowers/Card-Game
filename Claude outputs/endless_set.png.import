@@ -2,9 +2,9 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://x0eakqwpnlqk"
-path.bptc="res://.godot/imported/card_back.png-f1dc7d305e41223b9122d525c6cdf212.bptc.ctex"
-path.astc="res://.godot/imported/card_back.png-f1dc7d305e41223b9122d525c6cdf212.astc.ctex"
+uid="uid://br10glg5ephek"
+path.bptc="res://.godot/imported/endless_set.png-25417d3dd20644c02a3a2f68c411832e.bptc.ctex"
+path.astc="res://.godot/imported/endless_set.png-25417d3dd20644c02a3a2f68c411832e.astc.ctex"
 metadata={
 "imported_formats": ["s3tc_bptc", "etc2_astc"],
 "vram_texture": true
@@ -12,8 +12,8 @@ metadata={
 
 [deps]
 
-source_file="res://assets/aimfor20_art/card_back.png"
-dest_files=["res://.godot/imported/card_back.png-f1dc7d305e41223b9122d525c6cdf212.bptc.ctex", "res://.godot/imported/card_back.png-f1dc7d305e41223b9122d525c6cdf212.astc.ctex"]
+source_file="res://Claude outputs/endless_set.png"
+dest_files=["res://.godot/imported/endless_set.png-25417d3dd20644c02a3a2f68c411832e.bptc.ctex", "res://.godot/imported/endless_set.png-25417d3dd20644c02a3a2f68c411832e.astc.ctex"]
 
 [params]
 

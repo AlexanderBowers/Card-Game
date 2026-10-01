@@ -2,9 +2,9 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://x0eakqwpnlqk"
-path.bptc="res://.godot/imported/card_back.png-f1dc7d305e41223b9122d525c6cdf212.bptc.ctex"
-path.astc="res://.godot/imported/card_back.png-f1dc7d305e41223b9122d525c6cdf212.astc.ctex"
+uid="uid://bw6suu7ov2khm"
+path.bptc="res://.godot/imported/flip_2_plus.png-e78b8e6e59fd3c5ce7b620a7aa2d082d.bptc.ctex"
+path.astc="res://.godot/imported/flip_2_plus.png-e78b8e6e59fd3c5ce7b620a7aa2d082d.astc.ctex"
 metadata={
 "imported_formats": ["s3tc_bptc", "etc2_astc"],
 "vram_texture": true
@@ -12,8 +12,8 @@ metadata={
 
 [deps]
 
-source_file="res://assets/aimfor20_art/card_back.png"
-dest_files=["res://.godot/imported/card_back.png-f1dc7d305e41223b9122d525c6cdf212.bptc.ctex", "res://.godot/imported/card_back.png-f1dc7d305e41223b9122d525c6cdf212.astc.ctex"]
+source_file="res://assets/aimfor20_art/cards/mods/flip_2_plus.png"
+dest_files=["res://.godot/imported/flip_2_plus.png-e78b8e6e59fd3c5ce7b620a7aa2d082d.bptc.ctex", "res://.godot/imported/flip_2_plus.png-e78b8e6e59fd3c5ce7b620a7aa2d082d.astc.ctex"]
 
 [params]
 
