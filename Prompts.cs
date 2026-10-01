@@ -208,7 +208,7 @@ public sealed class Prompts
         // Re-open the turn exactly as an effect card does: no new draw, just a chance to play.
         P1.IsHolding = false;
         P1.HasEndedTurn = false;
-        _ui.ShowEffectBanner(banner);
+        _ui.Toasts.ShowEffectBanner(banner);
         _ui.Refresh();
     }
 

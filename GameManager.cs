@@ -298,7 +298,7 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
         _player1.ResetForNewSet();
         _player2.ResetForNewSet();
         ClearSelections();
-        _ui.ClearEffectBanner();
+        _ui.Toasts.ClearEffectBanner();
 
         // Clear old cards and lay out fresh empty 3x3 boards
         _ui.FillBoardWithSlots(_p1BoardContainer);
@@ -653,7 +653,7 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
         }
 
         GD.Print(result.Narration);
-        _ui.ShowEffectBanner(result.Narration); // the log is not on the table - the player has to SEE it
+        _ui.Toasts.ShowEffectBanner(result.Narration); // the log is not on the table - the player has to SEE it
 
         // The ladder's promise, kept: you meet a card when it is used on you, and the game says
         // once what it was. Only the bot's cards - your own were introduced when you were dealt them.
@@ -1309,7 +1309,7 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
 
     private void AnnounceCollectionComplete()
     {
-        _ui.ShowEffectBanner("Collection complete! Your deck now has a gilded back.");
+        _ui.Toasts.ShowEffectBanner("Collection complete! Your deck now has a gilded back.");
         _ui.ApplyRankTheme();
     }
 
