@@ -2,9 +2,9 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://x0eakqwpnlqk"
-path.bptc="res://.godot/imported/card_back.png-f1dc7d305e41223b9122d525c6cdf212.bptc.ctex"
-path.astc="res://.godot/imported/card_back.png-f1dc7d305e41223b9122d525c6cdf212.astc.ctex"
+uid="uid://rf4l2dpyyda3"
+path.bptc="res://.godot/imported/rescue_minus_2.png-80948d65e26602e707ca2f48bebe5fa0.bptc.ctex"
+path.astc="res://.godot/imported/rescue_minus_2.png-80948d65e26602e707ca2f48bebe5fa0.astc.ctex"
 metadata={
 "imported_formats": ["s3tc_bptc", "etc2_astc"],
 "vram_texture": true
@@ -12,8 +12,8 @@ metadata={
 
 [deps]
 
-source_file="res://assets/aimfor20_art/card_back.png"
-dest_files=["res://.godot/imported/card_back.png-f1dc7d305e41223b9122d525c6cdf212.bptc.ctex", "res://.godot/imported/card_back.png-f1dc7d305e41223b9122d525c6cdf212.astc.ctex"]
+source_file="res://assets/aimfor20_art/cards/mods/rescue_minus_2.png"
+dest_files=["res://.godot/imported/rescue_minus_2.png-80948d65e26602e707ca2f48bebe5fa0.bptc.ctex", "res://.godot/imported/rescue_minus_2.png-80948d65e26602e707ca2f48bebe5fa0.astc.ctex"]
 
 [params]
 

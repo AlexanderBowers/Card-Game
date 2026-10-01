@@ -49,13 +49,6 @@ enabled=PackedStringArray("res://addons/admob/plugin.cfg")
 
 theme/custom="res://ui_theme.tres"
 
-[rendering]
-
-renderer/rendering_method="mobile"
-textures/canvas_textures/default_texture_filter=3
-textures/vram_compression/import_etc2_astc=true
-environment/defaults/default_clear_color=Color(0.1, 0.14, 0.16, 1)
-
 [importer_defaults]
 
 texture={
@@ -67,6 +60,13 @@ texture={
 [input_devices]
 
 sensors/enable_gravity=true
+
+[rendering]
+
+textures/canvas_textures/default_texture_filter=3
+renderer/rendering_method="mobile"
+textures/vram_compression/import_etc2_astc=true
+environment/defaults/default_clear_color=Color(0.1, 0.14, 0.16, 1)
 
 [shader_globals]
 

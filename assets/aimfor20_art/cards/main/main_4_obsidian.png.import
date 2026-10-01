@@ -2,9 +2,9 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://x0eakqwpnlqk"
-path.bptc="res://.godot/imported/card_back.png-f1dc7d305e41223b9122d525c6cdf212.bptc.ctex"
-path.astc="res://.godot/imported/card_back.png-f1dc7d305e41223b9122d525c6cdf212.astc.ctex"
+uid="uid://m8yt64f8sxct"
+path.bptc="res://.godot/imported/main_4_obsidian.png-5cfe09ac671e9935be90a8694f69ed92.bptc.ctex"
+path.astc="res://.godot/imported/main_4_obsidian.png-5cfe09ac671e9935be90a8694f69ed92.astc.ctex"
 metadata={
 "imported_formats": ["s3tc_bptc", "etc2_astc"],
 "vram_texture": true
@@ -12,8 +12,8 @@ metadata={
 
 [deps]
 
-source_file="res://assets/aimfor20_art/card_back.png"
-dest_files=["res://.godot/imported/card_back.png-f1dc7d305e41223b9122d525c6cdf212.bptc.ctex", "res://.godot/imported/card_back.png-f1dc7d305e41223b9122d525c6cdf212.astc.ctex"]
+source_file="res://assets/aimfor20_art/cards/main/main_4_obsidian.png"
+dest_files=["res://.godot/imported/main_4_obsidian.png-5cfe09ac671e9935be90a8694f69ed92.bptc.ctex", "res://.godot/imported/main_4_obsidian.png-5cfe09ac671e9935be90a8694f69ed92.astc.ctex"]
 
 [params]
 
