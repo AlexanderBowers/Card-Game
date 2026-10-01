@@ -279,7 +279,7 @@ public sealed class Menus
 
         _collectionOverlay = new CollectionOverlay();
         _root.AddChild(_collectionOverlay);
-        _collectionOverlay.Setup(_ui.CreateCardView);
+        _collectionOverlay.Setup(_ui.Cards.CreateCardView);
     }
 
     private static void PlaceBand(ColorRect band, float length, float thickness, float cx, float cy)

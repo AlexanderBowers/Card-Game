@@ -1,11 +1,26 @@
 name: Android APK
 
-# Builds a debug APK on every push to main (and on demand), then publishes it as a
-# GitHub Release so the phone can auto-update from it (see ANDROID.md).
+# Builds a debug APK on every push to ANY branch (and on demand).
+#  - master/main: published as a normal GitHub Release, so the phone auto-updates from it
+#    (Obtainium, see ANDROID.md).
+#  - any other branch: published as a PRE-release named after the branch. Obtainium skips
+#    pre-releases by default, so a test branch never lands on the phone by itself - open the
+#    release page on the phone and install that APK by hand when you want to try it.
+# One workflow for every branch on purpose: the version code is this workflow's run number, so
+# it only ever goes up, and any build installs over whatever is on the phone.
 on:
   push:
-    branches: [main, master]
+    branches:
+      - "**"
+      - "!release"   # release has its own signed AAB workflow (android-release.yml)
+    paths-ignore:
+      - "**.md"
   workflow_dispatch:
+
+# A newer push to the same branch cancels the build still running for it.
+concurrency:
+  group: android-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: write
@@ -199,12 +214,29 @@ jobs:
           name: AimFor20-android-${{ github.run_number }}
           path: build/AimFor20.apk
 
-      - name: Publish GitHub Release (phone auto-updates from here)
+      - name: Name the release after the branch
+        id: rel
+        run: |
+          BRANCH="${GITHUB_REF_NAME}"
+          if [ "${BRANCH}" = "master" ] || [ "${BRANCH}" = "main" ]; then
+            echo "tag=android-v${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
+            echo "name=Android build ${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+          else
+            SAFE=$(echo "${BRANCH}" | tr -c 'A-Za-z0-9._-' '-' | sed 's/-*$//')
+            echo "tag=android-v${GITHUB_RUN_NUMBER}-${SAFE}" >> "$GITHUB_OUTPUT"
+            echo "name=Android build ${GITHUB_RUN_NUMBER} (${BRANCH})" >> "$GITHUB_OUTPUT"
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Publish GitHub Release (master auto-updates the phone; branches are pre-releases)
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: android-v${{ github.run_number }}
-          name: Android build ${{ github.run_number }}
+          tag_name: ${{ steps.rel.outputs.tag }}
+          name: ${{ steps.rel.outputs.name }}
+          prerelease: ${{ steps.rel.outputs.prerelease }}
+          target_commitish: ${{ github.sha }}
           body: |
-            Debug APK built from ${{ github.sha }}
+            Debug APK built from ${{ github.ref_name }} at ${{ github.sha }}
             ${{ github.event.head_commit.message }}
           files: build/AimFor20.apk

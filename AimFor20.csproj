@@ -4,6 +4,10 @@
     <TargetFramework Condition=" '$(GodotTargetPlatform)' == 'android' ">net9.0</TargetFramework>
     <EnableDynamicLoading>true</EnableDynamicLoading>
   </PropertyGroup>
+  <!-- tests/ is its own project (dotnet test tests/AimFor20.Tests); keep it out of the game. -->
+  <ItemGroup>
+    <Compile Remove="tests/**" />
+  </ItemGroup>
   <!--
     AdMobBackend.cs is written against the poingstudios AdMob plugin, whose C# types only exist
     once the plugin has been installed into addons/admob. Rather than break a fresh checkout, the
