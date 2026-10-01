@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    Unit tests for the game's rules, with no Godot in the loop: Card, Player, GameState and
+    CardEffects are plain C#, so they are compiled straight in from the project root.
+
+    Run from the repo root:   dotnet test tests/AimFor20.Tests
+
+    The game's own AimFor20.csproj leaves tests/ out of its build (Compile Remove), and
+    tests/.gdignore keeps the Godot editor from importing anything in here.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="../../Card.cs" Link="Game/Card.cs" />
+    <Compile Include="../../Player.cs" Link="Game/Player.cs" />
+    <Compile Include="../../GameState.cs" Link="Game/GameState.cs" />
+    <Compile Include="../../CardEffects.cs" Link="Game/CardEffects.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
+    <PackageReference Include="xunit" Version="2.9.2" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
+  </ItemGroup>
+</Project>

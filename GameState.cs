@@ -1,7 +1,6 @@
-using Godot;
 using System;
 
-public partial class GameState : Node
+public class GameState
 {
 	/// How many sets a player must win to take the match. Best of five (Alexander, 2026-09-12 -
 	/// raised from two, for every mode: ladder, vs-bot and local 2-player alike).

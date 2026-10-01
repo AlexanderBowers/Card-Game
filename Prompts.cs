@@ -208,7 +208,7 @@ public sealed class Prompts
         // Re-open the turn exactly as an effect card does: no new draw, just a chance to play.
         P1.IsHolding = false;
         P1.HasEndedTurn = false;
-        _ui.ShowEffectBanner(banner);
+        _ui.Toasts.ShowEffectBanner(banner);
         _ui.Refresh();
     }
 
@@ -258,7 +258,7 @@ public sealed class Prompts
         {
             if (!CardEffects.IsPlainModifier(spent)) continue;
             Card choice = spent; // capture per iteration, not the loop variable
-            row.AddChild(OverlayUi.CardButton(_ui.CreateCardView(choice, _ui.ModifierCardSize), _ui.ModifierCardSize,
+            row.AddChild(OverlayUi.CardButton(_ui.Cards.CreateCardView(choice, _ui.ModifierCardSize), _ui.ModifierCardSize,
                 () => OnRecallChosen(choice)));
         }
 

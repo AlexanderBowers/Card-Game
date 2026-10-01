@@ -1,8 +1,7 @@
-using Godot;
 using System;
 using System.Collections.Generic;
 
-public partial class Player : RefCounted
+public class Player
 {
     public string PlayerName { get; set; }
     public int CurrentScore { get; set; } = 0;
