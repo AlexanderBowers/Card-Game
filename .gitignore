@@ -11,3 +11,7 @@
 /android/build/libs/debug/*.aar
 /android/build/libs/release/*.aar
 /android/build/libs/dev/*.aar
+
+# Test project build output
+tests/**/bin/
+tests/**/obj/

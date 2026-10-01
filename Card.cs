@@ -1,12 +1,10 @@
-using Godot;
-
 public enum CardType
 {
 	Main,
 	Modifier
 }
 
-public partial class Card : RefCounted
+public class Card
 {
 	private static int _nextId;
 
