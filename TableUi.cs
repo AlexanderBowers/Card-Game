@@ -120,6 +120,7 @@ public sealed class TableUi
         _sfxLock = CreateSfx("res://assets/sfx/hold_lock.wav");
         _sfxOnTarget = CreateSfx("res://assets/sfx/on_target.wav");
         _sfxImpact = CreateSfx("res://assets/sfx/modifier_impact.wav");
+        Scores = new ScoreDisplay(_host, this, _sfxLock, _sfxOnTarget);
         _motion = new CardMotion(this, _root, _sfxSlide, _sfxPlace, _sfxImpact);
         _root.AddChild(new ShineDriver { Name = "ShineDriver" });
         World3D = new TableWorld3D { Name = "TableWorld3D", Ui = this };
@@ -129,6 +130,9 @@ public sealed class TableUi
 
     /// What every card looks like, wherever it is drawn (the table, the shop, the prompts).
     public CardViews Cards { get; }
+
+    /// The scores, the red/green boxes and the padlocks.
+    public ScoreDisplay Scores { get; }
 
     /// Cards flying onto the boards.
     private readonly CardMotion _motion;
@@ -381,11 +385,7 @@ public sealed class TableUi
 
         // Whatever is already on the table - a rotation mid-set - drawn straight in, no flight.
         BuildStatusToasts();
-        ResetScoreFeedback();
-        TurnRound(L.P1ScoreFarEnd);
-        TurnRound(L.P2ScoreFarEnd);
-        if (L.P1ScoreThem != null) L.P1ScoreThem.Visible = false; // the box is one line now
-        if (L.P2ScoreThem != null) L.P2ScoreThem.Visible = false;
+        Scores.Bind();
         RestoreBoard(L.P1Board, P1);
         RestoreBoard(L.P2Board, P2);
         ApplyRankTheme();
@@ -406,7 +406,7 @@ public sealed class TableUi
             if (c != null && !c.Visible) _authoredHidden.Add(c);
     }
 
-    private void Show(Control c, bool show)
+    internal void Show(Control c, bool show)
     {
         if (c != null) c.Visible = show && !_authoredHidden.Contains(c);
     }
@@ -542,7 +542,7 @@ public sealed class TableUi
         // middle of the table rather than toward the top edge (pass 39).
         if (L.P2Board is PerspectiveBoard p2Board) p2Board.FarAtTop = !mirrored;
 
-        ApplyScoreBadgeEnds(mirrored);
+        Scores.ApplyScoreBadgeEnds(mirrored);
     }
 
     private static Control.GrowDirection Opposite(Control.GrowDirection grow) => grow switch
@@ -754,17 +754,10 @@ public sealed class TableUi
         // dropped before anything is drawn, so the status line and the buttons agree.
         _host.ValidateSelections();
 
-        RefreshScoreLines();
+        Scores.RefreshScoreLines();
         UpdateTargetLabel();
 
-        RefreshOpponentLines();
-        ApplyScoreDanger(L.P1ScoreBox, P1, preview: true);
-        ApplyScoreDanger(L.P2ScoreBox, P2, preview: true);
-        ApplyScoreDanger(L.P1OpponentBox, P2); // the opponent's score, boxed and red the same way
-        ApplyScoreDanger(L.P2OpponentBox, P1);
-        UpdateHoldLock(L.P1ScoreBox, P1);
-        UpdateHoldLock(L.P2ScoreBox, P2);
-        _scoreFeedbackPrimed = true; // from here on, changes animate and make their sound
+        Scores.RefreshBoxes();
         UpdateStatusToast(0, P1, _p1StatusToast);
         UpdateStatusToast(1, P2, _p2StatusToast);
 
@@ -810,289 +803,6 @@ public sealed class TableUi
         _host.AfterRefresh();
 
         ApplyMirror(); // only does anything when the mirror has just changed
-    }
-
-    /// The score lines, in whichever form the mirror calls for.
-    ///
-    /// The score says whose it is and what it is chasing - "You  17/20" (playtest, 2026-09-14).
-    /// The target appears once per READER: against the bot only your row carries it; in local
-    /// 2-player each player reads their own row, so both do. Mirrored, each side reads from its
-    /// own player's point of view ("You: 13/20").
-    private void RefreshScoreLines()
-    {
-        if (L.ScoreBadges)
-        {
-            RefreshScoreBadges();
-            return;
-        }
-
-        ScoreLines p1 = new ScoreLines { YouPrefix = L.P1ScorePrefix, YouValue = L.P1ScoreValue, Them = L.P1ScoreThem };
-        ScoreLines p2 = new ScoreLines { YouPrefix = L.P2ScorePrefix, YouValue = L.P2ScoreValue, Them = L.P2ScoreThem };
-
-        if (IsMirrored)
-        {
-            // Pass 36: the "Them" line left the box for the spot beside it (RefreshOpponentLines).
-            SetScoreLines(p1, "You: ", P1, null);
-            SetScoreLines(p2, "You: ", P2, null);
-        }
-        else if (_host.VsBot)
-        {
-            SetScoreLines(p1, "You  ", P1, null);
-            SetScoreLines(p2, "Them  ", P2, null, preview: false, withTarget: false);
-        }
-        else
-        {
-            // Local 2-player, not mirrored: each side is still read by its own player, so it
-            // speaks to them - "You" / "Them", never "P1" / "P2" (playtest, pass 42).
-            SetScoreLines(p1, "You  ", P1, null);
-            SetScoreLines(p2, "You  ", P2, null);
-        }
-    }
-
-    /// The other player's score, in the spot beside each player's own (pass 36). Always shown to
-    /// the person reading that side; against the bot the bot's side has no reader, so it is
-    /// left empty there rather than repeating your score across the table.
-    private void RefreshOpponentLines()
-    {
-        string p1 = _host.GameStarted ? P1.CurrentScore.ToString() : "-";
-        string p2 = _host.GameStarted ? P2.CurrentScore.ToString() : "-";
-
-        if (L.ScoreBadges)
-        {
-            // Pass 43: face to face, each player reads BOTH scores on their own half - their badge
-            // and a "THEM" badge beside it - instead of reading the opponent's badge upside down
-            // across the table. Otherwise the opponent's own badge is already the right way up.
-            bool faceToFace = IsMirrored;
-            string target = _host.GameStarted ? $"/{State.TargetScore}" : string.Empty;
-            SetOpponentBadge(L.P1OpponentBox, L.P1OpponentScore, L.P1OpponentCaption, L.P1OpponentTarget, p2, target, faceToFace);
-            SetOpponentBadge(L.P2OpponentBox, L.P2OpponentScore, L.P2OpponentCaption, L.P2OpponentTarget, p1, target, faceToFace);
-            return;
-        }
-
-        if (IsMirrored)
-        {
-            SetText(L.P1OpponentScore, $"Them: {p2}");
-            SetText(L.P2OpponentScore, $"Them: {p1}");
-        }
-        else if (_host.VsBot)
-        {
-            SetText(L.P1OpponentScore, $"Them  {p2}");
-            SetText(L.P2OpponentScore, string.Empty);
-        }
-        else
-        {
-            SetText(L.P1OpponentScore, $"Them  {p2}");
-            SetText(L.P2OpponentScore, $"Them  {p1}");
-        }
-    }
-
-    private void SetOpponentBadge(Control box, Label value, Label caption, Label target,
-                                  string score, string targetText, bool show)
-    {
-        Show(box, show);
-        if (value != null) value.Text = score;
-        if (caption != null) caption.Text = "THEM";
-        if (target != null)
-        {
-            target.Text = targetText;
-            target.Visible = targetText.Length > 0;
-        }
-    }
-
-    private void SetText(Label label, string text)
-    {
-        if (label == null) return;
-        label.Text = text;
-        // An empty line hides its box too (the bot's side, against the bot).
-        Control box = label == L.P1OpponentScore ? L.P1OpponentBox : label == L.P2OpponentScore ? L.P2OpponentBox : null;
-        Show(box, !string.IsNullOrEmpty(text));
-    }
-
-    // ------------------------------------------------------------------
-    // Over the target: the score box turns red (pass 36), in place of the "Over target!" and
-    // "Bust!" words. Red while the score is over - a warning mid-turn (play a minus Modifier
-    // before ending it), a bust once the turn is over.
-    // ------------------------------------------------------------------
-    private readonly Dictionary<Control, StyleBox> _authoredBoxStyle = new Dictionary<Control, StyleBox>();
-    private readonly Dictionary<Control, StyleBox> _dangerBoxStyle = new Dictionary<Control, StyleBox>();
-
-    private static readonly Color DangerFill = new Color(0.5f, 0.06f, 0.08f, 0.88f);
-    private static readonly Color DangerEdge = new Color(1f, 0.45f, 0.42f, 0.95f);
-
-    private void ApplyScoreDanger(Control box, Player player, bool preview = false)
-    {
-        if (box is not PanelContainer panel || player == null) return;
-
-        if (!_authoredBoxStyle.TryGetValue(box, out StyleBox authored))
-        {
-            // Whatever the scene gave the box is its normal look; red is made from a copy of it,
-            // so a restyle in the editor carries over to the red version too.
-            authored = panel.GetThemeStylebox("panel");
-            _authoredBoxStyle[box] = authored;
-            StyleBox danger = (StyleBox)authored?.Duplicate();
-            if (danger is StyleBoxFlat flat)
-            {
-                flat.BgColor = DangerFill;
-                flat.BorderColor = DangerEdge;
-            }
-            _dangerBoxStyle[box] = danger;
-
-            // On target (release playtest, 2026-09-29): green, with a soft glow round it.
-            StyleBox onTargetStyle = (StyleBox)authored?.Duplicate();
-            if (onTargetStyle is StyleBoxFlat green)
-            {
-                green.BgColor = OnTargetFill;
-                green.BorderColor = OnTargetEdge;
-                green.ShadowColor = OnTargetGlow;
-                green.ShadowSize = 14;
-            }
-            _onTargetBoxStyle[box] = onTargetStyle;
-        }
-
-        // Follows the number the box is SHOWING: with a Modifier picked up that is the preview, so
-        // a minus card that brings you back under the target clears the red along with the digits.
-        // The opponent boxes show the real score, so they never use the preview.
-        int? previewed = preview ? PreviewedScore(player) : null;
-        int shown = previewed ?? player.CurrentScore;
-        bool started = _host.GameStarted;
-        bool over = started && shown > State.TargetScore;
-        bool onTarget = started && previewed.HasValue && previewed.Value == State.TargetScore;
-
-        StyleBox want = over ? _dangerBoxStyle[box] : onTarget ? _onTargetBoxStyle[box] : authored;
-        if (want != null) panel.AddThemeStyleboxOverride("panel", want);
-
-        bool was = _onTargetShown.TryGetValue(box, out bool w) && w;
-        _onTargetShown[box] = onTarget;
-        if (onTarget && !was && _scoreFeedbackPrimed) CelebrateOnTarget(box);
-    }
-
-    // ------------------------------------------------------------------
-    // Feedback on the score box (release playtest, 2026-09-29)
-    //
-    // On target: a picked-up Modifier that would land you EXACTLY on the target turns the box
-    // green with a glow, pulses it once and plays a light chime - the "yes, that one" moment.
-    //
-    // Hold: a padlock snaps onto the box's corner with a click and the box dims a little. It stays
-    // until the set ends. It replaces the "Holding" toast, which read as an afterthought.
-    // ------------------------------------------------------------------
-    private readonly Dictionary<Control, StyleBox> _onTargetBoxStyle = new Dictionary<Control, StyleBox>();
-    private readonly Dictionary<Control, bool> _onTargetShown = new Dictionary<Control, bool>();
-    private readonly Dictionary<Control, Control> _holdLocks = new Dictionary<Control, Control>();
-
-    /// False straight after a layout is bound (first launch, or a rotation mid-set): whatever is
-    /// already true is drawn as it is, without replaying the click or the chime.
-    private bool _scoreFeedbackPrimed;
-
-    private static readonly Color OnTargetFill = new Color(0.07f, 0.36f, 0.20f, 0.92f);
-    private static readonly Color OnTargetEdge = new Color(0.55f, 1.00f, 0.68f, 1.00f);
-    private static readonly Color OnTargetGlow = new Color(0.40f, 1.00f, 0.55f, 0.55f);
-    private static readonly Color PreviewOnTargetColor = new Color(0.72f, 1.00f, 0.78f);
-
-    private static readonly Color LockGold = new Color(0.96f, 0.78f, 0.30f);
-    private static readonly Color LockShade = new Color(0.55f, 0.40f, 0.10f);
-    private static readonly Color HeldDim = new Color(0.78f, 0.78f, 0.82f);
-    private static readonly Vector2 LockSize = new Vector2(40f, 50f);
-
-    private void ResetScoreFeedback()
-    {
-        _scoreFeedbackPrimed = false;
-        _onTargetShown.Clear();
-        _onTargetBoxStyle.Clear();
-        _authoredBoxStyle.Clear();
-        _dangerBoxStyle.Clear();
-        _holdLocks.Clear(); // the old layout's locks went with its nodes
-    }
-
-    private void CelebrateOnTarget(Control box)
-    {
-        _sfxOnTarget?.Play();
-        box.PivotOffset = box.Size / 2f;
-        Tween pulse = box.CreateTween();
-        pulse.TweenProperty(box, "scale", new Vector2(1.12f, 1.12f), 0.10f)
-             .SetTrans(Tween.TransitionType.Sine).SetEase(Tween.EaseType.Out);
-        pulse.TweenProperty(box, "scale", Vector2.One, 0.20f)
-             .SetTrans(Tween.TransitionType.Sine).SetEase(Tween.EaseType.In);
-    }
-
-    private void UpdateHoldLock(Control box, Player player)
-    {
-        if (box == null || player == null || box.GetParent() is not Control parent) return;
-        bool holding = _host.GameStarted && player.IsHolding && !State.IsGameOver;
-
-        if (!_holdLocks.TryGetValue(box, out Control padlock) || !GodotObject.IsInstanceValid(padlock))
-        {
-            padlock = BuildPadlock();
-            parent.AddChild(padlock);
-            parent.MoveChild(padlock, box.GetIndex() + 1); // drawn over the box, under the rest
-            _holdLocks[box] = padlock;
-        }
-
-        // The box's top-right corner, overlapping it: the lock is ON the score, not beside it.
-        padlock.Position = box.Position + new Vector2(box.Size.X - LockSize.X * 0.6f, -LockSize.Y * 0.4f);
-        box.Modulate = holding ? HeldDim : Colors.White;
-
-        if (holding == padlock.Visible) return;
-        padlock.Visible = holding;
-        if (!holding || !_scoreFeedbackPrimed) return;
-
-        _sfxLock?.Play();
-        padlock.PivotOffset = LockSize / 2f;
-        padlock.Scale = new Vector2(1.8f, 1.8f);
-        padlock.Modulate = new Color(1, 1, 1, 0);
-        Tween snap = padlock.CreateTween().SetParallel();
-        snap.TweenProperty(padlock, "scale", Vector2.One, 0.22f)
-            .SetTrans(Tween.TransitionType.Back).SetEase(Tween.EaseType.Out);
-        snap.TweenProperty(padlock, "modulate:a", 1f, 0.10f);
-    }
-
-    /// A padlock from three flat shapes - a shackle (an arch of border only), a body and a
-    /// keyhole - so it needs no art and stays crisp at any scale. Swap for a texture later if
-    /// the art pass wants one.
-    private static Control BuildPadlock()
-    {
-        Control root = new Control
-        {
-            Name = "HoldLock",
-            Size = LockSize,
-            CustomMinimumSize = LockSize,
-            MouseFilter = Control.MouseFilterEnum.Ignore,
-            Visible = false,
-        };
-
-        StyleBoxFlat shackleStyle = new StyleBoxFlat { DrawCenter = false, BorderColor = LockShade };
-        shackleStyle.BorderWidthLeft = shackleStyle.BorderWidthRight = shackleStyle.BorderWidthTop = 6;
-        shackleStyle.BorderWidthBottom = 0;
-        shackleStyle.CornerRadiusTopLeft = shackleStyle.CornerRadiusTopRight = 13;
-        Panel shackle = new Panel { MouseFilter = Control.MouseFilterEnum.Ignore };
-        shackle.AddThemeStyleboxOverride("panel", shackleStyle);
-        shackle.Position = new Vector2(8f, 0f);
-        shackle.Size = new Vector2(24f, 26f);
-        root.AddChild(shackle);
-
-        StyleBoxFlat bodyStyle = new StyleBoxFlat
-        {
-            BgColor = LockGold,
-            BorderColor = LockShade,
-            ShadowColor = new Color(0, 0, 0, 0.45f),
-            ShadowSize = 4,
-        };
-        bodyStyle.SetBorderWidthAll(2);
-        bodyStyle.SetCornerRadiusAll(7);
-        Panel body = new Panel { MouseFilter = Control.MouseFilterEnum.Ignore };
-        body.AddThemeStyleboxOverride("panel", bodyStyle);
-        body.Position = new Vector2(0f, 20f);
-        body.Size = new Vector2(40f, 30f);
-        root.AddChild(body);
-
-        StyleBoxFlat holeStyle = new StyleBoxFlat { BgColor = LockShade };
-        holeStyle.SetCornerRadiusAll(4);
-        Panel keyhole = new Panel { MouseFilter = Control.MouseFilterEnum.Ignore };
-        keyhole.AddThemeStyleboxOverride("panel", holeStyle);
-        keyhole.Position = new Vector2(16f, 28f);
-        keyhole.Size = new Vector2(8f, 14f);
-        root.AddChild(keyhole);
-
-        return root;
     }
 
     // ------------------------------------------------------------------
@@ -1210,14 +920,6 @@ public sealed class TableUi
         // Player 2's reads from the other side of the table when the side is turned round.
         toast.PivotOffset = size / 2f;
         toast.RotationDegrees = (playerTwo && IsMirrored) ? 180f : 0f;
-    }
-
-    /// The three labels of one side's score, as the layout scene has them.
-    private sealed class ScoreLines
-    {
-        public Label YouPrefix;
-        public Label YouValue;
-        public Label Them;
     }
 
     private void UpdateConfirmRow(Player player, Control row, Button playButton,
@@ -1365,204 +1067,6 @@ public sealed class TableUi
         else if (Cards.CardBack != null) deck.Texture = Cards.CardBack;
         deck.SelfModulate = back != null ? Colors.White : DeckBackTint;
     }
-
-    /// Blue: the picked-up Modifier keeps you at or under the target. Orange: it would take you over.
-    private static readonly Color PreviewUnderColor = new Color(0.45f, 0.72f, 1.00f);
-
-    private static readonly Color PreviewOverColor = new Color(1.00f, 0.55f, 0.30f);
-
-    /// Exactly on the target is its own colour, matching the green box around it.
-    private Color PreviewColorFor(int value) =>
-        value > State.TargetScore ? PreviewOverColor
-        : value == State.TargetScore ? PreviewOnTargetColor
-        : PreviewUnderColor;
-
-    // ------------------------------------------------------------------
-    // Score badges (pass 40, portrait)
-    //
-    // Each side's score sits in a badge beside its own board, Pokemon TCG Pocket-style, rather
-    // than in a "You  11/20" box in a row of its own. The badge sits on the board it counts,
-    // so it needs no "You" or "Them".
-    //
-    // Face to face, both players read both badges from opposite ends of the phone, so each badge
-    // grows a second end turned round (a playing card's two corner indices): its owner reads the
-    // near end, the player across the table reads the far end. The badge is then the same both
-    // ways up, so it looks like one object rather than a label with an upside-down copy. The far
-    // end shows the real score, never the preview of a card the owner has only picked up.
-    // ------------------------------------------------------------------
-    private void RefreshScoreBadges()
-    {
-        bool bothRead = !_host.VsBot; // the bot's badge has no reader of its own: no target on it
-        SetScoreBadge(P1, L.P1ScoreValue, L.P1ScoreTarget, L.P1ScoreFarValue, L.P1ScoreFarTarget, true, true);
-        SetScoreBadge(P2, L.P2ScoreValue, L.P2ScoreTarget, L.P2ScoreFarValue, L.P2ScoreFarTarget, bothRead, bothRead);
-
-        // Pass 42: a bare number beside a board still read as ambiguous in playtest, so each end
-        // says whose score it is to the person reading that end. The owner reads the near end;
-        // the far end (face to face only) is read from across the table. Against the bot, the
-        // bot's near end is read by Player 1.
-        // Pass 43: Player 2's badge only says YOU face to face, when Player 2 reads it. Without the
-        // mirror the whole table is read from Player 1's end, so it is THEM - "YOU" on both
-        // badges was the confusing case in playtest.
-        SetCaption(L.P1ScoreCaption, "YOU");
-        SetCaption(L.P1ScoreFarCaption, "THEM");
-        SetCaption(L.P2ScoreCaption, IsMirrored ? "YOU" : "THEM");
-        SetCaption(L.P2ScoreFarCaption, "THEM");
-    }
-
-    private static void SetCaption(Label caption, string text)
-    {
-        if (caption != null) caption.Text = text;
-    }
-
-    private void SetScoreBadge(Player player, Label value, Label target, Label farValue, Label farTarget,
-                               bool preview, bool withTarget)
-    {
-        if (player == null) return;
-        bool started = _host.GameStarted;
-        string targetText = started && withTarget ? $"/{State.TargetScore}" : string.Empty;
-        string scoreText = started ? player.CurrentScore.ToString() : "-";
-
-        if (value != null)
-        {
-            int? previewed = preview ? PreviewedScore(player) : null;
-            if (previewed.HasValue && started)
-            {
-                value.Text = previewed.Value.ToString();
-                value.AddThemeColorOverride("font_color", PreviewColorFor(previewed.Value));
-            }
-            else
-            {
-                value.Text = scoreText;
-                value.RemoveThemeColorOverride("font_color");
-            }
-        }
-        if (target != null)
-        {
-            target.Text = targetText;
-            target.Visible = targetText.Length > 0;
-        }
-        if (farValue != null) farValue.Text = scoreText;
-        if (farTarget != null)
-        {
-            farTarget.Text = targetText;
-            farTarget.Visible = targetText.Length > 0;
-        }
-    }
-
-    /// Pass 43: the turned-round far end is retired - face to face, each player now gets a
-    /// "THEM" badge on their own half instead (RefreshOpponentLines), so the far end and its
-    /// divider stay hidden in every mode. The nodes are left in the scene in case the idea
-    /// comes back. Each badge hugs its content from its anchored edge.
-    private void ApplyScoreBadgeEnds(bool faceToFace)
-    {
-        if (!L.ScoreBadges) return;
-        foreach ((Control far, Control divider, Control box) in new[]
-                 { (L.P1ScoreFarEnd, L.P1ScoreDivider, L.P1ScoreBox), (L.P2ScoreFarEnd, L.P2ScoreDivider, L.P2ScoreBox) })
-        {
-            if (far != null) far.Visible = false;
-            if (divider != null) divider.Visible = false;
-            HugContent(box);
-        }
-        HugContent(L.P1ScoreBox);
-        HugContent(L.P2ScoreBox);
-        StackBadgePair(L.P1ScoreBox, L.P1OpponentBox, faceToFace);
-        StackBadgePair(L.P2ScoreBox, L.P2OpponentBox, faceToFace);
-        HugContent(L.P1OpponentBox);
-        HugContent(L.P2OpponentBox);
-        Show(L.P1OpponentBox, faceToFace);
-        Show(L.P2OpponentBox, faceToFace);
-    }
-
-    // ------------------------------------------------------------------
-    // YOU / THEM, stacked (pass 45)
-    //
-    // Face to face, each half shows its player's YOU badge with a THEM badge directly above it,
-    // in the column left of the board. Pass 44 tried going side by side on wide screens; in
-    // playtest stacked read better everywhere, so it is stacked always.
-    //
-    // THEM is placed from YOU's size rather than a fixed spot in the scene, so the pair stays
-    // snug whatever the badge fonts are - move or resize the YOU badge in the editor and THEM
-    // follows it. THEM keeps its own authored rect when it is hidden.
-    // ------------------------------------------------------------------
-    private const float BadgeGap = 10f;
-
-    private static void StackBadgePair(Control you, Control them, bool faceToFace)
-    {
-        if (you == null || them == null || !faceToFace) return;
-        float youHeight = you.GetCombinedMinimumSize().Y;
-        float bottom = you.OffsetBottom - youHeight - BadgeGap;
-        them.OffsetLeft = you.OffsetLeft;
-        them.OffsetRight = you.OffsetRight;
-        them.OffsetBottom = bottom;
-        them.OffsetTop = bottom - 1f;
-    }
-
-    /// Shrinks a free-standing box to its content, keeping the edge it grows away from.
-    private static void HugContent(Control box)
-    {
-        if (box == null) return;
-        if (box.GrowVertical == Control.GrowDirection.Begin) box.OffsetTop = box.OffsetBottom - 1f;
-        else if (box.GrowVertical == Control.GrowDirection.End) box.OffsetBottom = box.OffsetTop + 1f;
-    }
-
-    /// The far end is turned round about its own centre. A container resets the rotation of its
-    /// own children, so the far end is a plain Control holding the turned content, and takes that
-    /// content's size as its minimum so the badge's column still makes room for it.
-    private static void TurnRound(Control end)
-    {
-        if (end == null || end.GetChildCount() == 0 || end.GetChild(0) is not Control turned) return;
-        void Fit()
-        {
-            end.CustomMinimumSize = turned.GetCombinedMinimumSize();
-            turned.PivotOffset = turned.Size / 2f;
-            turned.RotationDegrees = 180f;
-        }
-        turned.MinimumSizeChanged += Fit;
-        turned.Resized += Fit;
-        Fit();
-    }
-
-    private void SetScoreLines(ScoreLines lines, string prefix, Player player,
-                               string themLine, bool preview = true, bool withTarget = true)
-    {
-        if (lines?.YouPrefix == null || lines.YouValue == null) return;
-
-        lines.YouPrefix.Text = prefix;
-
-        int? previewed = preview ? PreviewedScore(player) : null;
-        if (previewed.HasValue)
-        {
-            int value = previewed.Value;
-            lines.YouValue.Text = _host.GameStarted ? $"{value}/{State.TargetScore}" : "-";
-            lines.YouValue.AddThemeColorOverride("font_color", PreviewColorFor(value));
-        }
-        else
-        {
-            lines.YouValue.Text = withTarget ? ScoreOf(player)
-                                             : (_host.GameStarted ? player.CurrentScore.ToString() : "-");
-            lines.YouValue.RemoveThemeColorOverride("font_color");
-        }
-
-        if (lines.Them != null)
-        {
-            lines.Them.Visible = themLine != null;
-            lines.Them.Text = themLine ?? string.Empty;
-        }
-    }
-
-    /// The score a picked-up plain Modifier would give, or null when nothing like that is picked
-    /// up. Effect cards and a just-recalled card explain themselves on the status line instead.
-    private int? PreviewedScore(Player player)
-    {
-        Card picked = _host.SelectedFor(player);
-        if (picked == null || picked.Effect != CardEffect.None || _host.Table.IsRecallLocked(player, picked)) return null;
-        return player.CurrentScore + picked.Value;
-    }
-
-    /// A player's score with the target behind it - "17/20" - so "how close am I" is one glance
-    /// rather than arithmetic against a number somewhere else on the screen.
-    private string ScoreOf(Player player) =>
-        _host.GameStarted ? $"{player.CurrentScore}/{State.TargetScore}" : "-";
 
     private static void SetEnabled(Button button, bool enabled)
     {

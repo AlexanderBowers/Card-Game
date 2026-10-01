@@ -1100,7 +1100,7 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
     {
         if (_setOverPending) return string.Empty;
 
-        // Holding is shown by the padlock on the score box (TableUi.UpdateHoldLock), not in words.
+        // Holding is shown by the padlock on the score box (ScoreDisplay.UpdateHoldLock), not in words.
         if (player.IsHolding) return string.Empty;
         if (player.HasEndedTurn) return string.Empty;
 
