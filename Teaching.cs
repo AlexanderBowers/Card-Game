@@ -202,6 +202,10 @@ void fragment() {
     /// of the table may be rotated 180 degrees, and a rotated control's position is not its corner.
     private static Rect2 ScreenRectOf(Control target)
     {
+        // On the 3D table a board card or deck is drawn somewhere else than its flat 2D rect:
+        // ring the one the player can see (pass 65).
+        if (TableWorld3D.Instance != null && TableWorld3D.Instance.TryScreenRect(target, out Rect2 seen)) return seen;
+
         Transform2D t = target.GetGlobalTransform();
         Vector2 size = target.Size;
         Vector2 a = t * Vector2.Zero;

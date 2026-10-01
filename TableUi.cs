@@ -131,6 +131,7 @@ public sealed class TableUi
         _root.AddChild(new ShineDriver { Name = "ShineDriver" });
         World3D = new TableWorld3D { Name = "TableWorld3D", Ui = this };
         _root.AddChild(World3D);
+        _root.AddChild(new FpsCounter { Name = "FpsCounter" });
     }
 
     /// The 3D table (prototype): draws the playmat, boards and cards in perspective under the 2D
@@ -2802,6 +2803,7 @@ public sealed class TableUi
     {
         if (board == null || !GodotObject.IsInstanceValid(board)) return;
         if (board.HasMeta("jolting")) return; // one at a time; a second would drift the rest spot
+        World3D?.Shake(strength * 0.006f);       // on the 3D table the camera takes the hit too
         board.SetMeta("jolting", true);
         Vector2 rest = board.Position;
         Tween t = board.CreateTween();

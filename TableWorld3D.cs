@@ -47,6 +47,18 @@ public partial class TableWorld3D : Node3D
     private float _swing = 1f;                  // 0 = start of the swing-in, 1 = at rest
     private Action _swingDone;
 
+    /// The table in the scene, for the tutorial's spotlight (TryScreenRect). Null when there is none.
+    public static TableWorld3D Instance { get; private set; }
+
+    private const string ShinePath = "res://card_shine_3d.gdshader";
+    private Shader _shineShader;
+
+    // Camera shake on a Modifier's impact (TableUi.JoltBoard): a short, decaying jitter.
+    private const float ShakeSeconds = 0.28f;
+    private float _shake;
+    private float _shakeStrength;
+    private readonly Random _rng = new Random();
+
     private readonly Dictionary<ulong, Piece> _pieces = new Dictionary<ulong, Piece>();
     private readonly HashSet<ulong> _seen = new HashSet<ulong>();
 
@@ -57,7 +69,8 @@ public partial class TableWorld3D : Node3D
     {
         public MeshInstance3D Mesh;
         public StandardMaterial3D Material;
-        public StandardMaterial3D StackMaterial; // decks only: the cards under the top one
+        public StandardMaterial3D StackMaterial; // decks: the cards under the top one; cards: the edge
+        public ShaderMaterial Shine;             // cards only: the additive gloss and foil overlay
     }
 
     private enum Kind { Card, Slot, Deck, Line, Ring }
@@ -68,6 +81,9 @@ public partial class TableWorld3D : Node3D
 
     public override void _Ready()
     {
+        Instance = this;
+        _shineShader = ResourceLoader.Exists(ShinePath) ? GD.Load<Shader>(ShinePath) : null;
+
         _camera = new Camera3D { Fov = FieldOfView, Near = 0.05f, Far = 200f };
         AddChild(_camera);
 
@@ -120,6 +136,7 @@ public partial class TableWorld3D : Node3D
 
     public override void _ExitTree()
     {
+        if (Instance == this) Instance = null;
         if (_active) SetActive(false);
     }
 
@@ -285,8 +302,47 @@ public partial class TableWorld3D : Node3D
         float distance = restDistance * Mathf.Lerp(SwingStartDistance, 1f, t);
 
         Vector3 offset = new Vector3(Mathf.Sin(pitch) * Mathf.Sin(yaw), Mathf.Cos(pitch), Mathf.Sin(pitch) * Mathf.Cos(yaw)) * distance;
-        Transform3D next = new Transform3D(Basis.Identity, offset).LookingAt(Vector3.Zero, Vector3.Up);
+        Vector3 jitter = Vector3.Zero;
+        if (_shake > 0f)
+        {
+            _shake = Mathf.Max(0f, _shake - (float)GetProcessDeltaTime());
+            float k = _shakeStrength * (_shake / ShakeSeconds);
+            jitter = new Vector3((float)_rng.NextDouble() - 0.5f, 0f, (float)_rng.NextDouble() - 0.5f) * 2f * k;
+        }
+        Transform3D next = new Transform3D(Basis.Identity, offset + jitter).LookingAt(jitter, Vector3.Up);
         if (!next.IsEqualApprox(_camera.Transform)) _camera.Transform = next;
+    }
+
+    /// A Modifier landing: the camera jolts with the board (TableUi.JoltBoard calls this).
+    public void Shake(float strength)
+    {
+        if (!_active || GameSettings.BatterySaver) return;
+        _shake = ShakeSeconds;
+        _shakeStrength = Mathf.Max(_shakeStrength * (_shake / ShakeSeconds), strength);
+    }
+
+    /// Where a 2D piece the table draws in 3D actually appears on screen - its 3D quad's corners
+    /// through the camera - so the tutorial's spotlight rings the card the player sees, not the
+    /// flat rect the layout keeps underneath. False when the piece is not drawn in 3D.
+    public bool TryScreenRect(Control control, out Rect2 rect)
+    {
+        rect = default;
+        if (!_active || !Visible || control == null || _camera == null) return false;
+        if (!_pieces.TryGetValue(control.GetInstanceId(), out Piece piece) || !piece.Mesh.Visible) return false;
+
+        Transform3D xf = piece.Mesh.GlobalTransform;
+        Vector2 min = new Vector2(float.MaxValue, float.MaxValue), max = new Vector2(float.MinValue, float.MinValue);
+        foreach (Vector3 corner in new[] { new Vector3(-0.5f, -0.5f, 0f), new Vector3(0.5f, -0.5f, 0f),
+                                           new Vector3(-0.5f, 0.5f, 0f), new Vector3(0.5f, 0.5f, 0f) })
+        {
+            Vector3 world = xf * corner;
+            if (_camera.IsPositionBehind(world)) return false;
+            Vector2 p = _camera.UnprojectPosition(world);
+            min = new Vector2(Mathf.Min(min.X, p.X), Mathf.Min(min.Y, p.Y));
+            max = new Vector2(Mathf.Max(max.X, p.X), Mathf.Max(max.Y, p.Y));
+        }
+        rect = new Rect2(min, max - min);
+        return true;
     }
 
     private static float EaseOutCubic(float x) => 1f - Mathf.Pow(1f - Mathf.Clamp(x, 0f, 1f), 3f);
@@ -393,19 +449,37 @@ public partial class TableWorld3D : Node3D
                     tint *= style.DrawCenter ? new Color(style.BorderColor, 1f) : style.BorderColor;
                 break;
         }
-        if (piece.Material.AlbedoColor != tint) piece.Material.AlbedoColor = tint;
-        if (piece.StackMaterial != null)
-        {
-            if (piece.StackMaterial.AlbedoTexture != piece.Material.AlbedoTexture) piece.StackMaterial.AlbedoTexture = piece.Material.AlbedoTexture;
-            Color under = tint * new Color(0.62f, 0.62f, 0.66f, 1f);
-            if (piece.StackMaterial.AlbedoColor != under) piece.StackMaterial.AlbedoColor = under;
-        }
-
         // Scissored edges while solid (cheap, casts a clean shadow), blended while fading.
         BaseMaterial3D.TransparencyEnum mode = tint.A < 0.99f || kind is Kind.Line or Kind.Ring or Kind.Slot
             ? BaseMaterial3D.TransparencyEnum.Alpha
             : BaseMaterial3D.TransparencyEnum.AlphaScissor;
         if (piece.Material.Transparency != mode) piece.Material.Transparency = mode;
+        if (piece.Material.AlbedoColor != tint) piece.Material.AlbedoColor = tint;
+        if (piece.StackMaterial != null)
+        {
+            if (piece.StackMaterial.AlbedoTexture != piece.Material.AlbedoTexture) piece.StackMaterial.AlbedoTexture = piece.Material.AlbedoTexture;
+            Color under = tint * (kind == Kind.Card ? new Color(0.45f, 0.45f, 0.5f, 1f) : new Color(0.62f, 0.62f, 0.66f, 1f));
+            if (piece.StackMaterial.AlbedoColor != under) piece.StackMaterial.AlbedoColor = under;
+            if (piece.StackMaterial.Transparency != mode) piece.StackMaterial.Transparency = mode;
+        }
+
+        if (piece.Shine != null)
+        {
+            // The gloss reads the same face texture for its shape, and the 2D card's own foil
+            // strength (TableUi.AddShine) - so effect, rescue and +/- cards shimmer as they do in 2D.
+            Texture2D face = piece.Material.AlbedoTexture;
+            if (piece.Shine.GetShaderParameter("card_face").AsGodotObject() != face)
+                piece.Shine.SetShaderParameter("card_face", face);
+            float foil = 0f;
+            if (control.GetNodeOrNull<CanvasItem>("Shine")?.Material is ShaderMaterial flat)
+                foil = flat.GetShaderParameter("foil_strength").AsSingle();
+            piece.Shine.SetShaderParameter("foil_strength", foil);
+            piece.Shine.SetShaderParameter("fade", tint.A);
+            // A card turning or rising catches the light differently: its turn and lift add tilt.
+            Vector2 extra = new Vector2(Mathf.Sin(angle) * 0.6f, Mathf.Max(0f, y - 0.05f) * 0.9f);
+            piece.Shine.SetShaderParameter("extra_tilt", extra);
+        }
+
     }
 
     /// The tint the 2D piece inherits, stopping at the layout's canvas - so fading the 2D layer
@@ -446,6 +520,33 @@ public partial class TableWorld3D : Node3D
         AddChild(mesh);
 
         Piece piece = new Piece { Mesh = mesh, Material = material };
+        if (kind == Kind.Card)
+        {
+            // A card has an edge: a darker copy of its face a hair underneath, so a card on the
+            // table or in flight reads as a thing with thickness, rounded corners and all.
+            piece.StackMaterial = (StandardMaterial3D)material.Duplicate();
+            MeshInstance3D edge = new MeshInstance3D
+            {
+                Mesh = mesh.Mesh,
+                MaterialOverride = piece.StackMaterial,
+                CastShadow = GeometryInstance3D.ShadowCastingSetting.Off,
+            };
+            edge.Position = new Vector3(0f, 0f, -CardThickness);
+            mesh.AddChild(edge);
+
+            if (_shineShader != null)
+            {
+                piece.Shine = new ShaderMaterial { Shader = _shineShader };
+                MeshInstance3D shine = new MeshInstance3D
+                {
+                    Mesh = mesh.Mesh,
+                    MaterialOverride = piece.Shine,
+                    CastShadow = GeometryInstance3D.ShadowCastingSetting.Off,
+                };
+                shine.Position = new Vector3(0f, 0f, 0.002f);
+                mesh.AddChild(shine);
+            }
+        }
         if (kind == Kind.Deck)
         {
             // The deck is a stack: more copies of the back under the top one, darker, each a
@@ -468,6 +569,7 @@ public partial class TableWorld3D : Node3D
         return piece;
     }
 
+    private const float CardThickness = 0.016f;
     private const int DeckLayers = 6;
     private const float DeckLayerGap = 0.022f;
 
