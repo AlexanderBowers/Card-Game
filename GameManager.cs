@@ -1060,11 +1060,11 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
 
         _shopOverlay = new ShopOverlay();
         AddChild(_shopOverlay);
-        _shopOverlay.Setup(_ui.CreateCardView);
+        _shopOverlay.Setup(_ui.Cards.CreateCardView);
 
         _deckOverlay = new DeckOverlay();
         AddChild(_deckOverlay);
-        _deckOverlay.Setup(_ui.CreateCardView);
+        _deckOverlay.Setup(_ui.Cards.CreateCardView);
     }
 
     /// Market first (spend the medals just won), then the deck (choose the twelve those cards

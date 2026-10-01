@@ -258,7 +258,7 @@ public sealed class Prompts
         {
             if (!CardEffects.IsPlainModifier(spent)) continue;
             Card choice = spent; // capture per iteration, not the loop variable
-            row.AddChild(OverlayUi.CardButton(_ui.CreateCardView(choice, _ui.ModifierCardSize), _ui.ModifierCardSize,
+            row.AddChild(OverlayUi.CardButton(_ui.Cards.CreateCardView(choice, _ui.ModifierCardSize), _ui.ModifierCardSize,
                 () => OnRecallChosen(choice)));
         }
 
