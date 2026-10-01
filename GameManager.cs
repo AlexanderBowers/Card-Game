@@ -250,6 +250,18 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
         StartNewSet(); // UpdateUI enables the Draw Card / Hold buttons
 
         if (tutorial) _teaching.StartTutorial();
+        else if (_ui.World3D != null && _ui.World3D.CanSwing) _ui.World3D.SwingIn(ShowStageIntro); // Pocket-style camera swing, then the banner
+        else ShowStageIntro();
+    }
+
+    /// "Stage 2 / Target: 20" sliding across at the start of a ladder match (StageIntro).
+    private void ShowStageIntro()
+    {
+        RunData run = _inRun ? RunData.Instance : null;
+        if (run == null) return;
+
+        string title = run.Endless ? $"Endless Match {run.EndlessStreak + 1}" : $"Stage {run.MatchNumber}";
+        StageIntro.Play(this, title, $"Target: {_gameState.TargetScore}");
     }
 
     /// Puts the solo scene onto the ladder: picks up the run in progress (or starts one), and takes
@@ -758,32 +770,56 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
         }
 
         Action next;
+        string secondText = null;
+        Action second = null;
+        bool matchOver = false;
         if (_gameState.CheckMatchWinner(out int matchWinner))
         {
+            // The match-end screen (Alexander, 2026-09-30): "X Wins!", then the buttons - "Proceed
+            // to Modifier Shop" after a win, "Start New Run" after a loss, and "Return to Main
+            // Menu" under either. ReportRunResult still banks the result; its text is no longer
+            // shown here (the medals are on the shop screen that follows).
+            matchOver = true;
             Player champion = (matchWinner == 1) ? _player1 : _player2;
-            int champWins = (matchWinner == 1) ? _gameState.SetsWonPlayer1 : _gameState.SetsWonPlayer2;
-            int otherWins = (matchWinner == 1) ? _gameState.SetsWonPlayer2 : _gameState.SetsWonPlayer1;
-            title = $"{champion.PlayerName} wins the match!";
-            why += $"\n{champion.PlayerName} took the match {champWins} sets to {otherWins}.";
-            why += ReportRunResult(matchWinner == 1, _gameState.SetsWonPlayer1);
-            // A won match on a live run goes to the market and the deck before the next rung;
-            // a loss (or the end of the ladder) just offers a fresh run. ReportRunResult above has
-            // already banked the result, so RunActive/RunComplete describe what happens next.
+            bool playerWon = matchWinner == 1;
+            title = (_isVsBot && playerWon) ? "You Win!" : $"{champion.PlayerName} Wins!";
+            ReportRunResult(playerWon, _gameState.SetsWonPlayer1);
+
             RunData run = _inRun ? RunData.Instance : null;
-            bool runContinues = run != null && run.RunActive && !run.RunComplete;
-            if (runContinues)
+            secondText = "Return to Main Menu";
+            second = RestartToMenu;
+
+            if (run != null && run.RunActive && !run.RunComplete)
             {
-                buttonText = "Continue";
+                buttonText = "Proceed to Modifier Shop";
                 next = OpenIntermission;
+            }
+            else if (run != null && playerWon && run.RunComplete)
+            {
+                // The whole ladder is cleared: the next thing worth offering is Endless.
+                buttonText = "Start Endless";
+                next = () =>
+                {
+                    RunData.Instance.StartEndless();
+                    StartNextMatch();
+                };
+            }
+            else if (run != null)
+            {
+                bool wasEndless = run.Endless;
+                buttonText = "Start New Run";
+                next = () =>
+                {
+                    if (wasEndless) RunData.Instance.StartEndless();
+                    else RunData.Instance.StartNewRun();
+                    StartNextMatch();
+                };
             }
             else
             {
-                // Nothing left to continue: the ladder is finished, the run was lost, or this was
-                // a one-off local match. That is the end of something, so it goes to the start
-                // menu rather than silently dealing the next thing - the menu is where the medals
-                // and the record are, and where the next climb becomes a choice.
+                // Local 2-player, or a one-off solo table: the same match again.
                 buttonText = "Play Again";
-                next = RestartToMenu;
+                next = () => RestartScene(sameMatch: true);
 
                 // Local co-op: a short ad the players can close, after every 2nd finished match
                 // (monetization-spec.md §2). On the match-end screen, before anything else starts.
@@ -792,8 +828,9 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
                     _coopMatchesFinished++;
                     if (_coopMatchesFinished % CoopMatchesPerAd == 0)
                     {
-                        Action afterAd = next;
-                        next = () => AdService.ShowInterstitial(this, afterAd);
+                        Action again = next, toMenu = second;
+                        next = () => AdService.ShowInterstitial(this, again);
+                        second = () => AdService.ShowInterstitial(this, toMenu);
                     }
                 }
             }
@@ -816,9 +853,10 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
         if (setInfo != null)
         {
             setInfo.Text = title;
+            setInfo.AddThemeFontSizeOverride("font_size", TableUi.SetInfoFont); // back from the big target
             setInfo.Visible = true; // hidden while it had nothing to say (TableUi.Refresh)
         }
-        _prompts.ShowSetEnd(title, why, buttonText, next);
+        _prompts.ShowSetEnd(title, matchOver ? string.Empty : why, buttonText, next, secondText, second);
     }
 
     /// Banks the match result against the run and says what it was worth. The market and the deck
@@ -902,8 +940,10 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
     {
         RunData run = _inRun ? RunData.Instance : null;
         if (run == null) return string.Empty;
-        if (run.Endless) return $"Endless - streak {run.EndlessStreak}";
-        return $"Stage {run.MatchNumber}/{RunData.LadderLength} - {run.CurrentRank.Name}";
+        // Alexander, 2026-09-30: the middle of the table shows the TARGET, not the stage - "if it's
+        // 20, just say 20". The stage is announced once, by the slide-in at the start of the match.
+        int target = _gameState.TargetScore;
+        return target == 20 ? "20" : $"Target {target}";
     }
 
     // ------------------------------------------------------------------

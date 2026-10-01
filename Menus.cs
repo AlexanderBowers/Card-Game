@@ -208,6 +208,7 @@ public sealed class Menus
     private const float MenuLogoSize = 170f;
 
     private TextureRect _menuMat;
+    private MenuCardDrift _menuDrift;
 
     /// The menu sits on YOUR board (pass 61): the one chosen in the Shop, so buying a board shows
     /// straight away on the front door. Falls back to the original mat if a render is missing.
@@ -216,7 +217,7 @@ public sealed class Menus
         if (_menuMat == null || _startMenuOverlay == null) return;
         Vector2 size = _startMenuOverlay.Size;
         bool portrait = size.Y > size.X;
-        string board = RunData.Instance?.SelectedBoard ?? "bronze";
+        string board = RunData.Instance?.SelectedBoard ?? RunData.DefaultCosmetic;
         string path = $"res://assets/aimfor20_art/playmats/playmat_{board}_{(portrait ? "portrait" : "landscape")}.png";
         Texture2D chosen = ResourceLoader.Exists(path) ? GD.Load<Texture2D>(path) : null;
         _menuMat.Texture = chosen ?? (portrait ? MenuMatPortrait : MenuMatLandscape);
@@ -252,6 +253,11 @@ public sealed class Menus
         ColorRect band = new ColorRect { Color = new Color(OverlayUi.Accent, 0.75f), MouseFilter = Control.MouseFilterEnum.Ignore };
         _startMenuOverlay.AddChild(bandWide);
         _startMenuOverlay.AddChild(band);
+
+        // Modifier cards turning slowly over the board, behind the panel (MenuCardDrift).
+        _menuDrift = new MenuCardDrift();
+        _startMenuOverlay.AddChild(_menuDrift);
+        _menuDrift.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
 
         _menuMat = mat;
         void Relayout()
@@ -303,6 +309,7 @@ public sealed class Menus
     private void FillStartMenu()
     {
         RefreshMenuMat(); // a board bought or chosen in the Shop shows on the way back
+        _menuDrift?.RefreshBack(); // ...and so does a deck
         OverlayUi.ClearChildren(_startMenuBox);
         _newRunArmed = false;
 

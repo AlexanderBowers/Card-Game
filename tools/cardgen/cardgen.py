@@ -50,6 +50,9 @@ LOOKS = {
     "gold":     dict(face="#fbf5e3", panel="#f7ecc9", rim="#d9a62e", ink="#6b4a0e"),
     "ruby":     dict(face="#fbeff0", panel="#f6dfe2", rim="#b3263a", ink="#7a1426"),
     "obsidian": dict(face="#f0edf6", panel="#e4def0", rim="#3d2f5c", ink="#3a2466"),
+    # Classic: the default deck everyone starts with - the mint card the game shipped with before
+    # the rank decks (playtest, 2026-09-30: "default deck should be closer to what we had before").
+    "classic":  dict(face="#f7fffb", panel="#e2f7ec", rim="#5ccf95", ink="#17805a"),
     # Endless: its own set - a deep night frame with an iridescent (thin-film) trim.
     "endless":  dict(face="#f4f2ff", panel="#e8e4ff", rim="#2a1670", ink="#4b2bb8", iridescent=True),
     # Modifiers.
@@ -432,27 +435,45 @@ def build_modifier(value, rescue=False):
 GREY_INK = "#9a9aa6"
 
 
+def flip_corners(n, plus_ink, minus_ink, num_ink, size=1.45):
+    """The +/- card's corners (playtest, 2026-09-30): the number, with a small + stacked over a
+    small - in front of it - the same read as the "±20" logo. Bottom-right is the same block
+    turned 180 degrees, like every other corner."""
+    z = THICK + 0.012
+    x, y = CARD_W / 2 - FRAME - 0.14, CARD_H / 2 - FRAME - 0.10 - size * 0.42
+    sx = x - 0.24                   # centre of the sign stack
+    L, gap = 0.5, 0.27             # sign length, half the distance between the two signs
+    for rot, k in ((0.0, 1), (math.pi, -1)):
+        # The small + is the font's glyph: at this size the bar-built sign's crossing shows a seam.
+        text("PlusGlyph", "+", L * 2.0, (-k * sx, k * (y + gap), z), plus_ink, rot=rot)
+        bar((-k * sx, k * (y - gap), THICK + 0.03), L * 0.92, L * 0.27, minus_ink)
+        text("Num", str(n), size, (-k * (sx - 0.4), k * y, z), num_ink, rot=rot, align="LEFT")
+
+
 def build_flip(value, chosen_plus=True):
     """+/-: blue + half over red - half. Two renders per value: the half in play is in full
     colour, the other is greyed back - the same "which way is it set" reading the game had."""
-    base_card("flip")
+    L = base_card("flip")
     plus_ink = ink_mat(PLUS_INK if chosen_plus else GREY_INK, "PlusInk")
     minus_ink = ink_mat(MINUS_INK if not chosen_plus else GREY_INK, "MinusInk")
     # A thin divider across the middle.
     div = mat("Div", srgb(LOOKS["flip"]["rim"]), rough=0.3, metal=1.0)
     bar((0, 0, THICK + 0.01), CARD_W - 1.0, 0.05, div, depth=0.012)
     n = abs(value)
-    sign(True, -1.15, 1.75, 1.05, plus_ink)
-    sign(False, -1.15, -1.75, 1.05, minus_ink)
+    flip_corners(n, plus_ink, minus_ink, ink_mat(L["ink"], "NumInk"))
+    # Each half pulled in towards the divider, to leave the corners room.
+    sign(True, -1.1, 1.3, 1.0, plus_ink)
+    sign(False, -1.1, -1.3, 1.0, minus_ink)
     z = THICK + 0.02
-    for x, y in pip_layout(n, 1.0, 1.75, 1.6, 2.4, 0.2):
-        pip((x, y, z), 0.2, plus_ink)
-    for x, y in pip_layout(n, 1.0, -1.75, 1.6, 2.4, 0.2):
-        pip((x, y, z), 0.2, minus_ink)
+    for x, y in pip_layout(n, 0.8, 1.3, 1.5, 1.5, 0.17):
+        pip((x, y, z), 0.17, plus_ink)
+    for x, y in pip_layout(n, 0.8, -1.3, 1.5, 1.5, 0.17):
+        pip((x, y, z), 0.17, minus_ink)
 
 
 BACK_LOOKS = {
     "default":  dict(face="#20304a", rim="#d9a62e", metal="#e0b64a"),
+    "classic":  dict(face="#20304a", rim="#d9a62e", metal="#e0b64a"),   # the original navy + gold
     "bronze":   dict(face="#1d3a2c", rim="#b0703a", metal="#d99a62"),
     "silver":   dict(face="#1d3440", rim="#a9b6c2", metal="#d8e2ea"),
     "gold":     dict(face="#3a2f12", rim="#d9a62e", metal="#f0c95a"),
@@ -682,6 +703,9 @@ MATS = {
     "ruby":     ("#4a1420", "#d9a62e", "velvet"),
     "obsidian": ("#17121f", "#8e6ad8", "glass"),
     "endless":  ("#120f2e", "#e8e8f0", "void"),
+    # The default board (playtest, 2026-09-30): bright and airy like the Pokemon TCG Pocket
+    # battle mat - a soft sky-blue with a faint hex weave and a white inlay.
+    "classic":  ("#78b6e0", "#ffffff", "pocket"),
 }
 
 
@@ -700,6 +724,7 @@ def surface_mat(color, kind):
         "velvet":  (120.0, 0.18, 0.85, 0.0),
         "glass":   (3.0, 0.06, 0.42, 0.0),
         "void":    (1.4, 0.02, 0.55, 0.0),
+        "pocket":  (4.0, 0.0, 0.8, 0.0),
     }[kind]
     noise.inputs["Scale"].default_value = settings[0]
     noise.inputs["Detail"].default_value = 6.0
@@ -742,6 +767,41 @@ def surface_mat(color, kind):
         nt.links.new(ramp.outputs["Color"], rgba_sock(mixs.inputs, "A"))
         rgba_sock(mixs.inputs, "B").default_value = (0.8, 0.82, 1.0, 1)
         nt.links.new(rgba_sock(mixs.outputs, "Result"), p.inputs["Base Color"])
+    if kind == "pocket":
+        # Airy: a radial wash from a pale centre to a deeper sky at the edges, and a faint hex
+        # weave (Voronoi cells, edge lines only) - the cards stay the show.
+        p.inputs["Specular IOR Level"].default_value = 0.2
+        tc = nt.nodes.new("ShaderNodeTexCoord")
+        grad = nt.nodes.new("ShaderNodeTexGradient")
+        grad.gradient_type = "SPHERICAL"
+        sc = nt.nodes.new("ShaderNodeMapping")
+        sc.inputs["Scale"].default_value = (1.7, 1.7, 1.0)   # object space is -0.5..0.5
+        nt.links.new(tc.outputs["Object"], sc.inputs["Vector"])
+        nt.links.new(sc.outputs["Vector"], grad.inputs["Vector"])
+        ramp = nt.nodes.new("ShaderNodeValToRGB")
+        ramp.color_ramp.elements[0].color = srgb("#3f95e0")
+        ramp.color_ramp.elements[1].position = 0.95
+        ramp.color_ramp.elements[1].color = srgb("#c4ebff")
+        nt.links.new(grad.outputs["Color"], ramp.inputs["Fac"])
+        vor = nt.nodes.new("ShaderNodeTexVoronoi")
+        vor.feature = "DISTANCE_TO_EDGE"
+        vor.inputs["Scale"].default_value = 0.9
+        edge = nt.nodes.new("ShaderNodeMath")
+        edge.operation = "LESS_THAN"
+        edge.inputs[1].default_value = 0.025
+        geo = nt.nodes.new("ShaderNodeNewGeometry")         # world units: round cells, any aspect
+        nt.links.new(geo.outputs["Position"], vor.inputs["Vector"])
+        nt.links.new(vor.outputs["Distance"], edge.inputs[0])
+        k = nt.nodes.new("ShaderNodeMath")
+        k.operation = "MULTIPLY"
+        k.inputs[1].default_value = 0.06
+        nt.links.new(edge.outputs[0], k.inputs[0])
+        mixp = nt.nodes.new("ShaderNodeMix")
+        mixp.data_type = "RGBA"
+        nt.links.new(k.outputs[0], mixp.inputs["Factor"])
+        nt.links.new(ramp.outputs["Color"], rgba_sock(mixp.inputs, "A"))
+        rgba_sock(mixp.inputs, "B").default_value = (1, 1, 1, 1)
+        nt.links.new(rgba_sock(mixp.outputs, "Result"), p.inputs["Base Color"])
     if kind == "velvet":
         p.inputs["Sheen Weight"].default_value = 0.6
     if kind in ("glass", "lacquer"):
@@ -798,7 +858,7 @@ def build_playmat(rank, portrait):
     d = bpy.data.lights.new("Pool", "AREA")
     d.shape = "ELLIPSE"
     d.size, d.size_y = w * 0.9, h * 0.9
-    d.energy = {"glass": 1000, "void": 700}.get(kind, 1300)
+    d.energy = {"glass": 1000, "void": 700, "pocket": 700}.get(kind, 1300)
     o = bpy.data.objects.new("Pool", d)
     o.location = (0, 0, 6)
     scene.collection.objects.link(o)
@@ -808,7 +868,8 @@ def build_playmat(rank, portrait):
 # The card list
 # ----------------------------------------------------------------------------------------------
 RANKS = ["bronze", "silver", "gold", "ruby", "obsidian"]
-THEMES = RANKS + ["endless"]   # endless is the Endless mode's own set; not a rank, not in the shop
+# classic is the default deck and board everyone owns; endless is the Endless mode's own set.
+THEMES = ["classic"] + RANKS + ["endless"]
 
 
 def cards(which):

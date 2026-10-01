@@ -762,9 +762,9 @@ public partial class RunData : Node
         CollectorBack = false;
         Inventory.Clear();
         SideDeck.Clear();
-        OwnedDecks.Clear(); OwnedDecks.Add("bronze");
-        OwnedBoards.Clear(); OwnedBoards.Add("bronze");
-        SelectedDeck = SelectedBoard = "bronze";
+        OwnedDecks.Clear(); OwnedDecks.Add(DefaultCosmetic);
+        OwnedBoards.Clear(); OwnedBoards.Add(DefaultCosmetic);
+        SelectedDeck = SelectedBoard = DefaultCosmetic;
         if (FileAccess.FileExists(SavePath)) DirAccess.RemoveAbsolute(ProjectSettings.GlobalizePath(SavePath));
         Save();
     }
@@ -780,45 +780,57 @@ public partial class RunData : Node
     // is owned from the start, the rest are bought with medals in the Shop - and only once the
     // player has beaten a stage of that rank.
     // ------------------------------------------------------------------
-    public static readonly string[] CosmeticKeys = { "bronze", "silver", "gold", "ruby", "obsidian" };
+    /// Everyone starts with Classic (playtest, 2026-09-30: "I really don't like the Bronze set being
+    /// the default"): the original mint deck on the navy-and-gold back, and a bright sky-blue board.
+    public const string DefaultCosmetic = "classic";
 
-    /// Medals to buy a rank's deck or board. Bronze is free and owned from the start.
+    /// Shop order. The five rank sets in ladder order, then Endless's own set.
+    public static readonly string[] CosmeticKeys = { "classic", "bronze", "silver", "gold", "ruby", "obsidian", "endless" };
+    private static readonly string[] RankCosmetics = { "bronze", "silver", "gold", "ruby", "obsidian" };
+
+    /// Medals to buy a deck or board. Classic is free and owned from the start.
     public static int CosmeticPrice(string key) => key switch
     {
+        "bronze" => 10,
         "silver" => 15,
         "gold" => 25,
         "ruby" => 40,
         "obsidian" => 60,
+        "endless" => 100,
         _ => 0,
     };
 
-    public HashSet<string> OwnedDecks { get; } = new HashSet<string> { "bronze" };
-    public HashSet<string> OwnedBoards { get; } = new HashSet<string> { "bronze" };
-    public string SelectedDeck { get; private set; } = "bronze";
-    public string SelectedBoard { get; private set; } = "bronze";
+    public HashSet<string> OwnedDecks { get; } = new HashSet<string> { DefaultCosmetic };
+    public HashSet<string> OwnedBoards { get; } = new HashSet<string> { DefaultCosmetic };
+    public string SelectedDeck { get; private set; } = DefaultCosmetic;
+    public string SelectedBoard { get; private set; } = DefaultCosmetic;
 
-    private static int CosmeticRank(string key) => Array.IndexOf(CosmeticKeys, key);
+    private static int CosmeticRank(string key) => Array.IndexOf(RankCosmetics, key);
+    private static bool IsCosmetic(string key) => Array.IndexOf(CosmeticKeys, key) >= 0;
 
     /// The stage that has to be beaten before this rank's deck and board can be bought: the
-    /// rank's first stage (its Challenger). Bronze needs nothing.
+    /// rank's first stage (its Challenger). Null for Classic and Endless.
     public static string UnlockStageName(string key)
     {
         int rank = CosmeticRank(key);
-        return rank <= 0 ? null : Ladder[Math.Min(rank * 2, Ladder.Length - 1)].Opponent;
+        return rank < 0 ? null : Ladder[Math.Min(rank * 2, Ladder.Length - 1)].Opponent;
     }
 
-    /// Beaten the rank's first stage = reached the rung after it at least once.
+    /// Classic is always yours. A rank's set: beaten the rank's first stage = reached the rung
+    /// after it at least once. Endless's set: cleared the ladder (Endless itself is open).
     public bool CosmeticUnlocked(string key)
     {
+        if (key == DefaultCosmetic) return true;
+        if (key == "endless") return EndlessUnlocked;
         int rank = CosmeticRank(key);
-        return rank == 0 || (rank > 0 && FurthestStep >= rank * 2 + 1);
+        return rank >= 0 && FurthestStep >= rank * 2 + 1;
     }
 
     public bool BuyCosmetic(string key, bool board)
     {
         HashSet<string> owned = board ? OwnedBoards : OwnedDecks;
         int price = CosmeticPrice(key);
-        if (CosmeticRank(key) < 0 || owned.Contains(key) || !CosmeticUnlocked(key) || Medals < price) return false;
+        if (!IsCosmetic(key) || owned.Contains(key) || !CosmeticUnlocked(key) || Medals < price) return false;
         Medals -= price;
         owned.Add(key);
         if (board) SelectedBoard = key; else SelectedDeck = key; // bought to be used
@@ -939,7 +951,7 @@ public partial class RunData : Node
 
         Godot.Collections.Dictionary data = new Godot.Collections.Dictionary
         {
-            { "version", 9 },
+            { "version", 10 },
             { "ownedDecks", ownedDecks },
             { "ownedBoards", ownedBoards },
             { "deck", SelectedDeck },
@@ -976,7 +988,7 @@ public partial class RunData : Node
     private static void LoadOwned(Godot.Collections.Dictionary data, string name, HashSet<string> into)
     {
         into.Clear();
-        into.Add("bronze");
+        into.Add(DefaultCosmetic);
         if (!data.TryGetValue(name, out Variant list) || list.VariantType != Variant.Type.Array) return;
         foreach (Variant entry in list.AsGodotArray())
             if (Array.IndexOf(CosmeticKeys, entry.AsString()) >= 0) into.Add(entry.AsString());
@@ -1000,11 +1012,15 @@ public partial class RunData : Node
         FurthestStep = data.TryGetValue("furthest", out Variant furthest) ? furthest.AsInt32() : StepIndex;
         TutorialSeen = data.TryGetValue("tutorialSeen", out Variant taught) && taught.AsBool();
 
-        // Version 9: decks and boards. An older save owns Bronze of each and uses it.
+        // Version 9: decks and boards. Version 10: Classic is the default, not Bronze. A version 9
+        // save was GIVEN Bronze, so it keeps owning it - but moves onto Classic, the new default.
+        int saveVersion = data.TryGetValue("version", out Variant savedVersion) ? savedVersion.AsInt32() : 0;
         LoadOwned(data, "ownedDecks", OwnedDecks);
         LoadOwned(data, "ownedBoards", OwnedBoards);
-        SelectedDeck = data.TryGetValue("deck", out Variant deck) && OwnedDecks.Contains(deck.AsString()) ? deck.AsString() : "bronze";
-        SelectedBoard = data.TryGetValue("board", out Variant board) && OwnedBoards.Contains(board.AsString()) ? board.AsString() : "bronze";
+        if (saveVersion == 9) { OwnedDecks.Add("bronze"); OwnedBoards.Add("bronze"); }
+        bool keepChoice = saveVersion >= 10;
+        SelectedDeck = keepChoice && data.TryGetValue("deck", out Variant deck) && OwnedDecks.Contains(deck.AsString()) ? deck.AsString() : DefaultCosmetic;
+        SelectedBoard = keepChoice && data.TryGetValue("board", out Variant board) && OwnedBoards.Contains(board.AsString()) ? board.AsString() : DefaultCosmetic;
         Endless = data.TryGetValue("endless", out Variant endless) && endless.AsBool();
         EndlessStreak = data.TryGetValue("endlessStreak", out Variant streak) ? streak.AsInt32() : 0;
         EndlessBest = data.TryGetValue("endlessBest", out Variant best) ? best.AsInt32() : 0;

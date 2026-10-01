@@ -151,6 +151,9 @@ public sealed class Bot
     private const double NoviceSkipsModifier = 0.45;
     private const double NoviceSkipsRescue = 0.3;
 
+    /// The first rung: see DrawAssist.BotAvoidsTarget.
+    private bool StageOne => DrawAssist.BotAvoidsTarget(_table.Run, _table.VsBot);
+
     private Skill CurrentSkill()
     {
         RunData run = _table.Run;
@@ -219,6 +222,25 @@ public sealed class Bot
         {
             GD.Print($"AI ends its turn over the target at {Me.CurrentScore}");
             Me.HasEndedTurn = true;
+            _table.ResolveTurn();
+            return;
+        }
+
+        // Stage 1 (playtest, 2026-09-30): "they should never be able to get to 20 naturally and
+        // only hold if they get 19". The deck never hands it the target (DrawAssist.BotPick), no
+        // Modifier is played onto it (TryPlayModifierCard), and it holds on target - 1 and nothing
+        // lower - so a player who reaches the target always wins the set.
+        if (StageOne)
+        {
+            if (Me.CurrentScore >= target - 1)
+            {
+                GD.Print($"AI (stage 1) HOLDS at {Me.CurrentScore}");
+                Me.IsHolding = true;
+            }
+            else
+            {
+                Me.HasEndedTurn = true;
+            }
             _table.ResolveTurn();
             return;
         }
@@ -638,6 +660,7 @@ public sealed class Bot
             foreach (int value in orientations)
             {
                 int result = score + value;
+                if (StageOne && result == target) continue; // stage 1 never reaches the target
 
                 if (result > target)
                 {

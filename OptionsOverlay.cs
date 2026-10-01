@@ -18,6 +18,7 @@ public partial class OptionsOverlay : Control
 
     private CheckButton _animations;
     private CheckButton _batterySaver;
+    private CheckButton _table3D;
     private CheckButton _debugButtons;
     private Button _closeButton;
     private Control _storeSection;      // the heading and the row, so both hide when there is no store
@@ -91,6 +92,11 @@ public partial class OptionsOverlay : Control
         privacy.AddChild(SectionLabel("Privacy"));
         privacy.AddChild(StoreButton("Privacy Choices", () => AdService.ShowPrivacyOptions(null)));
 
+        // --- Graphics. The 3D table (prototype); off is the flat table, and the lighter one.
+        box.AddChild(SectionLabel("Graphics"));
+        _table3D = Toggle("3D table", GameSettings.SetTable3D);
+        box.AddChild(_table3D);
+
         // --- Battery. Little to save today; the switches are here for when the art is heavier.
         box.AddChild(SectionLabel("Battery"));
         _animations = Toggle("Card animations", GameSettings.SetCardAnimations);
@@ -121,6 +127,7 @@ public partial class OptionsOverlay : Control
 
         _animations.SetPressedNoSignal(GameSettings.CardAnimations);
         _batterySaver.SetPressedNoSignal(GameSettings.BatterySaver);
+        _table3D.SetPressedNoSignal(GameSettings.Table3D);
         _debugButtons?.SetPressedNoSignal(GameSettings.ShowDebugButtons);
         if (_closeButton != null) _closeButton.CustomMinimumSize = WideButton;
         FillStore(); // sized here too, because WideButton follows the viewport

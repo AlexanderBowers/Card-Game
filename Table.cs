@@ -209,16 +209,34 @@ public sealed class Table
     /// The top card of this player's own deck. A deck cannot actually run out: one player drawing
     /// until they bust takes at most a handful of cards from forty. The reshuffle is here anyway,
     /// so a future rule change cannot turn that arithmetic into a crash.
-    private int DrawValue(Player owner)
+    private int DrawValue(Player owner, bool opening = false)
     {
         List<int> deck = DeckOf(owner);
         if (deck.Count == 0) ShuffleDeck(deck);
+
+        SteerTopCard(owner, deck, opening);
 
         int last = deck.Count - 1;
         int value = deck[last];
         deck.RemoveAt(last);
         return value;
     }
+    /// The Bronze rung's helping hand - see DrawAssist. Only ever reorders the deck.
+    private void SteerTopCard(Player owner, List<int> deck, bool opening)
+    {
+        if (_host.TutorialStaged && _host.State.IsFirstSet) return; // the staged opening is the lesson
+
+        int target = _host.State.TargetScore;
+        int? pick = null;
+
+        if (owner == P1 && DrawAssist.GuidesPlayer(_host.Run, _host.VsBot))
+            pick = DrawAssist.PlayerPick(deck, P1, target, opening, card => IsRecallLocked(P1, card), _host.Rng);
+        else if (owner == P2 && DrawAssist.BotAvoidsTarget(_host.Run, _host.VsBot))
+            pick = DrawAssist.BotPick(deck, P2, target, _host.Rng);
+
+        if (pick.HasValue) DrawAssist.StackTop(deck, pick.Value);
+    }
+
     /// A fresh modifier hand for both players. Cards are spent for the whole match, so this runs
     /// once per match - not per set.
     ///
@@ -312,16 +330,16 @@ public sealed class Table
             // Both players' cards fly at once, as they always have; the second pair is staggered so
             // an opening deal reads as two cards rather than one thick one.
             float delay = i * OpeningDealStagger;
-            DrawFor(P1, delay);
-            DrawFor(P2, delay);
+            DrawFor(P1, delay, opening);
+            DrawFor(P2, delay, opening);
         }
     }
 
-    private void DrawFor(Player player, float delay = 0f)
+    private void DrawFor(Player player, float delay = 0f, bool opening = false)
     {
         if (player.IsHolding) return;
 
-        int cardValue = DrawValue(player);
+        int cardValue = DrawValue(player, opening);
         player.CurrentScore += cardValue;
 
         Card drawnMainCard = new Card(cardValue, CardType.Main, cardValue.ToString());

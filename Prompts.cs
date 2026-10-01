@@ -314,6 +314,9 @@ public sealed class Prompts
     private Label _setEndBody;
 
     private Button _setEndButton;
+    // The match-end screen's second choice ("Return to Main Menu"). Hidden on an ordinary set end.
+    private Button _setEndSecondButton;
+    private Action _setEndSecondAction;
 
     private Control _setEndFlippedHolder;   // plain Control: containers reset a child's rotation, holders don't
 
@@ -416,6 +419,12 @@ public sealed class Prompts
         _setEndButton.CustomMinimumSize = new Vector2(260, 84);
         _setEndButton.Pressed += OnSetEndButtonPressed;
         box.AddChild(_setEndButton);
+
+        _setEndSecondButton = new Button { Text = "Return to Main Menu", Visible = false };
+        _setEndSecondButton.AddThemeFontSizeOverride("font_size", SetEndButtonFont);
+        _setEndSecondButton.CustomMinimumSize = new Vector2(260, 84);
+        _setEndSecondButton.Pressed += OnSetEndSecondButtonPressed;
+        box.AddChild(_setEndSecondButton);
     }
 
     private static Label MakeOverlayLabel(int fontSize)
@@ -425,9 +434,19 @@ public sealed class Prompts
         return label;
     }
 
-    public void ShowSetEnd(string title, string why, string buttonText, Action onAcknowledged)
+    /// The set-end panel, and - with a second button - the match-end screen ("X Wins!" and two
+    /// choices). An empty `why` hides the body line, which is how the match end reads: the
+    /// winner, then what to do next, nothing in between.
+    public void ShowSetEnd(string title, string why, string buttonText, Action onAcknowledged,
+                           string secondText = null, Action onSecond = null)
     {
         _setEndAction = onAcknowledged;
+        _setEndSecondAction = onSecond;
+        if (_setEndSecondButton != null)
+        {
+            _setEndSecondButton.Visible = !string.IsNullOrEmpty(secondText);
+            _setEndSecondButton.Text = secondText ?? string.Empty;
+        }
         if (_setEndOverlay == null)
         {
             onAcknowledged?.Invoke(); // overlay failed to build: don't strand the game
@@ -441,7 +460,12 @@ public sealed class Prompts
 
         _setEndTitle.Text = title;
         _setEndBody.Text = why;
+        _setEndBody.Visible = !string.IsNullOrEmpty(why);
         _setEndButton.Text = buttonText;
+        // Two long labels ("Proceed to Modifier Shop") need the same width, or the pair looks ragged.
+        float buttonWidth = string.IsNullOrEmpty(secondText) ? 260f : 420f;
+        _setEndButton.CustomMinimumSize = new Vector2(buttonWidth, 84);
+        if (_setEndSecondButton != null) _setEndSecondButton.CustomMinimumSize = new Vector2(buttonWidth, 84);
 
         bool mirrored = _ui.IsMirrored;
         _setEndFlippedHolder.Visible = mirrored;
@@ -479,6 +503,7 @@ public sealed class Prompts
         {
             _setEndFlippedTitle.Text = title;
             _setEndFlippedBody.Text = why;
+            _setEndFlippedBody.Visible = !string.IsNullOrEmpty(why);
             // The holder reports 0x0 on its own; give it the rotated block's footprint.
             _setEndFlippedHolder.CustomMinimumSize = _setEndFlippedBox.GetCombinedMinimumSize();
         }
@@ -507,6 +532,16 @@ public sealed class Prompts
         _setEndOverlay.Visible = false;
         Action action = _setEndAction;
         _setEndAction = null;
+        _setEndSecondAction = null;
+        action?.Invoke();
+    }
+
+    private void OnSetEndSecondButtonPressed()
+    {
+        _setEndOverlay.Visible = false;
+        Action action = _setEndSecondAction;
+        _setEndAction = null;
+        _setEndSecondAction = null;
         action?.Invoke();
     }
 }

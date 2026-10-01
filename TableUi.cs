@@ -129,7 +129,16 @@ public sealed class TableUi
         _sfxImpact = CreateSfx("res://assets/sfx/modifier_impact.wav");
         _shineShader = GD.Load<Shader>("res://card_shine.gdshader");
         _root.AddChild(new ShineDriver { Name = "ShineDriver" });
+        World3D = new TableWorld3D { Name = "TableWorld3D", Ui = this };
+        _root.AddChild(World3D);
     }
+
+    /// The 3D table (prototype): draws the playmat, boards and cards in perspective under the 2D
+    /// layer while GameSettings.Table3D is on. See TableWorld3D.
+    public TableWorld3D World3D { get; }
+
+    /// A match is on the table (the start menu is not covering it).
+    public bool MatchLive => _host.GameStarted;
 
     // ------------------------------------------------------------------
     // What other classes point at. The tutorial's spotlight and a coach mark's arrow get the
@@ -180,6 +189,8 @@ public sealed class TableUi
     // The layout's nodes under the names the painting code below has always used.
     private Control _mainDeckPosition => L?.Deck;
     private Label _setInfoLabel => L?.SetInfoLabel;
+    public const int SetInfoFont = 28;        // the scenes' own size for the middle line
+    private const int SetInfoTargetFont = 64; // ...and the target, which is all it shows mid-set
     private Label _targetLabel => L?.TargetLabel;
     private Label _effectBanner => L?.EffectLabel;
     private PanelContainer _effectToast => L?.EffectToast;
@@ -792,6 +803,9 @@ public sealed class TableUi
         if (_host.GameStarted && _setInfoLabel != null && !State.IsGameOver && !_host.SetOverPending)
         {
             _setInfoLabel.Text = _host.SetInfoLine();
+            // The target is the one number in the middle of the table: big while it is the target,
+            // the scene's own size again while EndSet uses the label for a sentence.
+            _setInfoLabel.AddThemeFontSizeOverride("font_size", SetInfoTargetFont);
         }
         // The middle panel's lines take no room while they have nothing to say (local 2-player
         // has no stage line, and the target line only speaks when the target moved).
@@ -1357,7 +1371,7 @@ public sealed class TableUi
             if (!L.Background.HasMeta("authoredMat")) L.Background.SetMeta("authoredMat", L.Background.Texture);
             Texture2D authored = L.Background.GetMeta("authoredMat").As<Texture2D>();
             // In a ladder stage the table is the STAGE's; anywhere else it is the player's own board.
-            string boardKey = RankKey ?? RunData.Instance?.SelectedBoard ?? "bronze";
+            string boardKey = RankKey ?? RunData.Instance?.SelectedBoard ?? RunData.DefaultCosmetic;
             Texture2D mat = Art($"playmats/playmat_{boardKey}_{(L.Portrait ? "portrait" : "landscape")}.png");
             L.Background.Texture = mat ?? authored;
             L.Background.SelfModulate = mat != null ? Colors.White : _playmatTint;
@@ -2312,7 +2326,7 @@ public sealed class TableUi
     private const string PrerenderedMeta = "prerendered";
 
     /// The player's chosen deck - "bronze", "silver"... (RunData.SelectedDeck).
-    private static string PlayerDeckKey => RunData.Instance?.SelectedDeck ?? "bronze";
+    private static string PlayerDeckKey => RunData.Instance?.SelectedDeck ?? RunData.DefaultCosmetic;
 
     /// Whose deck a main card on this side is drawn from: the opponent in a ladder stage uses the
     /// STAGE's deck; everyone else (you, and both players in local 2-player) uses yours.
@@ -2684,6 +2698,7 @@ public sealed class TableUi
         flier.MouseFilter = Control.MouseFilterEnum.Ignore;
         flier.Size = cardSize;
         flier.PivotOffset = cardSize / 2f;
+        flier.SetMeta(TableWorld3D.FlyingMeta, true);
         _root.AddChild(flier);
 
         Vector2 startScale = new Vector2(from.Size.X / Mathf.Max(1f, cardSize.X), from.Size.Y / Mathf.Max(1f, cardSize.Y));
@@ -2768,6 +2783,7 @@ public sealed class TableUi
         ringStyle.SetCornerRadiusAll(Mathf.RoundToInt(size.X * 0.14f));
         Panel ring = new Panel { MouseFilter = Control.MouseFilterEnum.Ignore, Size = size, PivotOffset = size / 2f };
         ring.AddThemeStyleboxOverride("panel", ringStyle);
+        ring.SetMeta(TableWorld3D.FlyingMeta, true);
         _root.AddChild(ring);
         ring.GlobalPosition = centre - size / 2f;
 
@@ -2833,6 +2849,7 @@ public sealed class TableUi
             MouseFilter = Control.MouseFilterEnum.Ignore,
             SelfModulate = (fromDeck as TextureRect)?.SelfModulate ?? DeckBackTint,
         };
+        fakeCard.SetMeta(TableWorld3D.FlyingMeta, true);
         _root.AddChild(fakeCard); // on the scene root so it draws above everything
 
         // 2. Start on the deck, small and upside down

@@ -67,6 +67,48 @@ def outlined_text(d, xy, text, px, fill, anchor="mm", outline=NAVY, ow=5, inline
     d.text(xy, text, font=f, fill=fill, anchor=anchor)
 
 
+def padlock(d, cx, baseline, px, fill, outline=NAVY, ow=5):
+    """A closed padlock the size of a lower-case "o", sitting on the text baseline - the "o" in
+    "Hold" (the padlock is what Hold puts on your score in the game)."""
+    bw, bh = px * 0.6, px * 0.48           # body
+    left, right = cx - S(bw / 2), cx + S(bw / 2)
+    bottom, top = baseline, baseline - S(bh)
+    sw = px * 0.1                          # shackle thickness
+    sr = bw * 0.36                         # shackle radius
+    arc_box = [cx - S(sr), top - S(sr * 2.15), cx + S(sr), top + S(sr * 0.5)]
+    for col, grow in ((outline, ow), (fill, 0)):
+        g = S(grow)
+        d.arc([arc_box[0] - g, arc_box[1] - g, arc_box[2] + g, arc_box[3] + g], 180, 360,
+              fill=col, width=S(sw) + 2 * g)
+        for x in (arc_box[0], arc_box[2] - S(sw)):
+            d.rectangle([x - g, top - S(sr * 1.05), x + S(sw) + g, top + g], fill=col)
+        d.rounded_rectangle([left - g, top - g, right + g, bottom + g], radius=S(px * 0.1) + g, fill=col)
+    # keyhole
+    kh = S(px * 0.07)
+    ky = (top + bottom) / 2 - S(px * 0.03)
+    d.ellipse([cx - kh, ky - kh, cx + kh, ky + kh], fill=outline)
+    d.rectangle([cx - kh * 0.45, ky, cx + kh * 0.45, ky + kh * 2.2], fill=outline)
+
+
+def tagline(d, cx, cy, px, fill):
+    """TAGLINE with the "o" of Hold drawn as a padlock."""
+    before, after = TAGLINE.split("Hold")
+    before += "H"
+    after = "ld" + after
+    f = font(px)
+    lock_w = f.getlength("o")
+    total = f.getlength(before) + lock_w + f.getlength(after)
+    x = cx - total / 2
+    baseline = cy + S(px * 0.36)
+    for part in (before, None, after):
+        if part is None:
+            padlock(d, x + lock_w / 2, baseline, px, fill)
+            x += lock_w
+            continue
+        outlined_text(d, (x, baseline), part, px, fill, anchor="ls", ow=5, inline=False)
+        x += f.getlength(part)
+
+
 def badge(base, cx, cy, value, colour, r=40, glow=None):
     """A round score chip like the in-game score boxes."""
     layer = Image.new("RGBA", base.size, (0, 0, 0, 0))
@@ -122,7 +164,7 @@ def main():
     logo = logo.resize((lw, lw // 2), Image.LANCZOS)
     shadow_paste(base, logo, S(170), S(150), blur=8, offset=(4, 8), alpha=110)
     d = ImageDraw.Draw(base)
-    outlined_text(d, (S(170), S(300)), TAGLINE, 40, CREAM, ow=5, inline=False)
+    tagline(d, S(170), S(300), 40, CREAM)
 
     # Modifier maths, stacked in the middle column
     equation(base, S(150), 16, "mods/plus_4.png", 20, BLUE, S(335))

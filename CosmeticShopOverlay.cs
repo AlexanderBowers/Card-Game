@@ -28,6 +28,16 @@ public partial class CosmeticShopOverlay : Control
     private Button _decksTab;
     private Button _boardsTab;
     private VBoxContainer _rows;
+    private ScrollContainer _scroll;
+
+    // Drag-to-scroll (playtest, 2026-09-30: "difficult to scroll; it requires holding the
+    // scrollbar"). The rows are buttons and panels, which swallow the touch before the
+    // ScrollContainer sees it, so the overlay scrolls the list itself from _Input - and a press
+    // that turned into a drag never buys or equips anything.
+    private bool _dragging;
+    private bool _dragMoved;
+    private float _dragDistance;
+    private const float DragThreshold = 12f;
 
     public void Build()
     {
@@ -57,7 +67,9 @@ public partial class CosmeticShopOverlay : Control
         {
             HorizontalScrollMode = ScrollContainer.ScrollMode.Disabled,
             CustomMinimumSize = new Vector2(430, 460),
+            ScrollDeadzone = 8,
         };
+        _scroll = scroll;
         box.AddChild(scroll);
         _rows = new VBoxContainer { SizeFlagsHorizontal = SizeFlags.ExpandFill };
         _rows.AddThemeConstantOverride("separation", 8);
@@ -89,6 +101,50 @@ public partial class CosmeticShopOverlay : Control
         done?.Invoke();
     }
 
+    public override void _Input(InputEvent e)
+    {
+        if (!Visible || _scroll == null) return;
+
+        // A phone sends touches AND emulated mouse events; read whichever is the real one, once.
+        bool touch = DisplayServer.IsTouchscreenAvailable();
+        switch (e)
+        {
+            case InputEventScreenTouch t when touch:
+                Press(t.Pressed, t.Position);
+                break;
+            case InputEventMouseButton mb when !touch && mb.ButtonIndex == MouseButton.Left:
+                Press(mb.Pressed, mb.Position);
+                break;
+            case InputEventScreenDrag d when touch && _dragging:
+                Drag(d.Relative.Y);
+                break;
+            case InputEventMouseMotion mm when !touch && _dragging && (mm.ButtonMask & MouseButtonMask.Left) != 0:
+                Drag(mm.Relative.Y);
+                break;
+        }
+    }
+
+    private void Press(bool down, Vector2 at)
+    {
+        if (down)
+        {
+            _dragging = _scroll.GetGlobalRect().HasPoint(at);
+            _dragMoved = false;
+            _dragDistance = 0f;
+        }
+        else
+        {
+            _dragging = false;
+        }
+    }
+
+    private void Drag(float dy)
+    {
+        _dragDistance += Mathf.Abs(dy);
+        if (_dragDistance > DragThreshold) _dragMoved = true;
+        if (_dragMoved) _scroll.ScrollVertical -= Mathf.RoundToInt(dy);
+    }
+
     private Button TabButton(string text, Action onPressed)
     {
         Button b = new Button { Text = text, CustomMinimumSize = new Vector2(150, 44), FocusMode = FocusModeEnum.None };
@@ -113,7 +169,14 @@ public partial class CosmeticShopOverlay : Control
     private Control Row(RunData run, string key)
     {
         bool board = _showBoards;
-        string name = char.ToUpperInvariant(key[0]) + key.Substring(1) + (board ? " Board" : " Deck");
+        bool owned = (board ? run.OwnedBoards : run.OwnedDecks).Contains(key);
+        bool unlocked = run.CosmeticUnlocked(key);
+        // Not yet earned = not yet seen (playtest, 2026-09-30): a "?" where the art would be, and
+        // Endless's set gives away nothing at all, not even its name.
+        bool hidden = !owned && !unlocked;
+        bool secret = hidden && key == "endless";
+        string name = secret ? "???"
+                    : char.ToUpperInvariant(key[0]) + key.Substring(1) + (board ? " Board" : " Deck");
 
         PanelContainer frame = new PanelContainer();
         StyleBoxFlat style = new StyleBoxFlat
@@ -133,7 +196,12 @@ public partial class CosmeticShopOverlay : Control
         // What it looks like: a deck is its back beside a 7; a board is the table itself.
         HBoxContainer preview = new HBoxContainer();
         preview.AddThemeConstantOverride("separation", 4);
-        if (board)
+        if (hidden)
+        {
+            preview.AddChild(Mystery(board ? BoardPreview : CardPreview));
+            if (!board) preview.AddChild(Mystery(CardPreview));
+        }
+        else if (board)
         {
             preview.AddChild(Picture($"playmats/playmat_{key}_portrait.png", BoardPreview));
         }
@@ -149,14 +217,13 @@ public partial class CosmeticShopOverlay : Control
         title.HorizontalAlignment = HorizontalAlignment.Left;
         info.AddChild(title);
 
-        bool owned = (board ? run.OwnedBoards : run.OwnedDecks).Contains(key);
         bool inUse = (board ? run.SelectedBoard : run.SelectedDeck) == key;
-        bool unlocked = run.CosmeticUnlocked(key);
         int price = RunData.CosmeticPrice(key);
 
         string note = owned ? (inUse ? "In use" : "Owned")
                     : unlocked ? $"{price} medals"
-                    : $"Beat the {RunData.UnlockStageName(key)} to unlock";
+                    : secret ? "???"
+                    : "Climb further up the ladder to unlock.";
         Label sub = OverlayUi.MakeLabel(note, 14, owned || unlocked ? OverlayUi.Muted : OverlayUi.Warning);
         sub.HorizontalAlignment = HorizontalAlignment.Left;
         sub.AutowrapMode = TextServer.AutowrapMode.WordSmart;
@@ -168,20 +235,39 @@ public partial class CosmeticShopOverlay : Control
         {
             action.Text = inUse ? "Using" : "Use";
             action.Disabled = inUse;
-            action.Pressed += () => { run.SelectCosmetic(key, board); Refresh(); };
+            action.Pressed += () => { if (_dragMoved) return; run.SelectCosmetic(key, board); Refresh(); };
             OverlayUi.StyleButton(action);
         }
         else
         {
             action.Text = unlocked ? "Buy" : "Locked";
             action.Disabled = !unlocked || run.Medals < price;
-            action.Pressed += () => { run.BuyCosmetic(key, board); Refresh(); };
+            action.Pressed += () => { if (_dragMoved) return; run.BuyCosmetic(key, board); Refresh(); };
             OverlayUi.StyleButton(action, primary: unlocked && run.Medals >= price);
         }
         CenterContainer actionBox = new CenterContainer();
         actionBox.AddChild(action);
         row.AddChild(actionBox);
         return frame;
+    }
+
+    /// A card-shaped "?" standing in for art the player has not earned a look at.
+    private static Control Mystery(Vector2 size)
+    {
+        PanelContainer card = new PanelContainer { CustomMinimumSize = size, MouseFilter = MouseFilterEnum.Ignore };
+        StyleBoxFlat style = new StyleBoxFlat
+        {
+            BgColor = new Color(0.17f, 0.21f, 0.29f, 0.85f),
+            BorderColor = new Color(1f, 1f, 1f, 0.35f),
+        };
+        style.SetBorderWidthAll(2);
+        style.SetCornerRadiusAll(8);
+        card.AddThemeStyleboxOverride("panel", style);
+        Label mark = OverlayUi.MakeLabel("?", 34, new Color(1f, 1f, 1f, 0.9f));
+        mark.VerticalAlignment = VerticalAlignment.Center;
+        mark.MouseFilter = MouseFilterEnum.Ignore;
+        card.AddChild(mark);
+        return card;
     }
 
     private static Control Picture(string relative, Vector2 size)
