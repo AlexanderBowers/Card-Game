@@ -473,7 +473,6 @@ def build_flip(value, chosen_plus=True):
 
 BACK_LOOKS = {
     "default":  dict(face="#20304a", rim="#d9a62e", metal="#e0b64a"),
-    "classic":  dict(face="#20304a", rim="#d9a62e", metal="#e0b64a"),   # the original navy + gold
     "bronze":   dict(face="#1d3a2c", rim="#b0703a", metal="#d99a62"),
     "silver":   dict(face="#1d3440", rim="#a9b6c2", metal="#d8e2ea"),
     "gold":     dict(face="#3a2f12", rim="#d9a62e", metal="#f0c95a"),
@@ -504,6 +503,47 @@ def build_back(style="default"):
     for sx in (-1, 1):
         for sy in (-1, 1):
             pip((sx * 1.9, sy * 2.85, THICK + 0.02), 0.13, gold)
+
+
+def vgrad_mat(name, top, bottom, rough=0.4, coat=0.3):
+    """A straight top-to-bottom colour fade (in the object's own Y), satin with a light coat."""
+    m = mat(name, srgb(top), rough=rough, coat=coat)
+    nt = m.node_tree
+    p = nt.nodes["Principled BSDF"]
+    tc = nt.nodes.new("ShaderNodeTexCoord")
+    sep = nt.nodes.new("ShaderNodeSeparateXYZ")
+    nt.links.new(tc.outputs["Object"], sep.inputs[0])
+    rng = nt.nodes.new("ShaderNodeMapRange")
+    rng.inputs["From Min"].default_value = -CARD_H / 2
+    rng.inputs["From Max"].default_value = CARD_H / 2
+    nt.links.new(sep.outputs["Y"], rng.inputs["Value"])
+    ramp = nt.nodes.new("ShaderNodeValToRGB")
+    ramp.color_ramp.elements[0].color = srgb(bottom)
+    ramp.color_ramp.elements[1].color = srgb(top)
+    nt.links.new(rng.outputs[0], ramp.inputs["Fac"])
+    nt.links.new(ramp.outputs["Color"], p.inputs["Base Color"])
+    return m
+
+
+def build_back_classic():
+    """The ORIGINAL back (Alexander's screenshot, 2026-09-30): a teal-to-sky frame, a navy face
+    fading darker downwards, a teal ring round a dark disc, and a gold diamond in the middle.
+    Built here so it shares the light and depth of every other card."""
+    frame = vgrad_mat("Frame", "#5fdccb", "#56b4ef")
+    face = vgrad_mat("Face", "#36598a", "#2a3d62", rough=0.55, coat=0.15)
+    slab("Card", CARD_W, CARD_H, CORNER * 1.15, 0.0, THICK, frame, bevel=0.05)
+    fw, fh = CARD_W - 2 * 0.42, CARD_H - 2 * 0.42
+    slab("Face", fw, fh, CORNER * 0.75, THICK, 0.006, face, bevel=0.004)
+    teal = mat("Ring", srgb("#5fd6e2"), rough=0.3, coat=0.4)
+    r_out, r_in = 1.62, 1.18
+    slab("Ring", 2 * r_out, 2 * r_out, r_out, THICK, 0.035, teal, bevel=0.012,
+         hole=(2 * r_in, 2 * r_in, r_in))
+    disc = mat("Disc", srgb("#3a4659"), rough=0.6)
+    slab("Disc", 2 * r_in, 2 * r_in, r_in, THICK, 0.012, disc, bevel=0.004)
+    gold = mat("Diamond", srgb("#ffc86e"), rough=0.3, coat=0.5)
+    d = 0.95
+    ob = slab("Diamond", d, d, 0.07, THICK + 0.012, 0.05, gold, bevel=0.02)
+    ob.rotation_euler.z = math.pi / 4
 
 
 # ----------------------------------------------------------------------------------------------
@@ -898,7 +938,8 @@ def cards(which):
     if which in ("all", "backs"):
         out.append(("card_back", build_back))
         for r in THEMES:
-            out.append((f"backs/card_back_{r}", lambda r=r: build_back(r)))
+            build = build_back_classic if r == "classic" else (lambda r=r: build_back(r))
+            out.append((f"backs/card_back_{r}", build))
     return out
 
 

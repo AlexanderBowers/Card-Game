@@ -251,7 +251,10 @@ public partial class TableWorld3D : Node3D
             foreach (Node child in root.GetChildren())
             {
                 if (child is not Control piece || !piece.HasMeta(FlyingMeta) || !piece.IsVisibleInTree()) continue;
-                if (piece is TextureRect flier) Mirror(flier, Kind.Card, view, layout, flying: true);
+                if (piece is TextureRect flier)
+                {
+                    if (IsPrerendered(flier)) Mirror(flier, Kind.Card, view, layout, flying: true);
+                }
                 else if (piece is Panel ring) Mirror(ring, Kind.Ring, view, layout, flying: true);
             }
         }
@@ -309,11 +312,19 @@ public partial class TableWorld3D : Node3D
             Mirror(slot, Kind.Slot, view, layout);
             foreach (Node child in slot.GetChildren())
             {
-                if (child is TextureRect card && card.HasMeta("cardId") && card.IsVisibleInTree())
+                if (child is TextureRect card && card.HasMeta("cardId") && card.IsVisibleInTree() && IsPrerendered(card))
                     Mirror(card, Kind.Card, view, layout);
             }
         }
     }
+
+    /// A card view whose whole face is one rendered texture can be drawn in 3D. A card that fell
+    /// back to the old built-up face (a blank frame plus number and pip nodes - when its render is
+    /// missing or not imported yet) cannot: drawing only its texture shows a blank card
+    /// (playtest, 2026-09-30). Those stay 2D, numbers and all. The draw-flight's face-down card
+    /// carries no cardId and is always just its texture.
+    private static bool IsPrerendered(TextureRect view) =>
+        !view.HasMeta("cardId") || view.HasMeta("prerendered");
 
     // ------------------------------------------------------------------
     // One piece

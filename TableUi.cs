@@ -1921,7 +1921,9 @@ public sealed class TableUi
         if (_artCache.TryGetValue(relative, out Texture2D cached)) return cached;
         string path = ArtDir + relative;
         Texture2D tex = ResourceLoader.Exists(path) ? GD.Load<Texture2D>(path) : null;
-        _artCache[relative] = tex;
+        // Only a hit is remembered: a miss (an image the editor has not finished importing) is
+        // asked again next time, rather than leaving that card on its fallback face all session.
+        if (tex != null) _artCache[relative] = tex;
         return tex;
     }
 
