@@ -1,4 +1,3 @@
-using Godot;
 using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
@@ -220,7 +219,6 @@ public sealed class Bot
         //4. Still over the target now = the bot ends its turn and busts when the turn resolves.
         if (Me.CurrentScore > target)
         {
-            GD.Print($"AI ends its turn over the target at {Me.CurrentScore}");
             Me.HasEndedTurn = true;
             _table.ResolveTurn();
             return;
@@ -234,7 +232,6 @@ public sealed class Bot
         {
             if (Me.CurrentScore >= target - 1)
             {
-                GD.Print($"AI (stage 1) HOLDS at {Me.CurrentScore}");
                 Me.IsHolding = true;
             }
             else
@@ -291,7 +288,6 @@ public sealed class Bot
 
         if (Me.CurrentScore >= holdThreshold || Me.CurrentScore == target)
         {
-            GD.Print($"AI decides to HOLD at {Me.CurrentScore} (Target: {target})");
             Me.IsHolding = true;
         }
         else
@@ -701,8 +697,6 @@ public sealed class Bot
         if (bestCard == null) return false;
 
         if (bestCard.Value != bestValue) bestCard.FlipValue(); // play the +/- card the other way round
-
-        GD.Print($"AI Bot plays modifier {bestCard.CardName}. New Score: {bestResult} (Target: {target})");
         _table.PlayBotModifier(bestCard);
 
         _table.Refresh();
@@ -743,19 +737,10 @@ public sealed class Bot
             hand[flipValueIndex] = new Card(Math.Abs(card.Value), CardType.Modifier, "", canFlipValue: true);
         }
 
-        // The stage's effect card takes one of the four slots.
+        // The stage's effect card takes one of the four slots: ONE card, dealt once for the whole
+        // match and spent when it is played. Hands are not topped up between sets - the drama of a
+        // stage card is that there is one of it.
         //
-        // From stage 4 up, if the card this rung is NAMED for is not built yet, the bot carries a
-        // finished effect instead of nothing. That is what Alexander was seeing as "the AI is
-        // sometimes starting a match without their new modifier card": a rung naming an unwired
-        // Trade was dealt four ordinary cards and played exactly like the rung below it.
-        //
-        // Pass 5 wired both Trades, so stages 4-7 each deal the card they are named for now. What
-        // still falls back is stage 8 (no card designed yet) and stages 9-10 (which name nothing
-        // at all until the randomizer rolls their ruleset).
-        //
-        // Still ONE card, dealt once for the whole match and spent when it is played. Hands are
-        // not topped up between sets: the drama of a stage card is that there is one of it.
         // The finale: two plain cards (one of them the "+/-") and one of each rolled effect.
         List<CardEffect> rolled = run.CurrentRolledEffects;
         if (rolled != null && rolled.Count > 0)
@@ -775,6 +760,9 @@ public sealed class Bot
             return;
         }
 
+        // From stage 4 up, a rung whose named card is not wired carries a finished effect it has
+        // already earned instead of nothing (every rung's card is wired today; this is the guard
+        // for the next card designed before it is built).
         CardEffect aiEffect = step.AiEffect;
         if (!CardEffects.IsWired(aiEffect) && run.MatchNumber >= 4)
         {

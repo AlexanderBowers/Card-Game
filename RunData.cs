@@ -6,8 +6,9 @@ using System.Collections.Generic;
 ///
 /// Plain C#, no Godot: the RunStore autoload creates the one instance, loads it from disk, and
 /// writes it back whenever Changed fires. That keeps every rule in here unit-testable - a test
-/// just news one up. The save format itself is in RunData.Save.cs; the fixed data the run is
-/// measured against is in Ladder, CollectionLog, Cosmetics, Ruleset and EndlessRules.
+/// just news one up, and can round-trip it through the save format (RunData.Save.cs). The
+/// fixed data the run is measured against is in Ladder, CollectionLog, Cosmetics, Ruleset and
+/// EndlessRules.
 ///
 /// Local 2-player never touches this - that mode stays a self-contained match with the randomized
 /// hands dealt by Player.DealRandomModifiers.
@@ -251,6 +252,17 @@ public partial class RunData
     /// The finale's rules, if the player is standing on it; otherwise null.
     public List<CardEffect> CurrentRolledEffects =>
         (CurrentStep.Randomised && RolledStep == StepIndex) ? RolledEffects : null;
+
+    /// "Rules: Copy + Shave" for the finale (and every endless match), after the prefix; empty on
+    /// any other rung.
+    public string FinaleRulesLine(string prefix)
+    {
+        List<CardEffect> rolled = CurrentRolledEffects;
+        if (rolled == null || rolled.Count == 0) return string.Empty;
+        List<string> names = new List<string>();
+        foreach (CardEffect effect in rolled) names.Add(CardEffects.Label(effect));
+        return $"{prefix}Rules: {string.Join(" + ", names)}";
+    }
 
     /// Rolls the current rung's rules if it is randomised and has not been rolled. Safe to call
     /// any number of times: the second call is a no-op, which is the whole point.

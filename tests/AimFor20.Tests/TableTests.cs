@@ -253,3 +253,65 @@ public class SetRulesTests
         Assert.True(SetRules.IsSetOver(TestTable.Player("You", 10), bust, 20));
     }
 }
+
+/// The set-end panel's words, and the status line for a picked-up effect card.
+public class TableWordingTests
+{
+    [Fact]
+    public void A_bust_says_who_busted_and_the_other_player_takes_the_set()
+    {
+        SetRules.Outcome o = SetRules.Describe("You", 22, "Them", 17, 20);
+        Assert.Equal(2, o.Winner);
+        Assert.Equal("Them wins the set!", o.Title);
+        Assert.StartsWith("You busted: 22 is over the target of 20.", o.Why);
+        Assert.Equal("Next Set", o.ButtonText);
+    }
+
+    [Fact]
+    public void Two_holds_say_who_is_closest()
+    {
+        SetRules.Outcome o = SetRules.Describe("You", 19, "Them", 17, 20);
+        Assert.Equal(1, o.Winner);
+        Assert.Contains("Both players held.", o.Why);
+        Assert.EndsWith("You is closest to 20.", o.Why);
+    }
+
+    [Fact]
+    public void A_tie_is_replayed()
+    {
+        SetRules.Outcome o = SetRules.Describe("You", 18, "Them", 18, 20);
+        Assert.Equal(0, o.Winner);
+        Assert.Equal("The set is a tie", o.Title);
+        Assert.Equal("Replay Set", o.ButtonText);
+        Assert.EndsWith("Same score, so the set is replayed.", o.Why);
+    }
+
+    [Fact]
+    public void An_effect_preview_shows_the_sum_or_says_why_not()
+    {
+        var host = new FakeTableHost();
+        var table = new Table(host);
+        Player you = host.Player1, them = host.Player2;
+        Card shave = TestTable.Effect(CardEffect.Shave);
+
+        them.CurrentScore = 18;
+        Assert.StartsWith("Shave: ", table.EffectPreview(you, shave)); // not holding: refused, with the reason
+        Assert.DoesNotContain("= 17", table.EffectPreview(you, shave));
+
+        them.IsHolding = true;
+        Assert.Equal("Them: 18 - 1 = 17", table.EffectPreview(you, shave));
+    }
+
+    [Fact]
+    public void A_Veto_preview_names_the_card_with_its_sign()
+    {
+        var host = new FakeTableHost();
+        var table = new Table(host);
+        Player you = host.Player1, them = host.Player2;
+        Card minus = TestTable.Mod(-3);
+        them.CurrentScore = 23;
+        them.Modifiers.Add(minus);
+        them.PlayModifierCard(minus, host.State); // 20
+        Assert.Equal("Destroy their -3: 20 back to 23", table.EffectPreview(you, TestTable.Effect(CardEffect.Veto)));
+    }
+}

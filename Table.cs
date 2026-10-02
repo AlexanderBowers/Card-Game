@@ -126,6 +126,153 @@ public sealed class Table
         else _p2RecallLock = card;
     }
 
+    /// The other side of the table.
+    public Player OpponentOf(Player player) => player == P1 ? P2 : P1;
+
+    // ------------------------------------------------------------------
+    // Effect cards: one set of rules for both sides
+    //
+    // The bot reaches these through IBotTable, the player through their hand. Neither gets its
+    // own rules. What a play LOOKS like (the card landing, a burned Veto, the banner) is the
+    // caller's business; what it DOES to the cards and the turn is decided here.
+    // ------------------------------------------------------------------
+
+    /// Can this player reach across the table with this card right now? Legality is the card's
+    /// own business (CardEffects.CanPlay); the once-per-turn limit is the turn's.
+    public bool CanPlayEffect(Player owner, Card card)
+    {
+        if (card == null || card.Effect == CardEffect.None) return false;
+        if (!CardEffects.Implemented(card.Effect)) return false;
+        if (HasPlayedEffect(owner)) return false;
+        return CardEffects.CanPlay(card, owner, OpponentOf(owner), _host.State.TargetScore);
+    }
+
+    /// WHY this card cannot be played right now, as a sentence, or null when it can be. The
+    /// once-per-turn limit belongs to the TURN, so it is answered here; every other rule is the
+    /// card's own and is answered by CardEffects.
+    ///
+    /// The same sentence is what the status line shows and what explains the greyed-out Play
+    /// button - a rule the player cannot see is a rule they cannot learn.
+    public string EffectRefusal(Player owner, Card card)
+    {
+        if (card == null || card.Effect == CardEffect.None) return null;
+        if (HasPlayedEffect(owner)) return "one card across the table per turn, and you have played yours.";
+        return CardEffects.RefusalReason(card, owner, OpponentOf(owner), _host.State.TargetScore);
+    }
+
+    /// What an effect play did, for the caller to show.
+    public readonly struct EffectPlay
+    {
+        public readonly CardEffects.EffectResult Result;
+        public readonly Player Target;
+        /// Whose board the effect card itself lands on (CardEffects.LandsOnTarget).
+        public readonly Player BoardOwner;
+        /// The card a Veto destroyed, or null.
+        public readonly Card Destroyed;
+        /// The target's turn was re-opened (the answering rule).
+        public readonly bool Reopened;
+
+        public EffectPlay(CardEffects.EffectResult result, Player target, Player boardOwner, Card destroyed, bool reopened)
+        {
+            Result = result;
+            Target = target;
+            BoardOwner = boardOwner;
+            Destroyed = destroyed;
+            Reopened = reopened;
+        }
+    }
+
+    /// Spends an effect card and applies it. Returns false without touching anything if the play
+    /// was not legal, so a card is never silently eaten.
+    /// `chosen` is Recall's only: which spent card comes back. The player picks it in the Recall
+    /// overlay, the bot in its PickRecallTarget; every other effect ignores it.
+    public bool TryPlayEffect(Player owner, Card card, Card chosen, out EffectPlay play)
+    {
+        play = default;
+        if (!CanPlayEffect(owner, card)) return false;
+        if (!owner.Modifiers.Remove(card)) return false;
+
+        Player target = OpponentOf(owner);
+
+        // Veto destroys a card that is already face-up on the target's board, and Resolve clears
+        // LastPlayedModifier - so the card is grabbed here, or the caller has nothing to burn.
+        Card destroyed = (card.Effect == CardEffect.Veto) ? target.LastPlayedModifier : null;
+
+        CardEffects.EffectResult result = CardEffects.Resolve(card, owner, target, _host.State.TargetScore, chosen);
+        if (!result.Applied)
+        {
+            owner.Modifiers.Add(card); // put it back rather than lose it to a rule we misread
+            return false;
+        }
+
+        NoteEffectPlayed(owner);
+
+        // Recall's card is back in hand but dead until the next turn. Set AFTER Resolve, because
+        // Resolve is what moved it out of the spent pile.
+        if (card.Effect == CardEffect.Recall) LockRecall(owner, chosen);
+
+        // THE ANSWERING RULE. A card played at you re-opens your turn for this turn, so you always
+        // get a say - unless you are holding, which is the locked state Shave exists to punish.
+        //
+        // ReleasesHold is the one exception to that exception (Veto, pass 7): it un-locks a score
+        // that was already committed, so the target is re-opened even from a hold. Neither flag
+        // ever deals a card - a re-opened player plays a Modifier, holds, or ends the turn.
+        if (result.ReleasesHold) target.IsHolding = false;
+        bool reopened = result.ReopensTarget && !target.IsHolding;
+        if (reopened) target.HasEndedTurn = false;
+
+        // The two effects that change the other player's score sit in THEIR board, so the number
+        // that moved and the card that moved it are in the same place.
+        Player boardOwner = CardEffects.LandsOnTarget(card.Effect) ? target : owner;
+        boardOwner.ActiveCardsOnBoard.Add(card);
+
+        play = new EffectPlay(result, target, boardOwner, destroyed, reopened);
+        return true;
+    }
+
+    /// The status line for a picked-up effect card: the teaching moment a plain Modifier gets from
+    /// its score preview, for a card whose arithmetic happens on the OTHER side of the table. Says what it would do, or says it cannot be played right now - never a
+    /// sum of this player's score and a number that is not going to be added to it.
+    public string EffectPreview(Player player, Card picked)
+    {
+        Player other = OpponentOf(player);
+        string name = CardEffects.Label(picked.Effect);
+
+        string refusal = EffectRefusal(player, picked);
+        if (refusal != null) return $"{name}: {refusal}";
+
+        switch (picked.Effect)
+        {
+            case CardEffect.Copy:
+            {
+                int mine = player.LastDrawnCard?.Value ?? 0;
+                int theirs = other.LastDrawnCard?.Value ?? 0;
+                int after = player.CurrentScore - mine + theirs;
+                return $"Your {mine} becomes a {theirs}: {player.CurrentScore} to {after}";
+            }
+            case CardEffect.Shave:
+                return $"{other.PlayerName}: {other.CurrentScore} - 1 = {other.CurrentScore - 1}";
+            case CardEffect.TradeTotals:
+                return $"Trade Totals: {player.CurrentScore} and {other.CurrentScore} change places";
+            case CardEffect.TradeHands:
+                return $"Trade Hands: your {player.Modifiers.Count - 1} Modifiers for their {other.Modifiers.Count}";
+            case CardEffect.Recall:
+                return "Take a Modifier back - you can play it from your next turn";
+            case CardEffect.Veto:
+            {
+                // EffectRefusal returned null above, so CanPlay said yes, so LastPlayedModifier is
+                // a plain modifier they played this turn. Named with its sign, because vetoing a
+                // minus card sends their score UP and the preview has to show that honestly.
+                Card theirs = other.LastPlayedModifier;
+                string theirSign = theirs.Value < 0 ? "-" : "+";
+                return $"Destroy their {theirSign}{Math.Abs(theirs.Value)}: "
+                     + $"{other.CurrentScore} back to {other.CurrentScore - theirs.Value}";
+            }
+        }
+
+        return name;
+    }
+
     /// A fresh set: a fresh forty for each player, and the next turn is this set's opening one.
     public void StartSet()
     {

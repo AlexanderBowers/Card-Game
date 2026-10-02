@@ -11,9 +11,6 @@ public interface IMenusHost
     bool GameStarted { get; }
     bool VsBot { get; }
 
-    /// A sentence about the run's rules, for the continue button's note.
-    string FinaleRulesLine(RunData run, string prefix);
-
     /// Deal a match: the solo ladder, or local 2-player as the setup page described it.
     void StartMatch(bool local2Player);
 
@@ -223,6 +220,13 @@ public sealed class Menus
         _menuMat.Texture = chosen ?? (portrait ? MenuMatPortrait : MenuMatLandscape);
     }
 
+    /// The front door. Before this the game opened straight onto a live-looking table with an empty
+    /// board, a dropdown and a Start button - which named neither the game nor the fact that there
+    /// was a climb waiting halfway up the ladder, and which asked for TWO presses to reach the bot:
+    /// one to change scene, another in the scene it changed to.
+    ///
+    /// Built in code and over the table, like every other overlay here (see OverlayUi), so every
+    /// layout scene gets it with no NodePath wiring.
     public void BuildStartMenu()
     {
         _startMenuOverlay = new Control { Visible = false, MouseFilter = Control.MouseFilterEnum.Stop };
@@ -357,7 +361,7 @@ public sealed class Menus
         if (runInProgress && run.Endless)
         {
             continueButton = AddMenuButton($"Continue - Endless, streak {run.EndlessStreak}",
-                          $"target {run.CurrentTarget}{_host.FinaleRulesLine(run, "   -   ")}",
+                          $"target {run.CurrentTarget}{run.FinaleRulesLine("   -   ")}",
                           () => MenuStartRun(fresh: false));
         }
         else if (runInProgress)

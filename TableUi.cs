@@ -43,10 +43,6 @@ public interface ITableUiHost
     /// tutorial, the coach marks - gets its look here.
     void AfterRefresh();
 
-    /// A sentence about the run's rules, for the target line. A reading of the rules, so the
-    /// rules write it.
-    string FinaleRulesLine(RunData run, string prefix);
-
     /// The layout has just moved. Anything anchored to a node on the table - the tutorial's
     /// spotlight - has to be placed again.
     void LayoutChanged();
@@ -1058,7 +1054,7 @@ public sealed class TableUi
         if (run != null && run.CurrentRolledEffects != null)
         {
             string heading = run.Endless ? "ENDLESS" : "FINAL";
-            _targetLabel.Text = $"{heading}  -  TARGET {State.TargetScore}{_host.FinaleRulesLine(run, "\n")}";
+            _targetLabel.Text = $"{heading}  -  TARGET {State.TargetScore}{run.FinaleRulesLine("\n")}";
             _targetLabel.AddThemeColorOverride("font_color", TableGold);
             return;
         }

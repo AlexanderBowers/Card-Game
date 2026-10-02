@@ -32,6 +32,7 @@
     <Compile Include="../../Table.cs" Link="Game/Table.cs" />
     <Compile Include="../../DrawAssist.cs" Link="Game/DrawAssist.cs" />
     <Compile Include="../../SetRules.cs" Link="Game/SetRules.cs" />
+    <Compile Include="../../Bot.cs" Link="Game/Bot.cs" />
   </ItemGroup>
 
   <ItemGroup>

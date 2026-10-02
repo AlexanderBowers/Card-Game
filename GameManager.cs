@@ -98,7 +98,7 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
         _prompts.BuildSetEndOverlay();
         _menus.BuildHowToPlay();
         _menus.BuildTableMenu();
-        BuildDebugRow(); // into the table menu (Options > Debug shows it)
+        _debugRows = DebugRows.Build(_menus.DebugSlot, DebugJumpStage, RestartToMenu); // Options > Debug shows them
         BuildIntermissionOverlays();
         GameSettings.EnsureLoaded();
         GameSettings.Changed += OnSettingsChanged;
@@ -148,7 +148,7 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
     // Options (GameSettings / OptionsOverlay)
     // ------------------------------------------------------------------
     private OptionsOverlay _optionsOverlay;
-    private readonly List<Control> _debugRows = new List<Control>();
+    private List<Control> _debugRows = new List<Control>();
 
     private void BuildOptions()
     {
@@ -401,7 +401,6 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
 
     bool IMenusHost.GameStarted => _isGameStarted;
     bool IMenusHost.VsBot => _isVsBot;
-    string IMenusHost.FinaleRulesLine(RunData run, string prefix) => FinaleRulesLine(run, prefix);
     void IMenusHost.StartMatch(bool local2Player) => StartMatch(local2Player);
     void IMenusHost.OpenOptions(Action onClosed) => OpenOptions(onClosed);
 
@@ -451,7 +450,6 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
     void ITableUiHost.MenuPressed() => _menus.ShowTableMenu();
     void ITableUiHost.LayoutBound(TableLayout layout) { } // nothing of the game's hangs on the layout now
     void ITableUiHost.LayoutChanged() => _teaching.RefreshSpotlight();
-    string ITableUiHost.FinaleRulesLine(RunData run, string prefix) => FinaleRulesLine(run, prefix);
 
     /// The table has just been repainted. The tutorial is watching the screen for the step it set,
     /// and a coach mark waits for a quiet moment to appear - both get their look here, after the
@@ -486,7 +484,7 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
     void ITableHost.DealBotHand() => _bot.DealHand();
 
     void ITableHost.ShowDrawnCard(Player player, Card card, float delay) =>
-        _ui.InstantiateCardView(card, player == _player1 ? _p1BoardContainer : _p2BoardContainer, delay);
+        _ui.InstantiateCardView(card, BoardOf(player), delay);
 
     void ITableHost.HandsDealt(bool introduceCards)
     {
@@ -544,8 +542,8 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
     // ------------------------------------------------------------------
     // Effect cards
     //
-    // One path for both sides. The AI reaches this from ProcessAiTurn (pass 2) and the player
-    // from their hand buttons once the market sells them one; neither gets its own rules.
+    // One path for both sides, and the rules of it live in Table (CanPlayEffect, EffectRefusal,
+    // TryPlayEffect). What is left here is how a play is SHOWN.
     // ------------------------------------------------------------------
 
     /// Can this player play this ORDINARY modifier right now? The only rule is the Recall lock -
@@ -553,102 +551,33 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
     private bool CanPlayModifierNow(Player owner, Card card) =>
         card != null && card.Effect == CardEffect.None && !_table.IsRecallLocked(owner, card);
 
-    /// Can this player reach across the table with this card right now? Legality is the card's
-    /// own business (CardEffects.CanPlay); the once-per-turn limit is the turn's.
-    private bool CanPlayEffect(Player owner, Card card)
-    {
-        if (card == null || card.Effect == CardEffect.None) return false;
-        if (!CardEffects.Implemented(card.Effect)) return false;
-        if (_table.HasPlayedEffect(owner)) return false;
+    private bool CanPlayEffect(Player owner, Card card) => _table.CanPlayEffect(owner, card);
+    private string EffectRefusal(Player owner, Card card) => _table.EffectRefusal(owner, card);
 
-        Player target = (owner == _player1) ? _player2 : _player1;
-        return CardEffects.CanPlay(card, owner, target, _gameState.TargetScore);
-    }
-
-    /// WHY this card cannot be played right now, as a sentence, or null when it can be. The
-    /// once-per-turn limit belongs to the TURN, so it is answered here; every other rule is the
-    /// card's own and is answered by CardEffects.
-    ///
-    /// The same sentence is what the status line shows and what explains the greyed-out Play
-    /// button - a rule the player cannot see is a rule they cannot learn.
-    private string EffectRefusal(Player owner, Card card)
-    {
-        if (card == null || card.Effect == CardEffect.None) return null;
-
-        if (_table.HasPlayedEffect(owner))
-            return "one card across the table per turn, and you have played yours.";
-
-        Player target = (owner == _player1) ? _player2 : _player1;
-        return CardEffects.RefusalReason(card, owner, target, _gameState.TargetScore);
-    }
-
-    /// Spends an effect card and applies it. Returns false without touching anything if the play
-    /// was not legal, so a card is never silently eaten.
-    /// `chosen` is Recall's only: which spent card comes back. The player picks it in the Recall
-    /// overlay, the bot in PickRecallTarget; every other effect ignores it.
+    /// Plays an effect card (Table.TryPlayEffect decides what it does) and shows it: the vetoed
+    /// card burning, the effect card landing, any redrawn faces, the banner and the coach mark.
     private bool PlayEffectCard(Player owner, Card card, Card chosen = null)
     {
-        if (!CanPlayEffect(owner, card)) return false;
-        if (!owner.Modifiers.Remove(card)) return false;
-
-        Player target = (owner == _player1) ? _player2 : _player1;
-
-        // Veto destroys a card that is already face-up on the target's board. Resolve takes it out
-        // of ActiveCardsOnBoard and then clears LastPlayedModifier, and it knows nothing about
-        // nodes - so the card has to be grabbed HERE, before resolving, or there is nothing left
-        // to point the animation at.
-        Card destroyed = (card.Effect == CardEffect.Veto) ? target.LastPlayedModifier : null;
-
-        CardEffects.EffectResult result = CardEffects.Resolve(card, owner, target, _gameState.TargetScore, chosen);
-
-        if (!result.Applied)
-        {
-            owner.Modifiers.Add(card); // put it back rather than lose it to a rule we misread
-            return false;
-        }
-
-        _table.NoteEffectPlayed(owner);
-
-        // Recall's card is back in hand but dead until the next turn. Set AFTER Resolve, because
-        // Resolve is what moved it out of the spent pile.
-        if (card.Effect == CardEffect.Recall) _table.LockRecall(owner, chosen);
-
-        // THE ANSWERING RULE. A card played at you re-opens your turn for this turn, so you always
-        // get a say - unless you are holding, which is the locked state Shave exists to punish.
-        //
-        // ReleasesHold is the one exception to that exception (Veto, pass 7): it un-locks a score
-        // that was already committed, so the target is re-opened even from a hold. Neither flag
-        // ever deals a card - a re-opened player plays a Modifier, holds, or ends the turn.
-        if (result.ReleasesHold) target.IsHolding = false;
-        bool reopened = result.ReopensTarget && !target.IsHolding;
-        if (reopened) target.HasEndedTurn = false;
-
-        // The two effects that change the other player's score sit in THEIR board, so the number
-        // that moved and the card that moved it are in the same place.
-        bool onTarget = CardEffects.LandsOnTarget(card.Effect);
-        Player boardOwner = onTarget ? target : owner;
-        Control board = (boardOwner == _player1) ? _p1BoardContainer : _p2BoardContainer;
+        if (!_table.TryPlayEffect(owner, card, chosen, out Table.EffectPlay play)) return false;
+        Player target = play.Target;
 
         // The vetoed card leaves the table. Burn it BEFORE the Veto card drops, so the eye follows
         // the card being destroyed rather than the one arriving - a score that ticks down on its
         // own tells the target nothing about WHICH card they just lost.
-        if (destroyed != null)
-            _ui.BurnCardView(destroyed, (target == _player1) ? _p1BoardContainer : _p2BoardContainer);
+        if (play.Destroyed != null) _ui.BurnCardView(play.Destroyed, BoardOf(target));
 
-        boardOwner.ActiveCardsOnBoard.Add(card);
-        _ui.InstantiateCardView(card, board);
+        _ui.InstantiateCardView(card, BoardOf(play.BoardOwner));
 
         // A card that rewrote a drawn card mutated a Card object that is already face-up on a
         // board. Without this the board still reads 10 while the score has been paid at 2, which
         // is the one thing a card called Copy cannot afford to get wrong.
         if (CardEffects.RewritesDrawnCards(card.Effect))
         {
-            _ui.RefreshCardFace(owner.LastDrawnCard, (owner == _player1) ? _p1BoardContainer : _p2BoardContainer);
-            _ui.RefreshCardFace(target.LastDrawnCard, (target == _player1) ? _p1BoardContainer : _p2BoardContainer);
+            _ui.RefreshCardFace(owner.LastDrawnCard, BoardOf(owner));
+            _ui.RefreshCardFace(target.LastDrawnCard, BoardOf(target));
         }
 
-        GD.Print(result.Narration);
-        _ui.Toasts.ShowEffectBanner(result.Narration); // the log is not on the table - the player has to SEE it
+        _ui.Toasts.ShowEffectBanner(play.Result.Narration); // the player has to SEE it
 
         // The ladder's promise, kept: you meet a card when it is used on you, and the game says
         // once what it was. Only the bot's cards - your own were introduced when you were dealt them.
@@ -658,10 +587,12 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
         // A re-opened BOT has to be sent round again: ResolveTurn refuses to move while either
         // side can act, and nothing else would ever call the bot back. How it goes round - now, or
         // as a note for the turn already in flight - is the bot's own business (Bot.TurnReopened).
-        if (reopened && _isVsBot && target == _player2) _bot.TurnReopened();
+        if (play.Reopened && _isVsBot && target == _player2) _bot.TurnReopened();
 
         return true;
     }
+
+    private Control BoardOf(Player player) => (player == _player1) ? _p1BoardContainer : _p2BoardContainer;
 
     /// True when a person is allowed to press Draw Card / Hold / a Modifier right now.
     /// (The bot thinking does NOT lock the human - both sides act at the same time.)
@@ -721,43 +652,13 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
         // A rescue card lasts the set it was given in, played or not (monetization-spec.md §3.4).
         _player1.DiscardRescueCards();
 
-        int target = _gameState.TargetScore;
-        int p1 = _player1.CurrentScore;
-        int p2 = _player2.CurrentScore;
-        bool p1Bust = p1 > target;
-        bool p2Bust = p2 > target;
-
-        int setWinner = SetRules.Winner(p1, p2, target);
-
-        // Why the set ended.
-        bool anyBust = p1Bust || p2Bust;
-        string why;
-        if (p1Bust && p2Bust)
-            why = $"Both players busted: {p1} and {p2} are over the target of {target}.";
-        else if (p1Bust)
-            why = $"{_player1.PlayerName} busted: {p1} is over the target of {target}.";
-        else if (p2Bust)
-            why = $"{_player2.PlayerName} busted: {p2} is over the target of {target}.";
-        else
-            why = $"Both players held.\n{_player1.PlayerName}: {p1}      {_player2.PlayerName}: {p2}";
-
-        // What that means.
-        string title;
-        string buttonText;
-        if (setWinner == 0)
-        {
-            title = "The set is a tie";
-            why += "\nSame score, so the set is replayed.";
-            buttonText = "Replay Set";
-        }
-        else
-        {
-            Player winner = (setWinner == 1) ? _player1 : _player2;
-            _gameState.RecordSetWinner(setWinner);
-            if (!anyBust) why += $"\n{winner.PlayerName} is closest to {target}.";
-            title = $"{winner.PlayerName} wins the set!";
-            buttonText = "Next Set";
-        }
+        SetRules.Outcome outcome = SetRules.Describe(_player1.PlayerName, _player1.CurrentScore,
+                                                     _player2.PlayerName, _player2.CurrentScore,
+                                                     _gameState.TargetScore);
+        if (outcome.Winner != 0) _gameState.RecordSetWinner(outcome.Winner);
+        string title = outcome.Title;
+        string why = outcome.Why;
+        string buttonText = outcome.ButtonText;
 
         Action next;
         string secondText = null;
@@ -767,15 +668,14 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
         {
             // The match-end screen (Alexander, 2026-09-30): "X Wins!", then the buttons - "Proceed
             // to Modifier Shop" after a win, "Start New Run" after a loss, and "Return to Main
-            // Menu" under either. ReportRunResult still banks the result; its text is no longer
-            // shown here (the medals are on the shop screen that follows).
+            // Menu" under either. The result is banked here; the medals it earned are shown on the
+            // shop screen that follows.
             matchOver = true;
             Player champion = (matchWinner == 1) ? _player1 : _player2;
             bool playerWon = matchWinner == 1;
             title = (_isVsBot && playerWon) ? "You Win!" : $"{champion.PlayerName} Wins!";
-            ReportRunResult(playerWon, _gameState.SetsWonPlayer1);
-
             RunData run = _inRun ? RunData.Instance : null;
+            run?.CompleteMatch(_gameState.SetsWonPlayer1, playerWon);
             secondText = "Return to Main Menu";
             second = RestartToMenu;
 
@@ -849,83 +749,6 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
         _prompts.ShowSetEnd(title, matchOver ? string.Empty : why, buttonText, next, secondText, second);
     }
 
-    /// Banks the match result against the run and says what it was worth. The market and the deck
-    /// open next (OpenIntermission), which is where those medals get spent.
-    private string ReportRunResult(bool playerWon, int playerSetsWon)
-    {
-        RunData run = _inRun ? RunData.Instance : null;
-        if (run == null) return string.Empty;
-
-        int before = run.Medals;
-        run.CompleteMatch(playerSetsWon, playerWon);
-
-        if (!playerWon)
-        {
-            // The cards are the progress, and they survive - say so plainly, on the screen where
-            // losing is most likely to make someone put the game down.
-            if (run.EndlessStreak > 0 || run.Endless)
-                return $"\n\nYour endless streak ends at {run.EndlessStreak} (best {run.EndlessBest})." +
-                       EndlessBoardLine(run) +
-                       $"\nEvery card you own ({run.Inventory.Count}) and your {run.Medals} medals are still yours.";
-            return $"\n\nThe run ends here. Every card you have unlocked ({run.Inventory.Count}) is " +
-                   $"still yours, along with {run.Medals} medals.\nPlay Again starts a fresh climb " +
-                   $"from stage 1 with your deck intact.";
-        }
-
-        int earned = run.Medals - before;
-        if (run.RunComplete)
-            return $"\n\nYou earned {earned} medals - and you have cleared the whole ladder." +
-                   "\nEndless mode is open on the start menu.";
-
-        if (run.Endless)
-            return $"\n\nStreak {run.EndlessStreak} (best {run.EndlessBest}). You earned {earned} medals." +
-                   $"\nNext: target {run.CurrentTarget}." + FinaleRulesLine(run, "\n") +
-                   "\nThe market is open first.";
-
-        return $"\n\nYou earned {earned} medals ({run.Medals} banked)." +
-               $"\nNext, stage {run.MatchNumber}: {run.CurrentOpponent}, target {run.CurrentTarget}." +
-               FinaleRulesLine(run, "\n") +
-               "\nThe market is open first.";
-    }
-
-    /// Where the streak just banked landed on the endless board, if it landed at all. CompleteMatch
-    /// has already written it, so the run being reported on is row 0 when it is the new best.
-    private static string EndlessBoardLine(RunData run)
-    {
-        List<EndlessScore> board = run.EndlessScores;
-        if (board.Count == 0) return string.Empty;
-
-        for (int i = 0; i < board.Count; i++)
-        {
-            if (board[i].Streak != run.EndlessStreak) continue;
-            if (i == 0) return "\nThat is your best yet - it tops the endless board.";
-            return $"\nThat is {Ordinal(i + 1)} on the endless board.";
-        }
-        return $"\nNot enough for the board - {board[board.Count - 1].Streak} is the score to beat.";
-    }
-
-    private static string Ordinal(int place) => place switch
-    {
-        1 => "first",
-        2 => "second",
-        3 => "third",
-        4 => "fourth",
-        5 => "fifth",
-        _ => $"{place}th",
-    };
-
-    /// "Stage 3/10 - Silver" while a run is on; nothing otherwise. The rank is named here because
-    /// the table is already wearing its colour - the words label what the player can see.
-    /// "Rules: Copy + Shave" for the finale, prefixed; empty on any other rung.
-    private static string FinaleRulesLine(RunData run, string prefix)
-    {
-        List<CardEffect> rolled = run?.CurrentRolledEffects;
-        if (rolled == null || rolled.Count == 0) return string.Empty;
-        List<string> names = new List<string>();
-        foreach (CardEffect effect in rolled) names.Add(CardEffects.Label(effect));
-        return $"{prefix}Rules: {string.Join(" + ", names)}";
-    }
-
     private string RunHeader()
     {
         RunData run = _inRun ? RunData.Instance : null;
@@ -936,99 +759,7 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
         return target == 20 ? "20" : $"Target {target}";
     }
 
-    // ------------------------------------------------------------------
-    // The middle panel's two added lines
-    // ------------------------------------------------------------------
-
-
-    // ------------------------------------------------------------------
-    // Debug row
-    //
-    // Behind OS.IsDebugBuild(), so it cannot ship: an exported build never builds these buttons.
-    // Solo scene only - local 2-player has no run to jump around in.
-    // ------------------------------------------------------------------
-    private void BuildDebugRow()
-    {
-        if (!OS.IsDebugBuild()) return;
-
-        Container column = _menus.DebugSlot;
-        if (column == null) return;
-
-        HBoxContainer row = new HBoxContainer { Alignment = BoxContainer.AlignmentMode.Center };
-        row.AddThemeConstantOverride("separation", 6);
-        column.AddChild(row);
-        _debugRows.Add(row);
-        row.Visible = GameSettings.ShowDebugButtons;   // Options > Debug
-
-        row.AddChild(OverlayUi.MakeLabel("debug", 12, OverlayUi.Muted));
-
-        Button back = new Button { Text = "< Stage" };
-        back.Pressed += () => DebugJumpStage(-1);
-        row.AddChild(back);
-
-        Button forward = new Button { Text = "Stage >" };
-        forward.Pressed += () => DebugJumpStage(+1);
-        row.AddChild(forward);
-
-        Button wipe = new Button { Text = "Wipe Save" };
-        wipe.Pressed += () =>
-        {
-            RunData.Instance?.DebugWipeSave();
-            GD.Print("DEBUG: save wiped - collection, deck, medals and run are gone");
-            RestartToMenu(); // there is no match left to go back to
-        };
-        row.AddChild(wipe);
-
-        // Monetization switches (monetization-spec.md), on a second row so the first stays narrow.
-        HBoxContainer adRow = new HBoxContainer { Alignment = BoxContainer.AlignmentMode.Center };
-        adRow.AddThemeConstantOverride("separation", 6);
-        column.AddChild(adRow);
-        _debugRows.Add(adRow);
-        adRow.Visible = GameSettings.ShowDebugButtons;
-
-        Button rescue = new Button();
-        void RescueText() => rescue.Text = Prompts.DebugAlwaysRescue ? "Rescue 100%" : "Rescue 15%";
-        RescueText();
-        rescue.Pressed += () => { Prompts.DebugAlwaysRescue = !Prompts.DebugAlwaysRescue; RescueText(); };
-        adRow.AddChild(rescue);
-
-        Button fill = new Button();
-        void FillText() => fill.Text = AdService.DebugSimulateNoFill ? "Ads: no fill" : "Ads: fill";
-        FillText();
-        fill.Pressed += () => { AdService.DebugSimulateNoFill = !AdService.DebugSimulateNoFill; FillText(); };
-        adRow.AddChild(fill);
-
-        Button noAds = new Button();
-        void NoAdsText() => noAds.Text = PurchaseService.OwnsNoAds ? "No Ads: owned" : "No Ads: not owned";
-        NoAdsText();
-        noAds.Pressed += () => { PurchaseService.DebugSetOwned(!PurchaseService.OwnsNoAds); NoAdsText(); };
-        adRow.AddChild(noAds);
-
-        // Consent testing, on a third row: both take effect on the NEXT launch, when consent is
-        // gathered.
-        HBoxContainer consentRow = new HBoxContainer { Alignment = BoxContainer.AlignmentMode.Center };
-        consentRow.AddThemeConstantOverride("separation", 6);
-        column.AddChild(consentRow);
-        _debugRows.Add(consentRow);
-        consentRow.Visible = GameSettings.ShowDebugButtons;
-
-        Button eea = new Button();
-        void EeaText() => eea.Text = AdMobBackend.DebugConsentEea ? "Consent: EEA test" : "Consent: real";
-        EeaText();
-        eea.Pressed += () => { AdMobBackend.DebugConsentEea = !AdMobBackend.DebugConsentEea; EeaText(); };
-        consentRow.AddChild(eea);
-
-        Button resetConsent = new Button { Text = "Reset consent" };
-        resetConsent.Pressed += () =>
-        {
-            AdMobBackend.DebugResetConsent();
-            GD.Print("DEBUG: consent reset - relaunch to be asked again");
-        };
-        consentRow.AddChild(resetConsent);
-    }
-
-    /// Drops the run one rung either way and walks straight into that match, so a stage can be
-    /// tested without climbing to it.
+    /// Drops the run one rung either way and walks straight into that match (the debug row).
     private void DebugJumpStage(int delta)
     {
         RunData run = RunData.Instance;
@@ -1099,57 +830,13 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
         Card picked = SelectedFor(player);
         if (picked != null)
         {
-            if (picked.Effect != CardEffect.None) return EffectPreview(player, picked);
+            if (picked.Effect != CardEffect.None) return _table.EffectPreview(player, picked);
             if (_table.IsRecallLocked(player, picked)) return "Just recalled - playable from your next turn";
             // A plain Modifier says nothing here: its result is shown on the score itself.
         }
 
         return string.Empty;
     }
-
-    /// The same teaching moment as the sum above, for a card whose arithmetic happens on the OTHER
-    /// side of the table. Says what it would do, or says it cannot be played right now - never a
-    /// sum of this player's score and a number that is not going to be added to it.
-    private string EffectPreview(Player player, Card picked)
-    {
-        Player other = (player == _player1) ? _player2 : _player1;
-        string name = CardEffects.Label(picked.Effect);
-
-        string refusal = EffectRefusal(player, picked);
-        if (refusal != null) return $"{name}: {refusal}";
-
-        switch (picked.Effect)
-        {
-            case CardEffect.Copy:
-            {
-                int mine = player.LastDrawnCard?.Value ?? 0;
-                int theirs = other.LastDrawnCard?.Value ?? 0;
-                int after = player.CurrentScore - mine + theirs;
-                return $"Your {mine} becomes a {theirs}: {player.CurrentScore} to {after}";
-            }
-            case CardEffect.Shave:
-                return $"{other.PlayerName}: {other.CurrentScore} - 1 = {other.CurrentScore - 1}";
-            case CardEffect.TradeTotals:
-                return $"Trade Totals: {player.CurrentScore} and {other.CurrentScore} change places";
-            case CardEffect.TradeHands:
-                return $"Trade Hands: your {player.Modifiers.Count - 1} Modifiers for their {other.Modifiers.Count}";
-            case CardEffect.Recall:
-                return "Take a Modifier back - you can play it from your next turn";
-            case CardEffect.Veto:
-            {
-                // EffectRefusal returned null above, so CanPlay said yes, so LastPlayedModifier is
-                // a plain modifier they played this turn. Named with its sign, because vetoing a
-                // minus card sends their score UP and the preview has to show that honestly.
-                Card theirs = other.LastPlayedModifier;
-                string theirSign = theirs.Value < 0 ? "-" : "+";
-                return $"Destroy their {theirSign}{Math.Abs(theirs.Value)}: "
-                     + $"{other.CurrentScore} back to {other.CurrentScore - theirs.Value}";
-            }
-        }
-
-        return name;
-    }
-
 
     // ------------------------------------------------------------------
     // Picking a card up
@@ -1214,7 +901,7 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
 
         if (player.PlayModifierCard(card, _gameState))
         {
-            _ui.InstantiateCardView(card, (player == _player1) ? _p1BoardContainer : _p2BoardContainer);
+            _ui.InstantiateCardView(card, BoardOf(player));
         }
 
         _ui.Refresh();
@@ -1250,22 +937,6 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
     }
 
 
-    // ------------------------------------------------------------------
-    // The start menu
-    //
-    // The front door. Before this the game opened straight onto a live-looking table with an empty
-    // board, a dropdown and a Start button - which named neither the game nor the fact that there
-    // was a climb waiting halfway up the ladder, and which asked for TWO presses to reach the bot:
-    // one to change scene, another in the scene it changed to.
-    //
-    // Built in code and over the table, like every other overlay here (see OverlayUi), so both
-    // scenes get it with no NodePath wiring. It is the only screen that knows about both scenes:
-    // the ladder lives in the solo scene and the mirrored face-to-face table in the other, so
-    // choosing a mode IS choosing a scene, and the menu does that itself rather than making the
-    // player discover it.
-    // ------------------------------------------------------------------
-
-
     /// Plain and flip-value Modifiers only; effect cards are marked when a coach-mark explains
     /// them. Ladder only - local 2-player deals random hands and has no profile to write to.
     private void NoteModifierMet(Card card)
@@ -1279,52 +950,4 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
         _ui.Toasts.ShowEffectBanner("Collection complete! Your deck now has a gilded back.");
         _ui.ApplyRankTheme();
     }
-
-
-    // ------------------------------------------------------------------
-    // The first-launch tutorial (Alexander, 2026-09-15)
-    //
-    // Against the bot there is nobody in the room to explain the game, so the game has to teach
-    // it. Six steps, each highlighting ONE control with one or two lines - the anti-wall-of-text
-    // the tenets ask for, and the only form that works at both ends of the 5-to-85 range.
-    //
-    // It teaches THE TABLE AND ONLY THE TABLE. The ladder is already the tutorial for the cards:
-    // ten rungs, one new card each, used on you by an opponent before the market will sell it to
-    // you. A tutorial that also explained effect cards would be competing with a teaching
-    // structure that already works, and would have to explain six cards the player cannot yet own.
-    //
-    // THE FIRST MATCH IS STAGED (Alexander's call): the deck is stacked so the opening deal is
-    // 10 + 6 = 16 against the bot's 9 + 5, and the hand holds a +4. The lesson therefore ends with
-    // the player making the RIGHT play - picking up the +4, seeing 16 + 4 = 20 in green, playing
-    // it and holding on the target - rather than any play. Staging only happens at a target of 20
-    // (see ShouldStageTutorial); replayed at any other rung the same six steps run on a real deal,
-    // and every caption reads live values so none of them can lie.
-    // ------------------------------------------------------------------
-
-
-    // ---- the overlay -------------------------------------------------
-
-
-    // ---- the steps ---------------------------------------------------
-
-
-    // ---- running it --------------------------------------------------
-
-
-    // ------------------------------------------------------------------
-    // Coach-marks: one line, the first time you meet a card
-    //
-    // This is what actually delivers the ladder's promise. The ladder introduces one new card per
-    // rung and the market sells it to you straight afterwards - but until now the card simply
-    // appeared and something happened to your score. One highlight and one sentence, once ever.
-    //
-    // The sentence is CardEffects.Introduction, which is the market's own Description. Two copies
-    // of an explanation drift, and the player would end up being told two different things about
-    // one card.
-    //
-    // "Met" is profile level (RunData.CardsMet), so a lost run does not un-teach it, and it is the
-    // same set a collection log will read.
-    // ------------------------------------------------------------------
-
-
 }

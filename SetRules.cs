@@ -23,4 +23,47 @@ public static class SetRules
         if (p1 == p2) return 0;
         return p1 > p2 ? 1 : 2;
     }
+
+    /// What the set-end panel says about a set that has just ended.
+    public readonly struct Outcome
+    {
+        public readonly int Winner;        // 1, 2, or 0 for a tie
+        public readonly string Title;      // "<name> wins the set!" / "The set is a tie"
+        public readonly string Why;        // why it ended, and what that means
+        public readonly string ButtonText; // "Next Set" / "Replay Set"
+
+        public Outcome(int winner, string title, string why, string buttonText)
+        {
+            Winner = winner;
+            Title = title;
+            Why = why;
+            ButtonText = buttonText;
+        }
+    }
+
+    /// The set-end explanation, worded from the two scores. A rule the player cannot see is a rule
+    /// they cannot learn, so it always says WHY: who busted, or who held closer.
+    public static Outcome Describe(string p1Name, int p1, string p2Name, int p2, int target)
+    {
+        bool p1Bust = p1 > target;
+        bool p2Bust = p2 > target;
+        int winner = Winner(p1, p2, target);
+
+        string why;
+        if (p1Bust && p2Bust)
+            why = $"Both players busted: {p1} and {p2} are over the target of {target}.";
+        else if (p1Bust)
+            why = $"{p1Name} busted: {p1} is over the target of {target}.";
+        else if (p2Bust)
+            why = $"{p2Name} busted: {p2} is over the target of {target}.";
+        else
+            why = $"Both players held.\n{p1Name}: {p1}      {p2Name}: {p2}";
+
+        if (winner == 0)
+            return new Outcome(0, "The set is a tie", why + "\nSame score, so the set is replayed.", "Replay Set");
+
+        string winnerName = winner == 1 ? p1Name : p2Name;
+        if (!p1Bust && !p2Bust) why += $"\n{winnerName} is closest to {target}.";
+        return new Outcome(winner, $"{winnerName} wins the set!", why, "Next Set");
+    }
 }
