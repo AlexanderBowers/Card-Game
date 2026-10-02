@@ -1,4 +1,3 @@
-using Godot;
 using System;
 using System.Collections.Generic;
 
@@ -50,7 +49,8 @@ public interface ITableHost
 ///
 /// The line against TableUi (and it is the line worth holding): this class knows WHERE the cards
 /// are, never what they look like. Nothing here touches a node, a texture or an animation - the
-/// one moment a card becomes visible goes out through ITableHost.ShowDrawnCard.
+/// one moment a card becomes visible goes out through ITableHost.ShowDrawnCard. It does not use
+/// Godot at all, which is what lets tests/AimFor20.Tests drive it through a fake host.
 public sealed class Table
 {
     private readonly ITableHost _host;
@@ -350,9 +350,6 @@ public sealed class Table
         // most recent draw), but it is the kind of thing that should be written down rather than
         // discovered.
         player.LastDrawnCard = drawnMainCard;
-
-        GD.Print($"{player.PlayerName} drew a {cardValue}. Score: {player.CurrentScore} "
-               + $"({DeckOf(player).Count} left in their deck)");
 
         _host.ShowDrawnCard(player, drawnMainCard, delay);
 

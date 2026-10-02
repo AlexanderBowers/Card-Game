@@ -342,11 +342,7 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
             return;
         }
 
-        int target = _gameState.TargetScore;
-        bool anyBust = _player1.CurrentScore > target || _player2.CurrentScore > target;
-        bool bothHolding = _player1.IsHolding && _player2.IsHolding;
-
-        if (anyBust || bothHolding)
+        if (SetRules.IsSetOver(_player1, _player2, _gameState.TargetScore))
         {
             if (_prompts.OfferRescue()) return;
             EndSet();
@@ -732,12 +728,7 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
         bool p1Bust = p1 > target;
         bool p2Bust = p2 > target;
 
-        int setWinner;
-        if (p1Bust && p2Bust) setWinner = 0;
-        else if (p1Bust) setWinner = 2;
-        else if (p2Bust) setWinner = 1;
-        else if (p1 == p2) setWinner = 0;
-        else setWinner = (p1 > p2) ? 1 : 2; // both under the target: the higher score is closer
+        int setWinner = SetRules.Winner(p1, p2, target);
 
         // Why the set ended.
         bool anyBust = p1Bust || p2Bust;
