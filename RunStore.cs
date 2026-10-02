@@ -2,7 +2,7 @@ using Godot;
 
 /// The autoload that owns the live RunData: loads it from disk when the game boots and writes it
 /// back whenever it changes. This is the only part of the profile that touches the filesystem,
-/// which is what lets RunData itself be plain, testable C#.
+/// which is what lets RunData itself - save format included - be plain, testable C#.
 public partial class RunStore : Node
 {
     private const string SavePath = "user://run.json";
@@ -10,21 +10,19 @@ public partial class RunStore : Node
     public override void _Ready()
     {
         RunData run = new RunData();
-        Godot.Collections.Dictionary saved = Read();
-        if (saved != null) run.LoadSaveData(saved);
+        string saved = Read();
+        if (saved != null && !run.LoadSaveJson(saved))
+            GD.PushWarning("The run save could not be read; starting from a fresh profile.");
         run.Changed += () => Write(run);
         RunData.Instance = run;
     }
 
-    private static Godot.Collections.Dictionary Read()
+    private static string Read()
     {
         if (!FileAccess.FileExists(SavePath)) return null;
 
         using FileAccess file = FileAccess.Open(SavePath, FileAccess.ModeFlags.Read);
-        if (file == null) return null;
-
-        Variant parsed = Json.ParseString(file.GetAsText());
-        return parsed.VariantType == Variant.Type.Dictionary ? parsed.AsGodotDictionary() : null;
+        return file?.GetAsText();
     }
 
     private static void Write(RunData run)
@@ -35,6 +33,6 @@ public partial class RunStore : Node
             GD.PushWarning($"Could not write the run save: {FileAccess.GetOpenError()}");
             return;
         }
-        file.StoreString(Json.Stringify(run.ToSaveData()));
+        file.StoreString(run.ToSaveJson());
     }
 }

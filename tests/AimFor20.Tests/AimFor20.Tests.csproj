@@ -25,8 +25,9 @@
     <Compile Include="../../CollectionLog.cs" Link="Game/CollectionLog.cs" />
     <Compile Include="../../Cosmetics.cs" Link="Game/Cosmetics.cs" />
     <Compile Include="../../Ruleset.cs" Link="Game/Ruleset.cs" />
-    <!-- RunData is split across files; RunData.Save.cs and RankTheme.cs need Godot and stay out. -->
+    <!-- RunData is split across files; only RankTheme.cs (the rank colours) needs Godot and stays out. -->
     <Compile Include="../../RunData.cs" Link="Game/RunData.cs" />
+    <Compile Include="../../RunData.Save.cs" Link="Game/RunData.Save.cs" />
     <Compile Include="../../RunData.Migration.cs" Link="Game/RunData.Migration.cs" />
     <Compile Include="../../Table.cs" Link="Game/Table.cs" />
     <Compile Include="../../DrawAssist.cs" Link="Game/DrawAssist.cs" />
