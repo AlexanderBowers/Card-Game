@@ -8,7 +8,7 @@ using System;
 /// A DECK is the player's card back plus the look of their 1-10 cards; a BOARD is the table they
 /// play on outside the ladder (local 2-player, and later online and endless). One of each per
 /// rank. Bronze is owned from the start; the rest unlock for purchase once the player has beaten
-/// that rank's first stage, and cost RunData.CosmeticPrice medals. What the player picks here is
+/// that rank's first stage, and cost Cosmetics.Price medals. What the player picks here is
 /// the only way their deck or board changes - a stage never changes it.
 ///
 /// Reads and writes RunData's cosmetic fields only; closing hands back to the menu, which
@@ -162,7 +162,7 @@ public partial class CosmeticShopOverlay : Control
         OverlayUi.StyleButton(_boardsTab, primary: _showBoards);
 
         OverlayUi.ClearChildren(_rows);
-        foreach (string key in RunData.CosmeticKeys)
+        foreach (string key in Cosmetics.Keys)
             _rows.AddChild(Row(run, key));
     }
 
@@ -218,7 +218,7 @@ public partial class CosmeticShopOverlay : Control
         info.AddChild(title);
 
         bool inUse = (board ? run.SelectedBoard : run.SelectedDeck) == key;
-        int price = RunData.CosmeticPrice(key);
+        int price = Cosmetics.Price(key);
 
         string note = owned ? (inUse ? "In use" : "Owned")
                     : unlocked ? $"{price} medals"

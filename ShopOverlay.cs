@@ -16,7 +16,7 @@ public partial class ShopOverlay : Control
 
     private sealed class Offer
     {
-        public RunData.ModifierDef Def;
+        public ModifierDef Def;
         public int Price;
         public bool Sold;
     }
@@ -43,7 +43,7 @@ public partial class ShopOverlay : Control
     // A won match pays roughly 5 medals early and 12 late (sets taken + the venue purse), so a
     // visit buys about one card - two if the player is saving or the stock is small.
     // ------------------------------------------------------------------
-    public static int PriceOf(RunData.ModifierDef def)
+    public static int PriceOf(ModifierDef def)
     {
         // Effect cards are one-shot swings rather than arithmetic, so they sit above the whole
         // modifier table. Trade Totals is the most expensive card in the game on purpose: it takes
@@ -86,9 +86,9 @@ public partial class ShopOverlay : Control
     /// lose two sets to a Copy, you clear the stage, and a Copy is waiting on the next screen.
     /// The rest rolls from everything unlocked so far - bigger cards and commoner +/- further up
     /// the ladder, and effects at about a quarter of the stock so the arithmetic deck still grows.
-    public static List<RunData.ModifierDef> RollOffers(Random rng, RunData run, int count)
+    public static List<ModifierDef> RollOffers(Random rng, RunData run, int count)
     {
-        List<RunData.ModifierDef> offers = new List<RunData.ModifierDef>();
+        List<ModifierDef> offers = new List<ModifierDef>();
         int stepIndex = run?.StepIndex ?? 0;
         int maxMagnitude = Mathf.Clamp(3 + stepIndex / 3, 3, 6);
         double flipValueChance = 0.15 + 0.02 * stepIndex;
@@ -98,7 +98,7 @@ public partial class ShopOverlay : Control
 
         for (int attempt = 0; attempt < count * 12 && offers.Count < count; attempt++)
         {
-            RunData.ModifierDef def;
+            ModifierDef def;
 
             if (unlocked.Count > 0 && rng.NextDouble() < 0.25)
             {
@@ -111,7 +111,7 @@ public partial class ShopOverlay : Control
 
                 // A +/- card is stored positive; the player picks its sign at the table.
                 int value = (canFlipValue || rng.Next(2) == 0) ? magnitude : -magnitude;
-                def = new RunData.ModifierDef(value, canFlipValue);
+                def = new ModifierDef(value, canFlipValue);
             }
 
             if (!IsDuplicate(offers, def)) offers.Add(def);
@@ -122,14 +122,14 @@ public partial class ShopOverlay : Control
         if (run != null && run.Medals >= 4 && offers.Count > 1
             && offers.TrueForAll(o => PriceOf(o) > run.Medals))
         {
-            offers[offers.Count - 1] = new RunData.ModifierDef(rng.Next(2) == 0 ? 2 : -2);
+            offers[offers.Count - 1] = new ModifierDef(rng.Next(2) == 0 ? 2 : -2);
         }
 
         return offers;
     }
 
     /// The one card every visit guarantees: whatever the stage just cleared was about.
-    private static RunData.ModifierDef SignatureOffer(Random rng, RunData run,
+    private static ModifierDef SignatureOffer(Random rng, RunData run,
                                                       List<CardEffect> unlocked, int maxMagnitude)
     {
         // Endless parks on the last rung, so "the stage just cleared" would be Veto every visit.
@@ -137,7 +137,7 @@ public partial class ShopOverlay : Control
         if (run.Endless && unlocked.Count > 0)
             return ToDef(CardEffects.Create(unlocked[rng.Next(unlocked.Count)], rng));
 
-        RunData.LadderStep cleared = run.StepAt(run.ClearedStepIndex);
+        LadderStep cleared = Ladder.At(run.ClearedStepIndex);
         int stage = run.ClearedStepIndex + 1;
 
         // Stages 4-8: the card the player has just been hit with, now for sale.
@@ -147,8 +147,8 @@ public partial class ShopOverlay : Control
         }
 
         // Stage 1 is the plain game; stage 2 is the one that introduces "+/-".
-        if (stage <= 1) return new RunData.ModifierDef(RollMagnitude(rng, 3) * (rng.Next(2) == 0 ? 1 : -1));
-        if (stage == 2) return new RunData.ModifierDef(RollMagnitude(rng, 3), canFlipValue: true);
+        if (stage <= 1) return new ModifierDef(RollMagnitude(rng, 3) * (rng.Next(2) == 0 ? 1 : -1));
+        if (stage == 2) return new ModifierDef(RollMagnitude(rng, 3), canFlipValue: true);
 
         // The cleared stage WAS about an effect card, but not one that is built yet - stages 5, 6
         // and 8 name a Trade that pass 3 has still to wire - or it is a randomized rung that names
@@ -165,15 +165,15 @@ public partial class ShopOverlay : Control
         // target is exactly when a big swing earns its price.
 
         int magnitude = Math.Max(4, RollMagnitude(rng, Math.Max(4, maxMagnitude)));
-        return new RunData.ModifierDef(rng.Next(2) == 0 ? magnitude : -magnitude);
+        return new ModifierDef(rng.Next(2) == 0 ? magnitude : -magnitude);
     }
 
-    private static RunData.ModifierDef ToDef(Card card) =>
-        new RunData.ModifierDef(card.Value, card.CanFlipValue, card.Effect);
+    private static ModifierDef ToDef(Card card) =>
+        new ModifierDef(card.Value, card.CanFlipValue, card.Effect);
 
     /// Two offers are the same card when they would play identically. Effect cards collide on the
     /// effect alone: two Copies in one market is a thin visit.
-    private static bool IsDuplicate(List<RunData.ModifierDef> offers, RunData.ModifierDef def)
+    private static bool IsDuplicate(List<ModifierDef> offers, ModifierDef def)
     {
         if (def.Effect != CardEffect.None) return offers.Exists(o => o.Effect == def.Effect);
         return offers.Exists(o => o.Effect == CardEffect.None && o.Value == def.Value && o.CanFlipValue == def.CanFlipValue);
@@ -248,7 +248,7 @@ public partial class ShopOverlay : Control
         }
 
         _offers.Clear();
-        foreach (RunData.ModifierDef def in RollOffers(_random, run, OfferCount))
+        foreach (ModifierDef def in RollOffers(_random, run, OfferCount))
             _offers.Add(new Offer { Def = def, Price = PriceOf(def) });
 
         _subtitle.Text = $"Next: {run.CurrentOpponent} - target {run.CurrentTarget}";

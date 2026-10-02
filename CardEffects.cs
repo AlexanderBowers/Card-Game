@@ -16,7 +16,7 @@ public enum CardEffect
     ///
     /// The SLOT stays because these values are written into save files as ints - deleting it
     /// would renumber every effect below it and turn a saved Shave into something else. Nothing
-    /// creates one any more, and RunData.Load migrates any that were saved.
+    /// creates one any more, and RunData.MigrateModifier migrates any that were saved.
     Push,
 
     /// RETIRED 2026-09-11. Trade Draw swapped the two cards drawn this turn. Copy (stage 4) is
@@ -28,7 +28,7 @@ public enum CardEffect
 
     // The ORDER of the members below is not the ladder's order and never will be again - these
     // values are ints in the save file, so a card's slot is fixed the day it is written, while
-    // its rung lives in RunData.Ladder and moved once already (2026-09-11).
+    // its rung lives in Ladder.cs and moved once already (2026-09-11).
     TradeTotals,   // stage 5: swap the two current scores
     Shave,         // stage 6: -1 to an opponent who is holding below the target
     TradeHands,    // stage 7: swap the two remaining hands

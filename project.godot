@@ -25,7 +25,7 @@ config/icon="res://assets/aimfor20_art/icon_1024.png"
 
 [autoload]
 
-RunData="*res://RunData.cs"
+RunStore="*res://RunStore.cs"
 
 [display]
 

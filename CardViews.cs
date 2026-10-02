@@ -475,7 +475,7 @@ public sealed class CardViews
     private const string PrerenderedMeta = "prerendered";
 
     /// The player's chosen deck - "bronze", "silver"... (RunData.SelectedDeck).
-    public static string PlayerDeckKey => RunData.Instance?.SelectedDeck ?? RunData.DefaultCosmetic;
+    public static string PlayerDeckKey => RunData.Instance?.SelectedDeck ?? Cosmetics.Default;
 
     /// Whose deck a main card on this side is drawn from: the opponent in a ladder stage uses the
     /// STAGE's deck; everyone else (you, and both players in local 2-player) uses yours.

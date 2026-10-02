@@ -931,7 +931,7 @@ public sealed class TableUi
             if (!L.Background.HasMeta("authoredMat")) L.Background.SetMeta("authoredMat", L.Background.Texture);
             Texture2D authored = L.Background.GetMeta("authoredMat").As<Texture2D>();
             // In a ladder stage the table is the STAGE's; anywhere else it is the player's own board.
-            string boardKey = Cards.RankKey ?? RunData.Instance?.SelectedBoard ?? RunData.DefaultCosmetic;
+            string boardKey = Cards.RankKey ?? RunData.Instance?.SelectedBoard ?? Cosmetics.Default;
             Texture2D mat = Cards.Art($"playmats/playmat_{boardKey}_{(L.Portrait ? "portrait" : "landscape")}.png");
             L.Background.Texture = mat ?? authored;
             L.Background.SelfModulate = mat != null ? Colors.White : _playmatTint;

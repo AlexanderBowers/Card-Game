@@ -217,7 +217,7 @@ public sealed class Menus
         if (_menuMat == null || _startMenuOverlay == null) return;
         Vector2 size = _startMenuOverlay.Size;
         bool portrait = size.Y > size.X;
-        string board = RunData.Instance?.SelectedBoard ?? RunData.DefaultCosmetic;
+        string board = RunData.Instance?.SelectedBoard ?? Cosmetics.Default;
         string path = $"res://assets/aimfor20_art/playmats/playmat_{board}_{(portrait ? "portrait" : "landscape")}.png";
         Texture2D chosen = ResourceLoader.Exists(path) ? GD.Load<Texture2D>(path) : null;
         _menuMat.Texture = chosen ?? (portrait ? MenuMatPortrait : MenuMatLandscape);
@@ -362,7 +362,7 @@ public sealed class Menus
         }
         else if (runInProgress)
         {
-            continueButton = AddMenuButton($"Continue - Match {run.MatchNumber} of {RunData.LadderLength}",
+            continueButton = AddMenuButton($"Continue - Match {run.MatchNumber} of {Ladder.Length}",
                           $"{run.CurrentOpponent}   -   target {run.CurrentTarget}",
                           () => MenuStartRun(fresh: false));
         }
@@ -422,7 +422,7 @@ public sealed class Menus
         AddMenuButton("How to Play", null, ShowHowToPlay);
         AddMenuButton("Options", null, () => _host.OpenOptions());
         if (run != null)
-            AddMenuButton($"Collection   {run.CollectionFound}/{RunData.CollectionKeys.Length}", null, OpenCollection);
+            AddMenuButton($"Collection   {run.CollectionFound}/{CollectionLog.Keys.Length}", null, OpenCollection);
         if (run != null)
             AddMenuButton($"Shop   {run.Medals} medals", null, OpenShop);
 
@@ -621,7 +621,7 @@ public sealed class Menus
 
         for (int i = 0; i < run.EndlessScores.Count; i++)
         {
-            RunData.EndlessScore score = run.EndlessScores[i];
+            EndlessScore score = run.EndlessScores[i];
             bool best = i == 0;
 
             HBoxContainer row = new HBoxContainer();
@@ -650,7 +650,7 @@ public sealed class Menus
         _startMenuBox.AddChild(MenuSpacer());
         Label footer = OverlayUi.MakeLabel(
             $"Best streak {run.EndlessBest}.   The rules are re-rolled every match; "
-            + $"past a streak of {RunData.EndlessThirdRuleStreak} the opponent carries three specials.",
+            + $"past a streak of {EndlessRules.ThirdRuleStreak} the opponent carries three specials.",
             MenuNoteFont, OverlayUi.Muted);
         footer.AutowrapMode = TextServer.AutowrapMode.WordSmart;
         footer.CustomMinimumSize = new Vector2(MenuButtonWidth, 0);

@@ -902,7 +902,7 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
     /// has already written it, so the run being reported on is row 0 when it is the new best.
     private static string EndlessBoardLine(RunData run)
     {
-        List<RunData.EndlessScore> board = run.EndlessScores;
+        List<EndlessScore> board = run.EndlessScores;
         if (board.Count == 0) return string.Empty;
 
         for (int i = 0; i < board.Count; i++)

@@ -725,7 +725,7 @@ public sealed class Bot
             return;
         }
 
-        RunData.LadderStep step = run.CurrentStep;
+        LadderStep step = run.CurrentStep;
         List<Card> hand = new List<Card>();
 
         // Plain cards first: no flip chance here, because whether this stage has a "+/-" card is
@@ -785,7 +785,7 @@ public sealed class Bot
             // that reached for anything wired would have handed the player a stage 7 Shave at
             // stage 5, two rungs before the game introduces it and two before the market will
             // sell it. It became a live risk the moment stage 5 lost its own card.
-            wired.RemoveAll(effect => RunData.StageThatIntroduces(effect) > run.MatchNumber);
+            wired.RemoveAll(effect => Ladder.StageThatIntroduces(effect) > run.MatchNumber);
 
             if (wired.Count > 0) aiEffect = wired[_table.Rng.Next(wired.Count)];
         }
