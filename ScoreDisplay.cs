@@ -34,8 +34,6 @@ public sealed class ScoreDisplay
     public void Bind()
     {
         ResetScoreFeedback();
-        TurnRound(L.P1ScoreFarEnd);
-        TurnRound(L.P2ScoreFarEnd);
         if (L.P1ScoreThem != null) L.P1ScoreThem.Visible = false; // the box is one line now
         if (L.P2ScoreThem != null) L.P2ScoreThem.Visible = false;
     }
@@ -361,32 +359,23 @@ public sealed class ScoreDisplay
     // Score badges (pass 40, portrait)
     //
     // Each side's score sits in a badge beside its own board, Pokemon TCG Pocket-style, rather
-    // than in a "You  11/20" box in a row of its own. The badge sits on the board it counts,
-    // so it needs no "You" or "Them".
-    //
-    // Face to face, both players read both badges from opposite ends of the phone, so each badge
-    // grows a second end turned round (a playing card's two corner indices): its owner reads the
-    // near end, the player across the table reads the far end. The badge is then the same both
-    // ways up, so it looks like one object rather than a label with an upside-down copy. The far
-    // end shows the real score, never the preview of a card the owner has only picked up.
+    // than in a "You  11/20" box in a row of its own. Face to face, the player across the table
+    // reads it from the THEM badge on their own half (RefreshOpponentLines); the turned-round far
+    // end that used to do that job (pass 40) was retired in pass 43 and removed in pass 66.
     // ------------------------------------------------------------------
     private void RefreshScoreBadges()
     {
         bool bothRead = !_host.VsBot; // the bot's badge has no reader of its own: no target on it
-        SetScoreBadge(P1, L.P1ScoreValue, L.P1ScoreTarget, L.P1ScoreFarValue, L.P1ScoreFarTarget, true, true);
-        SetScoreBadge(P2, L.P2ScoreValue, L.P2ScoreTarget, L.P2ScoreFarValue, L.P2ScoreFarTarget, bothRead, bothRead);
+        SetScoreBadge(P1, L.P1ScoreValue, L.P1ScoreTarget, true, true);
+        SetScoreBadge(P2, L.P2ScoreValue, L.P2ScoreTarget, bothRead, bothRead);
 
-        // Pass 42: a bare number beside a board still read as ambiguous in playtest, so each end
-        // says whose score it is to the person reading that end. The owner reads the near end;
-        // the far end (face to face only) is read from across the table. Against the bot, the
-        // bot's near end is read by Player 1.
+        // Pass 42: a bare number beside a board still read as ambiguous in playtest, so each badge
+        // says whose score it is to the person reading it.
         // Pass 43: Player 2's badge only says YOU face to face, when Player 2 reads it. Without the
         // mirror the whole table is read from Player 1's end, so it is THEM - "YOU" on both
         // badges was the confusing case in playtest.
         SetCaption(L.P1ScoreCaption, "YOU");
-        SetCaption(L.P1ScoreFarCaption, "THEM");
         SetCaption(L.P2ScoreCaption, IsMirrored ? "YOU" : "THEM");
-        SetCaption(L.P2ScoreFarCaption, "THEM");
     }
 
     private static void SetCaption(Label caption, string text)
@@ -394,8 +383,7 @@ public sealed class ScoreDisplay
         if (caption != null) caption.Text = text;
     }
 
-    private void SetScoreBadge(Player player, Label value, Label target, Label farValue, Label farTarget,
-                               bool preview, bool withTarget)
+    private void SetScoreBadge(Player player, Label value, Label target, bool preview, bool withTarget)
     {
         if (player == null) return;
         bool started = _host.GameStarted;
@@ -421,28 +409,13 @@ public sealed class ScoreDisplay
             target.Text = targetText;
             target.Visible = targetText.Length > 0;
         }
-        if (farValue != null) farValue.Text = scoreText;
-        if (farTarget != null)
-        {
-            farTarget.Text = targetText;
-            farTarget.Visible = targetText.Length > 0;
-        }
     }
 
-    /// Pass 43: the turned-round far end is retired - face to face, each player now gets a
-    /// "THEM" badge on their own half instead (RefreshOpponentLines), so the far end and its
-    /// divider stay hidden in every mode. The nodes are left in the scene in case the idea
-    /// comes back. Each badge hugs its content from its anchored edge.
+    /// Face to face, each player gets a "THEM" badge stacked on their own (RefreshOpponentLines).
+    /// Each badge hugs its content from its anchored edge.
     public void ApplyScoreBadgeEnds(bool faceToFace)
     {
         if (!L.ScoreBadges) return;
-        foreach ((Control far, Control divider, Control box) in new[]
-                 { (L.P1ScoreFarEnd, L.P1ScoreDivider, L.P1ScoreBox), (L.P2ScoreFarEnd, L.P2ScoreDivider, L.P2ScoreBox) })
-        {
-            if (far != null) far.Visible = false;
-            if (divider != null) divider.Visible = false;
-            HugContent(box);
-        }
         HugContent(L.P1ScoreBox);
         HugContent(L.P2ScoreBox);
         StackBadgePair(L.P1ScoreBox, L.P1OpponentBox, faceToFace);
@@ -483,23 +456,6 @@ public sealed class ScoreDisplay
         if (box == null) return;
         if (box.GrowVertical == Control.GrowDirection.Begin) box.OffsetTop = box.OffsetBottom - 1f;
         else if (box.GrowVertical == Control.GrowDirection.End) box.OffsetBottom = box.OffsetTop + 1f;
-    }
-
-    /// The far end is turned round about its own centre. A container resets the rotation of its
-    /// own children, so the far end is a plain Control holding the turned content, and takes that
-    /// content's size as its minimum so the badge's column still makes room for it.
-    private static void TurnRound(Control end)
-    {
-        if (end == null || end.GetChildCount() == 0 || end.GetChild(0) is not Control turned) return;
-        void Fit()
-        {
-            end.CustomMinimumSize = turned.GetCombinedMinimumSize();
-            turned.PivotOffset = turned.Size / 2f;
-            turned.RotationDegrees = 180f;
-        }
-        turned.MinimumSizeChanged += Fit;
-        turned.Resized += Fit;
-        Fit();
     }
 
     private void SetScoreLines(ScoreLines lines, string prefix, Player player,

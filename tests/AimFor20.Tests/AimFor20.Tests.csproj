@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <!--
-    Unit tests for the game's rules, with no Godot in the loop: Card, Player, GameState and
-    CardEffects are plain C#, so they are compiled straight in from the project root.
+    Unit tests for the game's rules, with no Godot in the loop: the rules and profile classes are
+    plain C#, so they are compiled straight in from the project root.
 
     Run from the repo root:   dotnet test tests/AimFor20.Tests
 
@@ -20,6 +20,19 @@
     <Compile Include="../../Player.cs" Link="Game/Player.cs" />
     <Compile Include="../../GameState.cs" Link="Game/GameState.cs" />
     <Compile Include="../../CardEffects.cs" Link="Game/CardEffects.cs" />
+    <Compile Include="../../ModifierDef.cs" Link="Game/ModifierDef.cs" />
+    <Compile Include="../../Ladder.cs" Link="Game/Ladder.cs" />
+    <Compile Include="../../CollectionLog.cs" Link="Game/CollectionLog.cs" />
+    <Compile Include="../../Cosmetics.cs" Link="Game/Cosmetics.cs" />
+    <Compile Include="../../Ruleset.cs" Link="Game/Ruleset.cs" />
+    <!-- RunData is split across files; only RankTheme.cs (the rank colours) needs Godot and stays out. -->
+    <Compile Include="../../RunData.cs" Link="Game/RunData.cs" />
+    <Compile Include="../../RunData.Save.cs" Link="Game/RunData.Save.cs" />
+    <Compile Include="../../RunData.Migration.cs" Link="Game/RunData.Migration.cs" />
+    <Compile Include="../../Table.cs" Link="Game/Table.cs" />
+    <Compile Include="../../DrawAssist.cs" Link="Game/DrawAssist.cs" />
+    <Compile Include="../../SetRules.cs" Link="Game/SetRules.cs" />
+    <Compile Include="../../Bot.cs" Link="Game/Bot.cs" />
   </ItemGroup>
 
   <ItemGroup>

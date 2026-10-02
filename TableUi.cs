@@ -43,10 +43,6 @@ public interface ITableUiHost
     /// tutorial, the coach marks - gets its look here.
     void AfterRefresh();
 
-    /// A sentence about the run's rules, for the target line. A reading of the rules, so the
-    /// rules write it.
-    string FinaleRulesLine(RunData run, string prefix);
-
     /// The layout has just moved. Anything anchored to a node on the table - the tutorial's
     /// spotlight - has to be placed again.
     void LayoutChanged();
@@ -931,7 +927,7 @@ public sealed class TableUi
             if (!L.Background.HasMeta("authoredMat")) L.Background.SetMeta("authoredMat", L.Background.Texture);
             Texture2D authored = L.Background.GetMeta("authoredMat").As<Texture2D>();
             // In a ladder stage the table is the STAGE's; anywhere else it is the player's own board.
-            string boardKey = Cards.RankKey ?? RunData.Instance?.SelectedBoard ?? RunData.DefaultCosmetic;
+            string boardKey = Cards.RankKey ?? RunData.Instance?.SelectedBoard ?? Cosmetics.Default;
             Texture2D mat = Cards.Art($"playmats/playmat_{boardKey}_{(L.Portrait ? "portrait" : "landscape")}.png");
             L.Background.Texture = mat ?? authored;
             L.Background.SelfModulate = mat != null ? Colors.White : _playmatTint;
@@ -1058,7 +1054,7 @@ public sealed class TableUi
         if (run != null && run.CurrentRolledEffects != null)
         {
             string heading = run.Endless ? "ENDLESS" : "FINAL";
-            _targetLabel.Text = $"{heading}  -  TARGET {State.TargetScore}{_host.FinaleRulesLine(run, "\n")}";
+            _targetLabel.Text = $"{heading}  -  TARGET {State.TargetScore}{run.FinaleRulesLine("\n")}";
             _targetLabel.AddThemeColorOverride("font_color", TableGold);
             return;
         }

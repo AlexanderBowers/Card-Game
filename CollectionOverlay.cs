@@ -97,11 +97,11 @@ public partial class CollectionOverlay : Control
         RunData run = RunData.Instance;
         OverlayUi.ClearChildren(_grid);
 
-        foreach (string key in RunData.CollectionKeys)
+        foreach (string key in CollectionLog.Keys)
         {
             if (run.HasMetCard(key))
             {
-                Control view = _cardFactory(RunData.CollectionEntry(key).ToCard(), _cardSize);
+                Control view = _cardFactory(CollectionLog.Entry(key).ToCard(), _cardSize);
                 _grid.AddChild(OverlayUi.CardButton(view, _cardSize, null));
             }
             else
@@ -111,7 +111,7 @@ public partial class CollectionOverlay : Control
         }
 
         int found = run.CollectionFound;
-        int total = RunData.CollectionKeys.Length;
+        int total = CollectionLog.Keys.Length;
         _countLabel.Text = $"{found} / {total} found";
 
         bool complete = run.CollectionComplete;

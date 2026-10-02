@@ -11,9 +11,6 @@ public interface IMenusHost
     bool GameStarted { get; }
     bool VsBot { get; }
 
-    /// A sentence about the run's rules, for the continue button's note.
-    string FinaleRulesLine(RunData run, string prefix);
-
     /// Deal a match: the solo ladder, or local 2-player as the setup page described it.
     void StartMatch(bool local2Player);
 
@@ -217,12 +214,19 @@ public sealed class Menus
         if (_menuMat == null || _startMenuOverlay == null) return;
         Vector2 size = _startMenuOverlay.Size;
         bool portrait = size.Y > size.X;
-        string board = RunData.Instance?.SelectedBoard ?? RunData.DefaultCosmetic;
+        string board = RunData.Instance?.SelectedBoard ?? Cosmetics.Default;
         string path = $"res://assets/aimfor20_art/playmats/playmat_{board}_{(portrait ? "portrait" : "landscape")}.png";
         Texture2D chosen = ResourceLoader.Exists(path) ? GD.Load<Texture2D>(path) : null;
         _menuMat.Texture = chosen ?? (portrait ? MenuMatPortrait : MenuMatLandscape);
     }
 
+    /// The front door. Before this the game opened straight onto a live-looking table with an empty
+    /// board, a dropdown and a Start button - which named neither the game nor the fact that there
+    /// was a climb waiting halfway up the ladder, and which asked for TWO presses to reach the bot:
+    /// one to change scene, another in the scene it changed to.
+    ///
+    /// Built in code and over the table, like every other overlay here (see OverlayUi), so every
+    /// layout scene gets it with no NodePath wiring.
     public void BuildStartMenu()
     {
         _startMenuOverlay = new Control { Visible = false, MouseFilter = Control.MouseFilterEnum.Stop };
@@ -357,12 +361,12 @@ public sealed class Menus
         if (runInProgress && run.Endless)
         {
             continueButton = AddMenuButton($"Continue - Endless, streak {run.EndlessStreak}",
-                          $"target {run.CurrentTarget}{_host.FinaleRulesLine(run, "   -   ")}",
+                          $"target {run.CurrentTarget}{run.FinaleRulesLine("   -   ")}",
                           () => MenuStartRun(fresh: false));
         }
         else if (runInProgress)
         {
-            continueButton = AddMenuButton($"Continue - Match {run.MatchNumber} of {RunData.LadderLength}",
+            continueButton = AddMenuButton($"Continue - Match {run.MatchNumber} of {Ladder.Length}",
                           $"{run.CurrentOpponent}   -   target {run.CurrentTarget}",
                           () => MenuStartRun(fresh: false));
         }
@@ -422,7 +426,7 @@ public sealed class Menus
         AddMenuButton("How to Play", null, ShowHowToPlay);
         AddMenuButton("Options", null, () => _host.OpenOptions());
         if (run != null)
-            AddMenuButton($"Collection   {run.CollectionFound}/{RunData.CollectionKeys.Length}", null, OpenCollection);
+            AddMenuButton($"Collection   {run.CollectionFound}/{CollectionLog.Keys.Length}", null, OpenCollection);
         if (run != null)
             AddMenuButton($"Shop   {run.Medals} medals", null, OpenShop);
 
@@ -621,7 +625,7 @@ public sealed class Menus
 
         for (int i = 0; i < run.EndlessScores.Count; i++)
         {
-            RunData.EndlessScore score = run.EndlessScores[i];
+            EndlessScore score = run.EndlessScores[i];
             bool best = i == 0;
 
             HBoxContainer row = new HBoxContainer();
@@ -650,7 +654,7 @@ public sealed class Menus
         _startMenuBox.AddChild(MenuSpacer());
         Label footer = OverlayUi.MakeLabel(
             $"Best streak {run.EndlessBest}.   The rules are re-rolled every match; "
-            + $"past a streak of {RunData.EndlessThirdRuleStreak} the opponent carries three specials.",
+            + $"past a streak of {EndlessRules.ThirdRuleStreak} the opponent carries three specials.",
             MenuNoteFont, OverlayUi.Muted);
         footer.AutowrapMode = TextServer.AutowrapMode.WordSmart;
         footer.CustomMinimumSize = new Vector2(MenuButtonWidth, 0);

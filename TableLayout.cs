@@ -50,9 +50,8 @@ public partial class TableLayout : Control
     [Export] public float HandLiftOnPick;
 
     /// Pass 40: each side's score is a badge beside its own board instead of a "You  11/20" box
-    /// (portrait). In face-to-face play the badge grows a second end, turned round, so the player
-    /// across the table reads it the right way up too - a playing card's two corner indices,
-    /// worked the same way. Uses ScoreValue / ScoreTarget and the ScoreFar* nodes below.
+    /// (portrait). Uses ScoreValue / ScoreTarget / ScoreCaption below. (The turned-round far end
+    /// it grew face to face was retired in pass 43 for the THEM badge, and removed in pass 66.)
     [Export] public bool ScoreBadges;
 
     /// The design canvas every element is placed on (720x1560 portrait, 1560x720 landscape). The
@@ -69,16 +68,8 @@ public partial class TableLayout : Control
     [Export] public Label P1ScoreThem;
     /// Score badge (ScoreBadges): the small "/20" under the number.
     [Export] public Label P1ScoreTarget;
-    /// Score badge, face to face only: the end turned round for the player across the table,
-    /// and the line between the two ends.
-    [Export] public Control P1ScoreFarEnd;
-    [Export] public Label P1ScoreFarValue;
-    [Export] public Label P1ScoreFarTarget;
-    [Export] public Control P1ScoreDivider;
-    /// Score badge: whose score it is, above the number - "YOU" on the end its owner reads,
-    /// "THEM" on the end turned round for the player across the table (pass 42).
+    /// Score badge: whose score it is, above the number (pass 42).
     [Export] public Label P1ScoreCaption;
-    [Export] public Label P1ScoreFarCaption;
     /// The OTHER player's score, beside this player's own ("Them  14"). Pass 36: this spot used to
     /// hold the status line; its messages now float as a toast.
     [Export] public Label P1OpponentScore;
@@ -115,16 +106,9 @@ public partial class TableLayout : Control
     [Export] public Label P2ScoreThem;
     /// Score badge (ScoreBadges): the small "/20" under the number.
     [Export] public Label P2ScoreTarget;
-    /// Score badge, face to face only: the end turned round for the player across the table,
-    /// and the line between the two ends.
-    [Export] public Control P2ScoreFarEnd;
-    [Export] public Label P2ScoreFarValue;
-    [Export] public Label P2ScoreFarTarget;
-    [Export] public Control P2ScoreDivider;
-    /// Score badge: whose score it is, above the number (pass 42). Against the bot the near end
-    /// is read by Player 1, so it says "THEM".
+    /// Score badge: whose score it is, above the number (pass 42). Against the bot it is read
+    /// by Player 1, so it says "THEM".
     [Export] public Label P2ScoreCaption;
-    [Export] public Label P2ScoreFarCaption;
     /// The OTHER player's score, beside this player's own ("Them  14"). Pass 36: this spot used to
     /// hold the status line; its messages now float as a toast.
     [Export] public Label P2OpponentScore;

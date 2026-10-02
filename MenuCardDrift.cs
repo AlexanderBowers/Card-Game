@@ -62,7 +62,7 @@ public partial class MenuCardDrift : Control
     /// The backs are the player's own deck's, so a deck bought in the Shop shows here too.
     public void RefreshBack()
     {
-        string key = RunData.Instance?.SelectedDeck ?? RunData.DefaultCosmetic;
+        string key = RunData.Instance?.SelectedDeck ?? Cosmetics.Default;
         string path = $"{ArtDir}backs/card_back_{key}.png";
         if (!ResourceLoader.Exists(path)) path = ArtDir + "card_back.png";
         _back = ResourceLoader.Exists(path) ? GD.Load<Texture2D>(path) : null;

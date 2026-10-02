@@ -36,6 +36,37 @@ public interface ITeachingHost
 /// Everything here watches the screen rather than the rules - the walkthrough waits for the player
 /// to actually pick a card up, and a coach mark waits for a quiet moment. That is why it hangs off
 /// TableUi's refresh (ITableUiHost.AfterRefresh) rather than off any game event.
+///
+/// THE FIRST-LAUNCH TUTORIAL (Alexander, 2026-09-15)
+///
+/// Against the bot there is nobody in the room to explain the game, so the game has to teach
+/// it. Six steps, each highlighting ONE control with one or two lines - the anti-wall-of-text
+/// the tenets ask for, and the only form that works at both ends of the 5-to-85 range.
+///
+/// It teaches THE TABLE AND ONLY THE TABLE. The ladder is already the tutorial for the cards:
+/// ten rungs, one new card each, used on you by an opponent before the market will sell it to
+/// you. A tutorial that also explained effect cards would be competing with a teaching
+/// structure that already works, and would have to explain six cards the player cannot yet own.
+///
+/// THE FIRST MATCH IS STAGED (Alexander's call): the deck is stacked so the opening deal is
+/// 10 + 6 = 16 against the bot's 9 + 5, and the hand holds a +4. The lesson therefore ends with
+/// the player making the RIGHT play - picking up the +4, seeing 16 + 4 = 20 in green, playing
+/// it and holding on the target - rather than any play. Staging only happens at a target of 20
+/// (see ShouldStageTutorial); replayed at any other rung the same six steps run on a real deal,
+/// and every caption reads live values so none of them can lie.
+///
+/// COACH-MARKS: one line, the first time you meet a card
+///
+/// This is what actually delivers the ladder's promise. The ladder introduces one new card per
+/// rung and the market sells it to you straight afterwards - but until now the card simply
+/// appeared and something happened to your score. One highlight and one sentence, once ever.
+///
+/// The sentence is CardEffects.Introduction, which is the market's own Description. Two copies
+/// of an explanation drift, and the player would end up being told two different things about
+/// one card.
+///
+/// "Met" is profile level (RunData.CardsMet), so a lost run does not un-teach it, and it is the
+/// same set a collection log will read.
 public sealed class Teaching
 {
     private readonly ITeachingHost _host;

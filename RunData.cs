@@ -1,150 +1,36 @@
-using Godot;
 using System;
 using System.Collections.Generic;
 
-/// <summary>
-/// The single piece of state that outlives a scene change: everything about the player's current
-/// run down the ladder, plus the permanent collection that outlives it. Registered as an autoload
-/// (see project.godot), so the table, the shop and the deck screen all read and write the same
-/// instance.
+/// Everything about the player that outlives a scene change: the current run down the ladder,
+/// plus the permanent profile that outlives the run (collection, deck, medals, records, cosmetics).
+///
+/// Plain C#, no Godot: the RunStore autoload creates the one instance, loads it from disk, and
+/// writes it back whenever Changed fires. That keeps every rule in here unit-testable - a test
+/// just news one up, and can round-trip it through the save format (RunData.Save.cs). The
+/// fixed data the run is measured against is in Ladder, CollectionLog, Cosmetics, Ruleset and
+/// EndlessRules.
 ///
 /// Local 2-player never touches this - that mode stays a self-contained match with the randomized
 /// hands dealt by Player.DealRandomModifiers.
-/// </summary>
-public partial class RunData : Node
+public partial class RunData
 {
-    public static RunData Instance { get; private set; }
+    /// The live profile, set by RunStore when the game boots.
+    public static RunData Instance { get; internal set; }
 
     public const int SideDeckSize = 12;   // the deck holds exactly this many
     public const int MatchModifierCount = 4;   // ...and this many are drawn from it each match
-    private const string SavePath = "user://run.json";
 
-    // ------------------------------------------------------------------
-    // A modifier card as it is stored between matches. Card itself is a runtime object tied to a
-    // match; this is the durable description the save file round-trips.
-    // ------------------------------------------------------------------
-    public readonly struct ModifierDef
-    {
-        public readonly int Value;
-        public readonly bool CanFlipValue;
-        public readonly CardEffect Effect;
+    /// Raised after every change worth keeping. RunStore writes the save file on it.
+    public event Action Changed;
 
-        public ModifierDef(int value, bool canFlipValue = false, CardEffect effect = CardEffect.None)
-        {
-            Value = value;
-            CanFlipValue = canFlipValue;
-            Effect = effect;
-        }
+    /// Seconds since the epoch, for dating scoreboard rows. Swappable so tests can pin it.
+    public Func<long> Clock { get; set; } = () => DateTimeOffset.UtcNow.ToUnixTimeSeconds();
 
-        public Card ToCard() => new Card(Value, CardType.Modifier, CardName, CanFlipValue, Effect);
+    private readonly Random _random;
 
-        private string CardName => Effect == CardEffect.None ? "" : CardEffects.Label(Effect);
+    public RunData(Random random = null) => _random = random ?? new Random();
 
-        public string Label => Effect != CardEffect.None
-            ? CardEffects.Label(Effect)
-            : (CanFlipValue ? "±" : (Value > 0 ? "+" : "-")) + Math.Abs(Value);
-    }
-
-    // ------------------------------------------------------------------
-    // One rung of the linear ladder.
-    //
-    // There are no invented venue names (Alexander's call, 2026-09-07): a place called the "Neon
-    // Underground" tells the player nothing they can see. Progress is shown instead - each RANK
-    // repaints the table and the standard cards, so two rungs in you are looking at a different
-    // board. Rank is also the whole difficulty story: it sets the target score.
-    // ------------------------------------------------------------------
-    public readonly struct LadderStep
-    {
-        public readonly int Rank;            // index into Ranks
-        public readonly string Opponent;
-        public readonly int TargetScore;
-        public readonly int MedalReward;
-
-        /// Stage 1 is the standard game and the AI's hand holds no "+/-" cards; every stage above
-        /// it guarantees the AI exactly one.
-        public readonly bool AiHasFlipValueCards;
-
-        /// The one effect card in the AI's four-card hand at this rung, or None. The AI's hand
-        /// lasts the whole match, so one effect card is about one dramatic moment per match.
-        public readonly CardEffect AiEffect;
-
-        /// The finale: target and effect cards are rolled when the player arrives on this rung
-        /// (RunData.EnsureRuleset). TargetScore is then only a fallback that nothing should reach.
-        public readonly bool Randomised;
-
-        public LadderStep(int rank, string opponent, int targetScore, int medalReward,
-                          bool aiHasFlipValueCards = true, CardEffect aiEffect = CardEffect.None,
-                          bool randomised = false)
-        {
-            Randomised = randomised;
-            Rank = rank;
-            Opponent = opponent;
-            TargetScore = targetScore;
-            MedalReward = medalReward;
-            AiHasFlipValueCards = aiHasFlipValueCards;
-            AiEffect = aiEffect;
-        }
-    }
-
-    /// A rank of the ladder: what it is called, what the table looks like, and how the standard
-    /// (main deck) cards are tinted while you are in it. Two rungs per rank, so the board changes
-    /// every other match and the player can SEE how far up they are.
-    public readonly struct Rank
-    {
-        public readonly string Name;
-        public readonly Color Table;      // the felt behind everything
-        public readonly Color CardTint;   // multiplied into the standard card art
-
-        public Rank(string name, Color table, Color cardTint)
-        {
-            Name = name;
-            Table = table;
-            CardTint = cardTint;
-        }
-    }
-
-    private static readonly Rank[] Ranks =
-    {
-        new Rank("Bronze",   new Color(0.07f, 0.24f, 0.13f), new Color(1.00f, 1.00f, 1.00f)),
-        new Rank("Silver",   new Color(0.10f, 0.20f, 0.26f), new Color(0.86f, 1.00f, 1.12f)),
-        new Rank("Gold",     new Color(0.18f, 0.16f, 0.06f), new Color(1.28f, 1.08f, 0.55f)),
-        new Rank("Ruby",     new Color(0.22f, 0.07f, 0.10f), new Color(1.30f, 0.74f, 0.74f)),
-        new Rank("Obsidian", new Color(0.10f, 0.07f, 0.16f), new Color(0.86f, 0.72f, 1.20f)),
-    };
-
-    /// The gauntlet. Difficulty escalates by moving the target away from the comfortable 20 - never
-    /// by inflating the arithmetic (the 5-to-85 accessibility tenet rules out multiplier math).
-    ///
-    /// EVERY CARD MOVED UP A RUNG on 2026-09-11 (Alexander's call), closing the hole Trade Draw
-    /// left at stage 5. Trade Totals 6 to 5, Shave 7 to 6, Trade Hands 8 to 7 - so every rung from
-    /// 4 to 7 still introduces exactly one new idea, which is the rule the whole ladder is built
-    /// on. Stage 8 is Recall and stage 9 is Veto (2026-09-13), so every rung from 1 to 9 now
-    /// introduces exactly one new thing and stage 10 is the single randomised finale. The
-    /// randomiser held two rungs only because that is what the table happened to have; after nine
-    /// rungs of learning, one boss rung that tests all of it is the better shape.
-    ///
-    /// Veto is not wired yet (CardEffects.Wired), so stage 9 still falls back to a card at or
-    /// below its rung until pass 7 turns it on.
-    ///
-    /// Note what moved WITH the cards and what did not: the targets belong to the RANKS, not to
-    /// the cards, so Shave is now met at a target of 18 rather than 24. Worth watching at the
-    /// table - Shave punishes holding below the target, and there is less room to hold below 18.
-    private static readonly LadderStep[] Ladder =
-    {
-        //             rank  opponent               target medals  +/-    effect introduced here
-        new LadderStep(0, "Bronze Challenger",   20,  3, false),                            // 1 standard rules
-        new LadderStep(0, "Bronze Champion",     20,  3, true),                             // 2 the AI gets +/-
-        new LadderStep(1, "Silver Challenger",   23,  4, true),                             // 3 the target moves
-        new LadderStep(1, "Silver Champion",     23,  5, true, CardEffect.Copy),            // 4
-        new LadderStep(2, "Gold Challenger",     18,  5, true, CardEffect.TradeTotals),     // 5
-        new LadderStep(2, "Gold Champion",       18,  6, true, CardEffect.Shave),           // 6
-        new LadderStep(3, "Ruby Challenger",     24,  6, true, CardEffect.TradeHands),      // 7
-        new LadderStep(3, "Ruby Champion",       24,  8, true, CardEffect.Recall),          // 8
-        new LadderStep(4, "Obsidian Challenger", 22,  8, true, CardEffect.Veto),            // 9
-        new LadderStep(4, "Obsidian Champion",   25, 10, true, randomised: true),           // 10 ruleset rolled
-    };
-
-    public static int LadderLength => Ladder.Length;
+    private void Save() => Changed?.Invoke();
 
     // ------------------------------------------------------------------
     // Run state
@@ -169,13 +55,44 @@ public partial class RunData : Node
     /// has changed a great deal since they last read anything about it.
     public bool TutorialSeen { get; private set; }
 
+    /// Set by the deck screen just before the table scene is reloaded for the next rung, so the player
+    /// walks straight into the match instead of landing back on a Start button. Deliberately not
+    /// saved: it is about this reload, not about the run. (This object survives the reload.)
+    public bool AutoStartNextMatch { get; set; }
+    public int StepIndex { get; private set; }              // 0-based rung of the ladder
+
+    /// Every modifier card the player owns. Cards are only ever added (there is no selling), so an
+    /// index into this list is a stable id - which is what SideDeck stores.
+    public List<ModifierDef> Inventory { get; } = new List<ModifierDef>();
+
+    /// Indices into Inventory. Exactly SideDeckSize of them once the deck has been confirmed.
+    public List<int> SideDeck { get; } = new List<int>();
+
+    /// What a player owns before they have ever bought anything: enough that the deck screen is a
+    /// real choice from the first visit (14 owned, 12 slotted). Handed out once, not once per run.
+    ///
+    /// Plain arithmetic only. A "+/-" card is a STORE card (Alexander, 2026-09-07): stage 2 is the
+    /// rung that introduces it - you meet one across the table, then the stage 2 market sells you
+    /// your first one. Handing one out at the start spends that introduction before it happens.
+    private static readonly ModifierDef[] StarterCollection =
+    {
+        new ModifierDef(1), new ModifierDef(1), new ModifierDef(2), new ModifierDef(2),
+        new ModifierDef(3), new ModifierDef(3), new ModifierDef(4),
+        new ModifierDef(-1), new ModifierDef(-1), new ModifierDef(-2), new ModifierDef(-2),
+        new ModifierDef(-3), new ModifierDef(-3), new ModifierDef(-4),
+    };
+
+    // ------------------------------------------------------------------
+    // Cards met, and the collection log built on them
+    // ------------------------------------------------------------------
+
     /// Every card TYPE this player has been introduced to - see CardEffects.MetKey for what a key
     /// is. Profile level, for the same reason TutorialSeen is: meeting a card is something that
     /// happened to the player, not to a run, and a lost run must not un-teach it.
     ///
-    /// This is also the set a collection log will read. It is keyed by string rather than by
-    /// CardEffect so it can hold the "+/-" card, which is not an effect at all, and later the
-    /// plain magnitudes - without renumbering anything already written to a save.
+    /// This is also the set the collection log reads. It is keyed by string rather than by
+    /// CardEffect so it can hold the "+/-" card, which is not an effect at all, and the plain
+    /// magnitudes - without renumbering anything already written to a save.
     public HashSet<string> CardsMet { get; } = new HashSet<string>();
 
     public bool HasMetCard(string key) => key == null || CardsMet.Contains(key);
@@ -195,68 +112,17 @@ public partial class RunData : Node
         return justCompleted;
     }
 
-    // ------------------------------------------------------------------
-    // The collection log (playtest-feedback-family.md §5.2)
-    //
-    // Read straight from CardsMet - the same set the coach-marks use, so an effect card is "met"
-    // on exactly the occasion the game explained it. Plain and flip-value Modifiers need no
-    // explanation, so they get their own keys ("+3", "-3", "flip3") and are marked when they
-    // enter the collection, are dealt to you, or are played at you.
-    // ------------------------------------------------------------------
-    public const int LogMaxMagnitude = 6;   // the market's own ceiling (ShopOverlay.RollOffers)
-
-    private static readonly CardEffect[] LogEffects =
+    /// Marks a plain or flip-value Modifier as met. Effect cards are left to the coach-marks,
+    /// which mark them when they are explained - marking one here first would skip its explanation.
+    public bool MarkPlainModifierMet(Card card)
     {
-        CardEffect.Copy, CardEffect.TradeTotals, CardEffect.Shave,
-        CardEffect.TradeHands, CardEffect.Recall, CardEffect.Veto,
-    };
-
-    /// Every entry, in display order: four rows of six - plus, minus, flip value, special.
-    public static readonly string[] CollectionKeys = BuildCollectionKeys();
-
-    private static string[] BuildCollectionKeys()
-    {
-        List<string> keys = new List<string>();
-        for (int m = 1; m <= LogMaxMagnitude; m++) keys.Add(LogKey(m, false, CardEffect.None));
-        for (int m = 1; m <= LogMaxMagnitude; m++) keys.Add(LogKey(-m, false, CardEffect.None));
-        for (int m = 1; m <= LogMaxMagnitude; m++) keys.Add(LogKey(m, true, CardEffect.None));
-        foreach (CardEffect effect in LogEffects) keys.Add(LogKey(0, false, effect));
-        return keys.ToArray();
+        if (card == null || card.Effect != CardEffect.None) return false;
+        return MarkCardMet(CollectionLog.Key(card));
     }
 
-    /// The effect's NAME for an effect card (the same key CardEffects.MetKey gives it), otherwise
-    /// the signed magnitude. Null for a card that is not a Modifier at all.
-    public static string LogKey(int value, bool canFlipValue, CardEffect effect)
-    {
-        if (effect != CardEffect.None) return effect.ToString();
-        int magnitude = Math.Abs(value);
-        if (magnitude == 0) return null;
-        if (canFlipValue) return "flip" + magnitude;
-        return (value > 0 ? "+" : "-") + magnitude;
-    }
+    public int CollectionFound => CollectionLog.Found(CardsMet);
 
-    public static string LogKey(Card card) =>
-        (card == null || card.Type != CardType.Modifier) ? null : LogKey(card.Value, card.CanFlipValue, card.Effect);
-
-    /// The card a log key stands for, so the screen can draw it.
-    public static ModifierDef CollectionEntry(string key)
-    {
-        if (key.StartsWith("flip")) return new ModifierDef(int.Parse(key.Substring(4)), canFlipValue: true);
-        if (key[0] == '+' || key[0] == '-') return new ModifierDef(int.Parse(key));
-        return new ModifierDef(0, false, Enum.Parse<CardEffect>(key));
-    }
-
-    public int CollectionFound
-    {
-        get
-        {
-            int found = 0;
-            foreach (string key in CollectionKeys) if (CardsMet.Contains(key)) found++;
-            return found;
-        }
-    }
-
-    public bool CollectionComplete => CollectionFound == CollectionKeys.Length;
+    public bool CollectionComplete => CollectionFound == CollectionLog.Keys.Length;
 
     /// The log's reward: the face-down deck wears a gilded back. Cosmetic, and switchable, because
     /// the rank's own colour on the deck is part of how the ladder shows progress.
@@ -272,60 +138,24 @@ public partial class RunData : Node
         Save();
     }
 
-    /// Marks a plain or flip-value Modifier as met. Effect cards are left to the coach-marks,
-    /// which mark them when they are explained - marking one here first would skip its explanation.
-    public bool MarkPlainModifierMet(Card card)
-    {
-        if (card == null || card.Effect != CardEffect.None) return false;
-        return MarkCardMet(LogKey(card));
-    }
-
-    /// Set by the deck screen just before the table scene is reloaded for the next rung, so the player
-    /// walks straight into the match instead of landing back on a Start button. Deliberately not
-    /// saved: it is about this reload, not about the run. (This autoload survives the reload.)
-    public bool AutoStartNextMatch { get; set; }
-    public int StepIndex { get; private set; }              // 0-based rung of the ladder
-
-    /// Every modifier card the player owns. Cards are only ever added (there is no selling), so an
-    /// index into this list is a stable id - which is what SideDeck stores.
-    public List<ModifierDef> Inventory { get; } = new List<ModifierDef>();
-
-    /// Indices into Inventory. Exactly SideDeckSize of them once the deck has been confirmed.
-    public List<int> SideDeck { get; } = new List<int>();
-
-    private readonly Random _random = new Random();
-
-    /// What a player owns before they have ever bought anything: enough that the deck screen is a
-    /// real choice from the first visit (14 owned, 12 slotted). Handed out once, not once per run.
-    ///
-    /// Plain arithmetic only. A "+/-" card is a STORE card (Alexander, 2026-09-07): stage 2 is the
-    /// rung that introduces it - you meet one across the table, then the stage 2 market sells you
-    /// your first one. Handing one out at the start spends that introduction before it happens.
-    private static readonly ModifierDef[] StarterCollection =
-    {
-        new ModifierDef(1), new ModifierDef(1), new ModifierDef(2), new ModifierDef(2),
-        new ModifierDef(3), new ModifierDef(3), new ModifierDef(4),
-        new ModifierDef(-1), new ModifierDef(-1), new ModifierDef(-2), new ModifierDef(-2),
-        new ModifierDef(-3), new ModifierDef(-3), new ModifierDef(-4),
-    };
-
-    public override void _Ready()
-    {
-        Instance = this;
-        Load();
-    }
-
     // ------------------------------------------------------------------
     // The ladder
     // ------------------------------------------------------------------
-    public LadderStep CurrentStep => Ladder[Mathf.Clamp(StepIndex, 0, Ladder.Length - 1)];
+    public LadderStep CurrentStep => Ladder.At(StepIndex);
     public int CurrentTarget =>
         (CurrentStep.Randomised && RolledStep == StepIndex) ? RolledTarget : CurrentStep.TargetScore;
-    public Rank CurrentRank => Ranks[Mathf.Clamp(CurrentStep.Rank, 0, Ranks.Length - 1)];
-    public int MatchNumber => Mathf.Clamp(StepIndex, 0, Ladder.Length - 1) + 1;
+    public int MatchNumber => Ladder.ClampIndex(StepIndex) + 1;
     public bool RunComplete => !Endless && StepIndex >= Ladder.Length;
 
     public string CurrentOpponent => Endless ? $"Endless Challenger {EndlessStreak + 1}" : CurrentStep.Opponent;
+
+    /// The target of the rung below this one - what the player has been playing to until now.
+    public int PreviousTarget => StepIndex > 0 ? Ladder.At(StepIndex - 1).TargetScore : CurrentTarget;
+
+    /// True when stepping onto this rung MOVED the target. Difficulty on this ladder is the
+    /// target moving away from a comfortable 20, so the one thing the table must not do is change
+    /// that number quietly - the player has to be told, on the rung where it happens.
+    public bool TargetMovedThisStage => StepIndex > 0 && CurrentTarget != PreviousTarget;
 
     // ------------------------------------------------------------------
     // Endless mode (playtest-feedback-family.md §5.1)
@@ -349,30 +179,15 @@ public partial class RunData : Node
     // EndlessBest is one number, and one number cannot say "I have been close three times". The
     // playtest asked for endless to have "its own high-score list" - so every endless run that
     // ends with a streak on it is written down with the date, and the best five are kept.
-    // The streak IS the score; the target it died on was noise on the row (Alexander, 2026-09-17).
-    // Local only: the online list in the GDD is a stretch goal, and this is
-    // the shape it will eventually upload.
+    // Local only for now; this is the shape the online list will upload.
     //
     // A run is BANKED once, whenever it stops being playable: lost, given up for a new run, or
     // given up for a fresh endless run. EndlessRunBanked is what stops the same streak landing on
     // the board twice, and it is saved, because quitting the app between the loss and the next
     // menu is an ordinary thing to do.
     // ------------------------------------------------------------------
-    public const int EndlessScoreboardSize = 5;
 
-    public readonly struct EndlessScore
-    {
-        public readonly int Streak;
-        public readonly long UnixTime;
-
-        public EndlessScore(int streak, long unixTime)
-        {
-            Streak = streak;
-            UnixTime = unixTime;
-        }
-    }
-
-    /// Best first, and for a tie the more recent run first. Never longer than EndlessScoreboardSize.
+    /// Best first, and for a tie the more recent run first. Never longer than EndlessRules.ScoreboardSize.
     public List<EndlessScore> EndlessScores { get; } = new List<EndlessScore>();
 
     /// Whether the endless run in progress (or just lost) has already been written to the board.
@@ -384,17 +199,19 @@ public partial class RunData : Node
     {
         if (!Endless || EndlessRunBanked || EndlessStreak <= 0) return;
         EndlessRunBanked = true;
-        EndlessScores.Add(new EndlessScore(EndlessStreak, (long)Time.GetUnixTimeFromSystem()));
-        SortEndlessScores();
+        EndlessScores.Add(new EndlessScore(EndlessStreak, Clock()));
+        EndlessRules.SortAndTrim(EndlessScores);
     }
 
-    private void SortEndlessScores()
+    public void StartEndless()
     {
-        EndlessScores.Sort((a, b) => a.Streak != b.Streak
-            ? b.Streak.CompareTo(a.Streak)
-            : b.UnixTime.CompareTo(a.UnixTime));
-        if (EndlessScores.Count > EndlessScoreboardSize)
-            EndlessScores.RemoveRange(EndlessScoreboardSize, EndlessScores.Count - EndlessScoreboardSize);
+        StartNewRun();          // banks any endless run being given up, then resets the rest
+        Endless = true;
+        EndlessRunBanked = false;
+        EndlessStreak = 0;
+        StepIndex = Ladder.Length - 1;
+        EnsureRuleset();
+        Save();
     }
 
     // ------------------------------------------------------------------
@@ -419,44 +236,6 @@ public partial class RunData : Node
         Save();
     }
 
-    /// The target range widens as the streak grows - one step further from 20 on each side every
-    /// two wins - so a long streak is harder arithmetic, never bigger multipliers. Capped where
-    /// a 9-slot board and a shared 40-card deck still comfortably reach it.
-    public static (int min, int max) EndlessTargetRange(int streak)
-    {
-        int widen = streak / 2;
-        return (Math.Max(15, 18 - widen), Math.Min(30, 25 + widen));
-    }
-
-    /// The range above stops widening at a streak of 10, and after that endless stopped getting
-    /// harder at all - every match past it was the same match (pass 24). Past this streak the
-    /// opponent carries a THIRD rolled effect card instead of two, which fills its whole hand:
-    /// one "+/-" and three specials, no ordinary cards. That is the last escalation there is, and
-    /// it is deliberately the last one - it is bounded (each effect is spent when it is played)
-    /// and it is announced, because the rolled rules are printed over the table before the deal.
-    public const int EndlessThirdRuleStreak = 12;
-
-    public static int EndlessRuleCount(int streak) => streak >= EndlessThirdRuleStreak ? 3 : 2;
-
-    public void StartEndless()
-    {
-        StartNewRun();          // banks any endless run being given up, then resets the rest
-        Endless = true;
-        EndlessRunBanked = false;
-        EndlessStreak = 0;
-        StepIndex = Ladder.Length - 1;
-        EnsureRuleset();
-        Save();
-    }
-
-    /// The target of the rung below this one - what the player has been playing to until now.
-    public int PreviousTarget => StepIndex > 0 ? StepAt(StepIndex - 1).TargetScore : CurrentTarget;
-
-    /// True when stepping onto this rung MOVED the target. Difficulty on this ladder is the
-    /// target moving away from a comfortable 20, so the one thing the table must not do is change
-    /// that number quietly - the player has to be told, on the rung where it happens.
-    public bool TargetMovedThisStage => StepIndex > 0 && CurrentTarget != PreviousTarget;
-
     // ------------------------------------------------------------------
     // The randomised finale (stage-ladder-spec.md, "Stage 9+")
     //
@@ -464,12 +243,6 @@ public partial class RunData : Node
     // plays the same match rather than re-rolling until the dice are kind. Endless mode rolls with
     // the same method.
     // ------------------------------------------------------------------
-    public readonly struct Ruleset
-    {
-        public readonly int Target;
-        public readonly CardEffect[] Effects;
-        public Ruleset(int target, CardEffect[] effects) { Target = target; Effects = effects; }
-    }
 
     /// The rung the saved roll belongs to, or -1. A roll for a rung the player is not on is stale.
     public int RolledStep { get; private set; } = -1;
@@ -480,37 +253,15 @@ public partial class RunData : Node
     public List<CardEffect> CurrentRolledEffects =>
         (CurrentStep.Randomised && RolledStep == StepIndex) ? RolledEffects : null;
 
-    /// A target away from the familiar 20, and `count` different effect cards - never Copy with
-    /// Trade Totals, which are both "the AI undoes the draw that ruined it" and together read as
-    /// the game cheating rather than as two rules.
-    ///
-    /// `count` is 2 everywhere except deep in an endless streak (EndlessRuleCount). It is clamped
-    /// to what the wired pool can actually supply, so adding or removing a card never rolls a
-    /// ruleset with a hole in it.
-    public static Ruleset RollRuleset(Random rng, int minTarget = 18, int maxTarget = 25, int count = 2)
+    /// "Rules: Copy + Shave" for the finale (and every endless match), after the prefix; empty on
+    /// any other rung.
+    public string FinaleRulesLine(string prefix)
     {
-        int target;
-        do target = rng.Next(minTarget, maxTarget + 1); while (target == 20 && minTarget < maxTarget);
-
-        List<CardEffect> pool = CardEffects.WiredEffects();
-        List<CardEffect> picked = new List<CardEffect>();
-        int wanted = Math.Max(1, count);
-
-        while (picked.Count < wanted && pool.Count > 0)
-        {
-            CardEffect next = pool[rng.Next(pool.Count)];
-            picked.Add(next);
-            pool.Remove(next);
-            // The exclusion is between these two specifically, and it applies however many are
-            // rolled: whichever of the pair comes out first, the other stops being available.
-            if (next == CardEffect.Copy) pool.Remove(CardEffect.TradeTotals);
-            if (next == CardEffect.TradeTotals) pool.Remove(CardEffect.Copy);
-        }
-
-        // Stage order, so the finale names them the way the ladder taught them.
-        CardEffect[] effects = picked.ToArray();
-        Array.Sort(effects, (a, b) => StageThatIntroduces(a).CompareTo(StageThatIntroduces(b)));
-        return new Ruleset(target, effects);
+        List<CardEffect> rolled = CurrentRolledEffects;
+        if (rolled == null || rolled.Count == 0) return string.Empty;
+        List<string> names = new List<string>();
+        foreach (CardEffect effect in rolled) names.Add(CardEffects.Label(effect));
+        return $"{prefix}Rules: {string.Join(" + ", names)}";
     }
 
     /// Rolls the current rung's rules if it is randomised and has not been rolled. Safe to call
@@ -522,12 +273,12 @@ public partial class RunData : Node
         Ruleset rolled;
         if (Endless)
         {
-            (int min, int max) = EndlessTargetRange(EndlessStreak);
-            rolled = RollRuleset(_random, min, max, EndlessRuleCount(EndlessStreak));
+            (int min, int max) = EndlessRules.TargetRange(EndlessStreak);
+            rolled = Ruleset.Roll(_random, min, max, EndlessRules.RuleCount(EndlessStreak));
         }
         else
         {
-            rolled = RollRuleset(_random);
+            rolled = Ruleset.Roll(_random);
         }
         RolledStep = StepIndex;
         RolledTarget = rolled.Target;
@@ -542,6 +293,10 @@ public partial class RunData : Node
         RolledTarget = 0;
         RolledEffects.Clear();
     }
+
+    // ------------------------------------------------------------------
+    // Starting, finishing and ending runs
+    // ------------------------------------------------------------------
 
     /// Starts a run at the bottom of the ladder. The LADDER resets; the COLLECTION does not.
     ///
@@ -560,7 +315,7 @@ public partial class RunData : Node
         ClearRuleset();
 
         if (Inventory.Count == 0) Inventory.AddRange(StarterCollection);
-        foreach (ModifierDef def in Inventory) CardsMet.Add(LogKey(def.Value, def.CanFlipValue, def.Effect));
+        foreach (ModifierDef def in Inventory) CardsMet.Add(def.LogKey);
 
         // Keep the deck they last built; only fill it in if it is missing or has gone stale.
         SideDeck.RemoveAll(index => index < 0 || index >= Inventory.Count);
@@ -614,7 +369,7 @@ public partial class RunData : Node
         }
         else if (won)
         {
-            // A medal per set taken, plus the rung's purse - a clean 2-0 is worth keeping.
+            // A medal per set taken, plus the rung's purse - a clean 3-0 is worth keeping.
             Medals += setsWon + CurrentStep.MedalReward;
             StepIndex++;
             if (StepIndex > FurthestStep) FurthestStep = StepIndex;
@@ -646,19 +401,7 @@ public partial class RunData : Node
 
     /// The rung the player has just cleared. CompleteMatch has already moved StepIndex on by the
     /// time the market opens, so "the stage I just played" is the one behind it.
-    public int ClearedStepIndex => Mathf.Clamp(StepIndex - 1, 0, Ladder.Length - 1);
-
-    public LadderStep StepAt(int index) => Ladder[Mathf.Clamp(index, 0, Ladder.Length - 1)];
-
-    /// The stage number (1-based) that introduces this effect, or 0 if no stage does.
-    public static int StageThatIntroduces(CardEffect effect)
-    {
-        for (int i = 0; i < Ladder.Length; i++)
-        {
-            if (Ladder[i].AiEffect == effect) return i + 1;
-        }
-        return 0;
-    }
+    public int ClearedStepIndex => Ladder.ClampIndex(StepIndex - 1);
 
     /// Buyable once the player has cleared the stage that introduced it IN THIS RUN.
     ///
@@ -673,8 +416,22 @@ public partial class RunData : Node
     public bool EffectUnlocked(CardEffect effect)
     {
         if (!CardEffects.Implemented(effect)) return false;
-        int stage = StageThatIntroduces(effect);
+        int stage = Ladder.StageThatIntroduces(effect);
         return stage > 0 && StepIndex >= stage;
+    }
+
+    public List<CardEffect> UnlockedEffects()
+    {
+        List<CardEffect> unlocked = new List<CardEffect>();
+        for (int i = 0; i < Ladder.Length; i++)
+        {
+            CardEffect effect = Ladder.At(i).AiEffect;
+            if (effect != CardEffect.None && !unlocked.Contains(effect) && EffectUnlocked(effect))
+            {
+                unlocked.Add(effect);
+            }
+        }
+        return unlocked;
     }
 
     // ------------------------------------------------------------------
@@ -686,10 +443,11 @@ public partial class RunData : Node
     /// True once the player has reached a fixed-target rung that plays to this target.
     public bool TargetReached(int target)
     {
-        int last = Mathf.Min(FurthestStep, Ladder.Length - 1);
+        int last = Math.Min(FurthestStep, Ladder.Length - 1);
         for (int i = 0; i <= last; i++)
         {
-            if (!Ladder[i].Randomised && Ladder[i].TargetScore == target) return true;
+            LadderStep step = Ladder.At(i);
+            if (!step.Randomised && step.TargetScore == target) return true;
         }
         return false;
     }
@@ -700,137 +458,38 @@ public partial class RunData : Node
         List<CardEffect> met = new List<CardEffect>();
         foreach (CardEffect effect in CardEffects.WiredEffects())
         {
-            int stage = StageThatIntroduces(effect);
+            int stage = Ladder.StageThatIntroduces(effect);
             if (stage > 0 && stage - 1 <= FurthestStep) met.Add(effect);
         }
-        met.Sort((a, b) => StageThatIntroduces(a).CompareTo(StageThatIntroduces(b)));
+        met.Sort((a, b) => Ladder.StageThatIntroduces(a).CompareTo(Ladder.StageThatIntroduces(b)));
         return met;
     }
 
-    public List<CardEffect> UnlockedEffects()
-    {
-        List<CardEffect> unlocked = new List<CardEffect>();
-        foreach (LadderStep step in Ladder)
-        {
-            if (step.AiEffect != CardEffect.None && !unlocked.Contains(step.AiEffect)
-                && EffectUnlocked(step.AiEffect))
-            {
-                unlocked.Add(step.AiEffect);
-            }
-        }
-        return unlocked;
-    }
-
     // ------------------------------------------------------------------
-    // Debug
-    //
-    // Called only from the debug row on the table, which GameManager builds behind
-    // OS.IsDebugBuild() - an exported build has no way to reach either of these.
+    // Medals, decks and boards (see Cosmetics for the catalogue)
     // ------------------------------------------------------------------
-
-    /// Drops the run onto any rung, for testing a stage without climbing to it.
-    public void DebugJumpToStep(int stepIndex)
-    {
-        if (!RunActive) StartNewRun();
-        Endless = false;
-        MatchRescueUsed = false;
-        // "Stage >" on the finale unlocks endless mode, so it can be tested without a full climb.
-        if (stepIndex >= Ladder.Length) FurthestStep = Ladder.Length;
-        StepIndex = Mathf.Clamp(stepIndex, 0, Ladder.Length - 1);
-        if (StepIndex > FurthestStep) FurthestStep = StepIndex;
-        ClearRuleset();
-        EnsureRuleset(); // a debug jump onto the finale re-rolls it, which is what testing wants
-        Save();
-    }
-
-    /// Back to a brand new player: no collection, no deck, no medals, no run.
-    public void DebugWipeSave()
-    {
-        RunActive = false;
-        Medals = 0;
-        StepIndex = 0;
-        FurthestStep = 0;
-        Endless = false;
-        EndlessStreak = 0;
-        EndlessBest = 0;
-        EndlessRunBanked = false;
-        EndlessScores.Clear();
-        MatchRescueUsed = false;
-        ClearRuleset();
-        TutorialSeen = false; // a wiped save IS a first launch, tutorial included
-        CardsMet.Clear();
-        CollectorBack = false;
-        Inventory.Clear();
-        SideDeck.Clear();
-        OwnedDecks.Clear(); OwnedDecks.Add(DefaultCosmetic);
-        OwnedBoards.Clear(); OwnedBoards.Add(DefaultCosmetic);
-        SelectedDeck = SelectedBoard = DefaultCosmetic;
-        if (FileAccess.FileExists(SavePath)) DirAccess.RemoveAbsolute(ProjectSettings.GlobalizePath(SavePath));
-        Save();
-    }
-
     public void SpendMedals(int amount) { Medals = Math.Max(0, Medals - amount); Save(); }
 
-    // ------------------------------------------------------------------
-    // Decks and boards (playtest, 2026-09-30)
-    //
-    // The player's deck (card back + the look of their 1-10 cards) and board (the table outside
-    // the ladder) are theirs: chosen on the main menu and never changed by a stage. Each stage
-    // plays on its own table, and the opponent uses the stage's deck. One of each per rank; Bronze
-    // is owned from the start, the rest are bought with medals in the Shop - and only once the
-    // player has beaten a stage of that rank.
-    // ------------------------------------------------------------------
-    /// Everyone starts with Classic (playtest, 2026-09-30: "I really don't like the Bronze set being
-    /// the default"): the original mint deck on the navy-and-gold back, and a bright sky-blue board.
-    public const string DefaultCosmetic = "classic";
-
-    /// Shop order. The five rank sets in ladder order, then Endless's own set.
-    public static readonly string[] CosmeticKeys = { "classic", "bronze", "silver", "gold", "ruby", "obsidian", "endless" };
-    private static readonly string[] RankCosmetics = { "bronze", "silver", "gold", "ruby", "obsidian" };
-
-    /// Medals to buy a deck or board. Classic is free and owned from the start.
-    public static int CosmeticPrice(string key) => key switch
-    {
-        "bronze" => 10,
-        "silver" => 15,
-        "gold" => 25,
-        "ruby" => 40,
-        "obsidian" => 60,
-        "endless" => 100,
-        _ => 0,
-    };
-
-    public HashSet<string> OwnedDecks { get; } = new HashSet<string> { DefaultCosmetic };
-    public HashSet<string> OwnedBoards { get; } = new HashSet<string> { DefaultCosmetic };
-    public string SelectedDeck { get; private set; } = DefaultCosmetic;
-    public string SelectedBoard { get; private set; } = DefaultCosmetic;
-
-    private static int CosmeticRank(string key) => Array.IndexOf(RankCosmetics, key);
-    private static bool IsCosmetic(string key) => Array.IndexOf(CosmeticKeys, key) >= 0;
-
-    /// The stage that has to be beaten before this rank's deck and board can be bought: the
-    /// rank's first stage (its Challenger). Null for Classic and Endless.
-    public static string UnlockStageName(string key)
-    {
-        int rank = CosmeticRank(key);
-        return rank < 0 ? null : Ladder[Math.Min(rank * 2, Ladder.Length - 1)].Opponent;
-    }
+    public HashSet<string> OwnedDecks { get; } = new HashSet<string> { Cosmetics.Default };
+    public HashSet<string> OwnedBoards { get; } = new HashSet<string> { Cosmetics.Default };
+    public string SelectedDeck { get; private set; } = Cosmetics.Default;
+    public string SelectedBoard { get; private set; } = Cosmetics.Default;
 
     /// Classic is always yours. A rank's set: beaten the rank's first stage = reached the rung
     /// after it at least once. Endless's set: cleared the ladder (Endless itself is open).
     public bool CosmeticUnlocked(string key)
     {
-        if (key == DefaultCosmetic) return true;
-        if (key == "endless") return EndlessUnlocked;
-        int rank = CosmeticRank(key);
-        return rank >= 0 && FurthestStep >= rank * 2 + 1;
+        if (key == Cosmetics.Default) return true;
+        if (key == Cosmetics.EndlessKey) return EndlessUnlocked;
+        int step = Cosmetics.UnlockStepIndex(key);
+        return step >= 0 && FurthestStep >= step + 1;
     }
 
     public bool BuyCosmetic(string key, bool board)
     {
         HashSet<string> owned = board ? OwnedBoards : OwnedDecks;
-        int price = CosmeticPrice(key);
-        if (!IsCosmetic(key) || owned.Contains(key) || !CosmeticUnlocked(key) || Medals < price) return false;
+        int price = Cosmetics.Price(key);
+        if (!Cosmetics.IsCosmetic(key) || owned.Contains(key) || !CosmeticUnlocked(key) || Medals < price) return false;
         Medals -= price;
         owned.Add(key);
         if (board) SelectedBoard = key; else SelectedDeck = key; // bought to be used
@@ -845,6 +504,10 @@ public partial class RunData : Node
         Save();
     }
 
+    // ------------------------------------------------------------------
+    // The collection and the 12-card deck
+    // ------------------------------------------------------------------
+
     /// Adds a bought card to the collection and returns its index - which is its permanent id,
     /// because the collection is append-only (there is no selling).
     public int AddToInventory(ModifierDef def)
@@ -853,7 +516,7 @@ public partial class RunData : Node
         // Bought is met. For an effect card that is already true - the market only sells a card
         // you have been shown - so this never skips an explanation.
         bool wasComplete = CollectionComplete;
-        CardsMet.Add(LogKey(def.Value, def.CanFlipValue, def.Effect));
+        CardsMet.Add(def.LogKey);
         if (!wasComplete && CollectionComplete) CollectorBack = true;
         Save();
         return Inventory.Count - 1;
@@ -871,9 +534,6 @@ public partial class RunData : Node
         Save();
     }
 
-    // ------------------------------------------------------------------
-    // Dealing a match hand
-    // ------------------------------------------------------------------
     /// Draws MatchModifierCount cards at random from the player's side deck. This is the whole point of
     /// the 12-card deck: the deck is chosen, the hand is not.
     public List<Card> DrawMatchModifiers()
@@ -907,247 +567,50 @@ public partial class RunData : Node
     }
 
     // ------------------------------------------------------------------
-    // Save / load
+    // Debug
     //
-    // Godot's own Json + FileAccess rather than System.Text.Json: no reflection, so nothing breaks
-    // under the AOT trimming used for the iOS and Android builds.
+    // Called only from the debug row on the table, which GameManager builds behind
+    // OS.IsDebugBuild() - an exported build has no way to reach either of these.
     // ------------------------------------------------------------------
-    public void Save()
+
+    /// Drops the run onto any rung, for testing a stage without climbing to it.
+    public void DebugJumpToStep(int stepIndex)
     {
-        Godot.Collections.Array inventory = new Godot.Collections.Array();
-        foreach (ModifierDef def in Inventory)
-        {
-            inventory.Add(new Godot.Collections.Dictionary
-            {
-                { "value", def.Value },
-                { "flip", def.CanFlipValue },
-                { "effect", (int)def.Effect },
-            });
-        }
-
-        Godot.Collections.Array sideDeck = new Godot.Collections.Array();
-        foreach (int index in SideDeck) sideDeck.Add(index);
-
-        Godot.Collections.Array rolledEffects = new Godot.Collections.Array();
-        foreach (CardEffect effect in RolledEffects) rolledEffects.Add((int)effect);
-
-        Godot.Collections.Array cardsMet = new Godot.Collections.Array();
-        foreach (string key in CardsMet) cardsMet.Add(key);
-
-        Godot.Collections.Array endlessScores = new Godot.Collections.Array();
-        foreach (EndlessScore score in EndlessScores)
-        {
-            endlessScores.Add(new Godot.Collections.Dictionary
-            {
-                { "streak", score.Streak },
-                { "at", score.UnixTime },
-            });
-        }
-
-        Godot.Collections.Array ownedDecks = new Godot.Collections.Array();
-        foreach (string key in OwnedDecks) ownedDecks.Add(key);
-        Godot.Collections.Array ownedBoards = new Godot.Collections.Array();
-        foreach (string key in OwnedBoards) ownedBoards.Add(key);
-
-        Godot.Collections.Dictionary data = new Godot.Collections.Dictionary
-        {
-            { "version", 10 },
-            { "ownedDecks", ownedDecks },
-            { "ownedBoards", ownedBoards },
-            { "deck", SelectedDeck },
-            { "board", SelectedBoard },
-            { "active", RunActive },
-            { "medals", Medals },
-            { "step", StepIndex },
-            { "furthest", FurthestStep },
-            { "tutorialSeen", TutorialSeen },
-            { "cardsMet", cardsMet },
-            { "collectorBack", CollectorBack },
-            { "endless", Endless },
-            { "endlessStreak", EndlessStreak },
-            { "endlessBest", EndlessBest },
-            { "endlessBanked", EndlessRunBanked },
-            { "endlessScores", endlessScores },
-            { "matchRescueUsed", MatchRescueUsed },
-            { "rolledStep", RolledStep },
-            { "rolledTarget", RolledTarget },
-            { "rolledEffects", rolledEffects },
-            { "inventory", inventory },
-            { "sideDeck", sideDeck },
-        };
-
-        using FileAccess file = FileAccess.Open(SavePath, FileAccess.ModeFlags.Write);
-        if (file == null)
-        {
-            GD.PushWarning($"Could not write the run save: {FileAccess.GetOpenError()}");
-            return;
-        }
-        file.StoreString(Json.Stringify(data));
-    }
-
-    private static void LoadOwned(Godot.Collections.Dictionary data, string name, HashSet<string> into)
-    {
-        into.Clear();
-        into.Add(DefaultCosmetic);
-        if (!data.TryGetValue(name, out Variant list) || list.VariantType != Variant.Type.Array) return;
-        foreach (Variant entry in list.AsGodotArray())
-            if (Array.IndexOf(CosmeticKeys, entry.AsString()) >= 0) into.Add(entry.AsString());
-    }
-
-    public void Load()
-    {
-        if (!FileAccess.FileExists(SavePath)) return;
-
-        using FileAccess file = FileAccess.Open(SavePath, FileAccess.ModeFlags.Read);
-        if (file == null) return;
-
-        Variant parsed = Json.ParseString(file.GetAsText());
-        if (parsed.VariantType != Variant.Type.Dictionary) return;
-
-        Godot.Collections.Dictionary data = parsed.AsGodotDictionary();
-
-        RunActive = data.TryGetValue("active", out Variant active) && active.AsBool();
-        Medals = data.TryGetValue("medals", out Variant medals) ? medals.AsInt32() : 0;
-        StepIndex = data.TryGetValue("step", out Variant step) ? step.AsInt32() : 0;
-        FurthestStep = data.TryGetValue("furthest", out Variant furthest) ? furthest.AsInt32() : StepIndex;
-        TutorialSeen = data.TryGetValue("tutorialSeen", out Variant taught) && taught.AsBool();
-
-        // Version 9: decks and boards. Version 10: Classic is the default, not Bronze. A version 9
-        // save was GIVEN Bronze, so it keeps owning it - but moves onto Classic, the new default.
-        int saveVersion = data.TryGetValue("version", out Variant savedVersion) ? savedVersion.AsInt32() : 0;
-        LoadOwned(data, "ownedDecks", OwnedDecks);
-        LoadOwned(data, "ownedBoards", OwnedBoards);
-        if (saveVersion == 9) { OwnedDecks.Add("bronze"); OwnedBoards.Add("bronze"); }
-        bool keepChoice = saveVersion >= 10;
-        SelectedDeck = keepChoice && data.TryGetValue("deck", out Variant deck) && OwnedDecks.Contains(deck.AsString()) ? deck.AsString() : DefaultCosmetic;
-        SelectedBoard = keepChoice && data.TryGetValue("board", out Variant board) && OwnedBoards.Contains(board.AsString()) ? board.AsString() : DefaultCosmetic;
-        Endless = data.TryGetValue("endless", out Variant endless) && endless.AsBool();
-        EndlessStreak = data.TryGetValue("endlessStreak", out Variant streak) ? streak.AsInt32() : 0;
-        EndlessBest = data.TryGetValue("endlessBest", out Variant best) ? best.AsInt32() : 0;
-
-        // Version 8. A version 7 save has neither key: the board loads empty and the run in
-        // progress loads as not yet banked, so an endless run that survives the update still gets
-        // its place when it ends. EndlessBest is untouched, so the one number that existed before
-        // is not lost - it simply has no dated rows behind it until the next run ends.
-        EndlessRunBanked = data.TryGetValue("endlessBanked", out Variant banked) && banked.AsBool();
-        EndlessScores.Clear();
-        if (data.TryGetValue("endlessScores", out Variant scores))
-        {
-            foreach (Variant entry in scores.AsGodotArray())
-            {
-                if (entry.VariantType != Variant.Type.Dictionary) continue;
-                Godot.Collections.Dictionary row = entry.AsGodotDictionary();
-                // rowStreak, not streak: "streak" already names the out-variable of the
-                // EndlessStreak read above, and an out-variable's scope is the whole method.
-                int rowStreak = row.TryGetValue("streak", out Variant st) ? st.AsInt32() : 0;
-                if (rowStreak <= 0) continue;
-                long at = row.TryGetValue("at", out Variant when) ? when.AsInt64() : 0;
-                EndlessScores.Add(new EndlessScore(rowStreak, at));
-            }
-            SortEndlessScores();
-        }
-        // Version 7. A version 6 save carried "endlessRescueUsed" (once per endless RUN), which
-        // no longer means anything; it is ignored, and a missing key loads as a fresh match.
-        MatchRescueUsed = data.TryGetValue("matchRescueUsed", out Variant rescued) && rescued.AsBool();
-        if (Endless) StepIndex = Ladder.Length - 1;
-
-        // A version 4 save has no key and loads as an empty set, so an existing player is
-        // introduced to each card once more. That is the right way round: the alternative is
-        // assuming they have met cards nobody ever showed them.
-        CardsMet.Clear();
-        if (data.TryGetValue("cardsMet", out Variant met))
-        {
-            foreach (Variant entry in met.AsGodotArray())
-            {
-                string key = entry.AsString();
-                if (!string.IsNullOrEmpty(key)) CardsMet.Add(key);
-            }
-        }
-
-        Inventory.Clear();
-        if (data.TryGetValue("inventory", out Variant inventoryVariant))
-        {
-            foreach (Variant entry in inventoryVariant.AsGodotArray())
-            {
-                Godot.Collections.Dictionary card = entry.AsGodotDictionary();
-                int value = card.TryGetValue("value", out Variant v) ? v.AsInt32() : 0;
-                bool flip = card.TryGetValue("flip", out Variant f) && f.AsBool();
-
-                // A version 2 save has no "effect" key at all, which reads as None - so an older
-                // collection loads unchanged rather than being thrown away.
-                // Range-checked: an out-of-range int would otherwise become an undefined effect
-                // that renders blank, can never be played, and sits in a deck slot forever.
-                int rawEffect = card.TryGetValue("effect", out Variant e) ? e.AsInt32() : 0;
-                // Enum.IsDefined rather than a hand-written upper bound. The bound used to read
-                // "<= (int)CardEffect.Copy", which was correct only for as long as Copy happened
-                // to be the last member - appending Recall and Veto would have made every saved
-                // copy of them load as None and silently vanish from the player's collection,
-                // with no error anywhere. This version is right for every future card too.
-                CardEffect effect = (rawEffect > 0 && Enum.IsDefined(typeof(CardEffect), rawEffect))
-                    ? (CardEffect)rawEffect
-                    : CardEffect.None;
-
-                // Push was scrapped (2026-09-10) and Copy took its stage 4 slot. A Push already in
-                // someone's collection becomes a Copy rather than a card that no longer exists:
-                // it keeps its place in the deck, and what the player owns is still "the stage 4
-                // effect card". Copy carries no number, so the old rolled value goes with it.
-                //
-                // Cards are never TAKEN away - that rule is what makes losing a run survivable,
-                // and it applies just as much when the design changes underneath a card.
-                // Trade Draw was removed the next day (2026-09-11) for overlapping Copy. It was
-                // never wired and so never buyable, which means no honest save can hold one - but
-                // a hand-edited or half-migrated file could, and a card nothing can play is worse
-                // than a card that plays as its replacement.
-                if (effect == CardEffect.Push || effect == CardEffect.TradeDraw)
-                {
-                    effect = CardEffect.Copy;
-                    value = 0;
-                }
-
-                // Effect cards are worth 0 - none of them carries a number - so the "value != 0"
-                // guard against junk rows only applies to ordinary modifiers.
-                if (value != 0 || effect != CardEffect.None) Inventory.Add(new ModifierDef(value, flip, effect));
-            }
-        }
-
-        // Version 6 adds the collection log. An older save knows nothing of plain magnitudes, but
-        // everything in the collection has plainly been met, so the log starts from what is owned
-        // rather than from nothing.
-        foreach (ModifierDef def in Inventory) CardsMet.Add(LogKey(def.Value, def.CanFlipValue, def.Effect));
-        CollectorBack = data.TryGetValue("collectorBack", out Variant gilded)
-            ? gilded.AsBool()
-            : CollectionComplete;
-
-        // The finale's roll. Anything unreadable is dropped and re-rolled on arrival, which only
-        // costs the player a different - still fair - set of rules.
+        if (!RunActive) StartNewRun();
+        Endless = false;
+        MatchRescueUsed = false;
+        // "Stage >" on the finale unlocks endless mode, so it can be tested without a full climb.
+        if (stepIndex >= Ladder.Length) FurthestStep = Ladder.Length;
+        StepIndex = Ladder.ClampIndex(stepIndex);
+        if (StepIndex > FurthestStep) FurthestStep = StepIndex;
         ClearRuleset();
-        if (data.TryGetValue("rolledStep", out Variant rolledStep) && rolledStep.AsInt32() >= 0
-            && data.TryGetValue("rolledEffects", out Variant rolledEffects))
-        {
-            foreach (Variant entry in rolledEffects.AsGodotArray())
-            {
-                int raw = entry.AsInt32();
-                if (Enum.IsDefined(typeof(CardEffect), raw) && CardEffects.IsWired((CardEffect)raw))
-                    RolledEffects.Add((CardEffect)raw);
-            }
-            RolledTarget = data.TryGetValue("rolledTarget", out Variant t) ? t.AsInt32() : 0;
-            RolledStep = (RolledEffects.Count > 0 && RolledTarget > 0) ? rolledStep.AsInt32() : -1;
-            if (RolledStep < 0) ClearRuleset();
-        }
+        EnsureRuleset(); // a debug jump onto the finale re-rolls it, which is what testing wants
+        Save();
+    }
 
+    /// Back to a brand new player: no collection, no deck, no medals, no run. The save that
+    /// follows overwrites the file whole, so nothing of the old profile survives on disk.
+    public void DebugWipeSave()
+    {
+        RunActive = false;
+        Medals = 0;
+        StepIndex = 0;
+        FurthestStep = 0;
+        Endless = false;
+        EndlessStreak = 0;
+        EndlessBest = 0;
+        EndlessRunBanked = false;
+        EndlessScores.Clear();
+        MatchRescueUsed = false;
+        ClearRuleset();
+        TutorialSeen = false; // a wiped save IS a first launch, tutorial included
+        CardsMet.Clear();
+        CollectorBack = false;
+        Inventory.Clear();
         SideDeck.Clear();
-        if (data.TryGetValue("sideDeck", out Variant deckVariant))
-        {
-            foreach (Variant entry in deckVariant.AsGodotArray())
-            {
-                int index = entry.AsInt32();
-                if (index >= 0 && index < Inventory.Count) SideDeck.Add(index);
-            }
-        }
-
-        // A save that lost its cards (a failed write, a hand-edited file) is not recoverable as a
-        // run - drop back to "no run" rather than starting a match with an empty hand. StartNewRun
-        // then rebuilds the collection from the starters.
-        if (RunActive && (Inventory.Count == 0 || SideDeck.Count == 0)) RunActive = false;
+        OwnedDecks.Clear(); OwnedDecks.Add(Cosmetics.Default);
+        OwnedBoards.Clear(); OwnedBoards.Add(Cosmetics.Default);
+        SelectedDeck = SelectedBoard = Cosmetics.Default;
+        Save();
     }
 }
