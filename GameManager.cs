@@ -23,7 +23,6 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
     private Button _exitButton;
 
     private Random _random = new Random();
-    private PackedScene _cardViewScene = GD.Load<PackedScene>("res://CardView.tscn");
     private bool _isGameStarted = false;
     private bool _isVsBot = false;
     private bool _setOverPending = false; // the set-end explanation is up; nothing moves until it's acknowledged
@@ -1249,29 +1248,6 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
         _ui.SoundSlide();
         _ui.Refresh();
     }
-
-
-    // When P2's side is mirrored, every card shows its value twice - like the corner indices on
-    // a real playing card: once in the top half and once upside down in the bottom half - so
-    // both players can read every card. Otherwise a single centred value is used.
-    // ------------------------------------------------------------------
-    // Card faces: corners and pips (playtest feedback, 2026-09-14)
-    //
-    // The 55+ blackjack players could not read the table. Two changes, both taken straight from
-    // how an ordinary playing card works: the number sits in two OPPOSITE corners, and the middle
-    // of a main-deck card carries pips.
-    //
-    // The corners also replace what LabelMinus used to do on a mirrored board - a second,
-    // upside-down copy of the number in the lower half, so the player across the table could read
-    // it. Two opposite corners do that permanently, for every card, in both scenes, and they leave
-    // the middle of the card free for the pips. LabelMinus is now ONLY the minus half of a "+/-"
-    // card, which is the one job the corners cannot do.
-    // ------------------------------------------------------------------
-
-
-    // ------------------------------------------------------------------
-    // Reading the table at arm's length (playtest feedback, 2026-09-14)
-    // ------------------------------------------------------------------
 
 
     // ------------------------------------------------------------------
