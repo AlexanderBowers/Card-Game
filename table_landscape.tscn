@@ -16,12 +16,12 @@
 [ext_resource type="Script" path="res://PerspectiveBoard.cs" id="script_persp"]
 
 [sub_resource type="StyleBoxFlat" id="slot_style"]
-bg_color = Color(1, 1, 1, 0.05)
+bg_color = Color(0.29, 0.37, 0.47, 0.05)
 border_width_left = 2
 border_width_top = 2
 border_width_right = 2
 border_width_bottom = 2
-border_color = Color(1, 1, 1, 0.3)
+border_color = Color(0.29, 0.37, 0.47, 0.3)
 corner_radius_top_left = 10
 corner_radius_top_right = 10
 corner_radius_bottom_right = 10
@@ -190,7 +190,7 @@ grow_vertical = 2
 mouse_filter = 2
 texture = ExtResource("tex_mat")
 expand_mode = 1
-stretch_mode = 6
+stretch_mode = 0
 
 [node name="Canvas" type="Control" parent="."]
 layout_mode = 1
@@ -448,6 +448,7 @@ theme_override_constants/separation = 8
 
 [node name="WinsLabel" type="Label" parent="Canvas/P1Side/WinsRow"]
 layout_mode = 2
+theme_override_colors/font_color = Color(0.29, 0.37, 0.47, 0.9)
 theme_override_font_sizes/font_size = 22
 text = "Wins:"
 vertical_alignment = 1
@@ -614,6 +615,7 @@ alignment = 2
 
 [node name="SetInfoLabel" type="Label" parent="Canvas/InfoColumn"]
 layout_mode = 2
+theme_override_colors/font_color = Color(0.2, 0.27, 0.36, 1)
 theme_override_font_sizes/font_size = 24
 text = "Stage 3/10 - Silver"
 horizontal_alignment = 1
@@ -622,7 +624,7 @@ autowrap_mode = 3
 [node name="TargetLabel" type="Label" parent="Canvas/InfoColumn"]
 layout_mode = 2
 visible = false
-theme_override_colors/font_color = Color(1, 0.85, 0.35, 1)
+theme_override_colors/font_color = Color(0.2, 0.27, 0.36, 1)
 theme_override_font_sizes/font_size = 32
 text = "TARGET  23   (up from 20)"
 horizontal_alignment = 1
@@ -936,6 +938,7 @@ theme_override_constants/separation = 8
 
 [node name="WinsLabel" type="Label" parent="Canvas/P2Side/WinsRow"]
 layout_mode = 2
+theme_override_colors/font_color = Color(0.29, 0.37, 0.47, 0.9)
 theme_override_font_sizes/font_size = 22
 text = "Wins:"
 vertical_alignment = 1

@@ -729,179 +729,114 @@ EFFECTS = ["copy", "tradetotals", "tradehands", "shave", "recall", "veto"]
 
 
 # ----------------------------------------------------------------------------------------------
-# Playmats: one table per rank, portrait 1080x1920 and landscape 1920x1080.
+# Playmats: one board per rank, portrait 1080x2340 and landscape 2340x1080 - the game's own
+# 9:19.5 design canvas, so the board's rounded outline lands on the phone's edges unstretched.
 #
-# The table itself is calm - a surface texture and soft light falloff - because the cards are the
-# show. Detail lives at the edges: an inlaid border line and corner ornaments. The game draws its
-# own centre line and ring on top.
+# Light boards (playtest, 2026-10-02: "The lighter themes definitely look better ... It should be
+# rounded out", and no more metal trim). Each board is a rounded slab that fills the canvas: a
+# soft coloured rim with a rounded edge, a pale field inset in it, and the near-white room showing
+# in the four corners. The rim colour is the rank's; the field stays pale, so the cards are the
+# show. The game draws its own centre line and ring on top.
+#
+# The board's outline must match TableWorld3D's rounded mat (BOARD_CORNER, as a fraction of the
+# short side), because the 3D table cuts the same rounded rectangle out of this picture.
 # ----------------------------------------------------------------------------------------------
+BOARD_CORNER = 0.10          # corner radius / short side - keep in step with TableWorld3D.MatCorner
+BOARD_RIM = 0.045            # rim width / short side
+ROOM = "#eef1f6"             # the near-white room round the board
+
 MATS = {
-    #           surface       inlay       kind      (noise scale, bump, roughness)
-    "bronze":   ("#1f4a36", "#b0703a", "felt"),
-    "silver":   ("#27404d", "#a9b6c2", "slate"),
-    "gold":     ("#6a3f0c", "#e6b54a", "lacquer"),
-    "ruby":     ("#4a1420", "#d9a62e", "velvet"),
-    "obsidian": ("#17121f", "#8e6ad8", "glass"),
-    "endless":  ("#120f2e", "#e8e8f0", "void"),
-    # The default board (playtest, 2026-09-30): bright and airy like the Pokemon TCG Pocket
-    # battle mat - a soft sky-blue with a faint hex weave and a white inlay.
-    "classic":  ("#78b6e0", "#ffffff", "pocket"),
+    #            field      rim
+    "classic":  ("#dcedfa", "#7cbdea"),
+    "bronze":   ("#f7e9da", "#dea072"),
+    "silver":   ("#e6ebf0", "#a3b5c6"),
+    "gold":     ("#f9f0d2", "#e9c055"),
+    "ruby":     ("#f9e3e6", "#df8797"),
+    "obsidian": ("#ebe5f6", "#9a82d3"),
+    "endless":  ("#e6e3f8", "#b3a9ea"),
 }
 
 
-def surface_mat(color, kind):
-    m = mat("Surface", srgb(color))
-    nt = m.node_tree
-    p = nt.nodes["Principled BSDF"]
-    noise = nt.nodes.new("ShaderNodeTexNoise")
-    bump = nt.nodes.new("ShaderNodeBump")
-    nt.links.new(noise.outputs["Fac"], bump.inputs["Height"])
-    nt.links.new(bump.outputs["Normal"], p.inputs["Normal"])
-    settings = {
-        "felt":    (160.0, 0.25, 0.95, 0.0),
-        "slate":   (6.0, 0.20, 0.70, 0.0),
-        "lacquer": (2.0, 0.03, 0.40, 0.0),
-        "velvet":  (120.0, 0.18, 0.85, 0.0),
-        "glass":   (3.0, 0.06, 0.42, 0.0),
-        "void":    (1.4, 0.02, 0.55, 0.0),
-        "pocket":  (4.0, 0.0, 0.8, 0.0),
-    }[kind]
-    noise.inputs["Scale"].default_value = settings[0]
-    noise.inputs["Detail"].default_value = 6.0
-    bump.inputs["Strength"].default_value = settings[1]
-    p.inputs["Roughness"].default_value = settings[2]
-    if kind == "lacquer":
-        # Lacquered wood: long soft grain bands, darker streaks in the amber.
-        grain = nt.nodes.new("ShaderNodeTexWave")
-        grain.wave_type = "BANDS"
-        grain.bands_direction = "Y"
-        grain.inputs["Scale"].default_value = 7.0
-        grain.inputs["Distortion"].default_value = 2.5
-        grain.inputs["Detail"].default_value = 4.0
-        ramp = nt.nodes.new("ShaderNodeValToRGB")
-        ramp.color_ramp.elements[0].color = srgb("#58330a")
-        ramp.color_ramp.elements[1].color = srgb(color)
-        nt.links.new(grain.outputs["Fac"], ramp.inputs["Fac"])
-        nt.links.new(ramp.outputs["Color"], p.inputs["Base Color"])
-    if kind == "void":
-        # A night sky of slow colour: indigo drifting to violet and teal, with faint star specks.
-        ramp = nt.nodes.new("ShaderNodeValToRGB")
-        noise.inputs["Scale"].default_value = 3.5
-        noise.inputs["Detail"].default_value = 8.0
-        ramp.color_ramp.elements[0].position = 0.32
-        ramp.color_ramp.elements[0].color = srgb("#07061a")
-        ramp.color_ramp.elements[1].position = 0.70
-        ramp.color_ramp.elements[1].color = srgb("#0c4a63")
-        mid = ramp.color_ramp.elements.new(0.5)
-        mid.color = srgb("#3b1d86")
-        nt.links.new(noise.outputs["Fac"], ramp.inputs["Fac"])
-        stars = nt.nodes.new("ShaderNodeTexVoronoi")
-        stars.inputs["Scale"].default_value = 90.0
-        thr = nt.nodes.new("ShaderNodeMath")
-        thr.operation = "LESS_THAN"
-        thr.inputs[1].default_value = 0.035
-        nt.links.new(stars.outputs["Distance"], thr.inputs[0])
-        mixs = nt.nodes.new("ShaderNodeMix")
-        mixs.data_type = "RGBA"
-        nt.links.new(thr.outputs[0], mixs.inputs["Factor"])
-        nt.links.new(ramp.outputs["Color"], rgba_sock(mixs.inputs, "A"))
-        rgba_sock(mixs.inputs, "B").default_value = (0.8, 0.82, 1.0, 1)
-        nt.links.new(rgba_sock(mixs.outputs, "Result"), p.inputs["Base Color"])
-    if kind == "pocket":
-        # Airy: a radial wash from a pale centre to a deeper sky at the edges, and a faint hex
-        # weave (Voronoi cells, edge lines only) - the cards stay the show.
-        p.inputs["Specular IOR Level"].default_value = 0.2
-        tc = nt.nodes.new("ShaderNodeTexCoord")
-        grad = nt.nodes.new("ShaderNodeTexGradient")
-        grad.gradient_type = "SPHERICAL"
-        sc = nt.nodes.new("ShaderNodeMapping")
-        sc.inputs["Scale"].default_value = (1.7, 1.7, 1.0)   # object space is -0.5..0.5
-        nt.links.new(tc.outputs["Object"], sc.inputs["Vector"])
-        nt.links.new(sc.outputs["Vector"], grad.inputs["Vector"])
-        ramp = nt.nodes.new("ShaderNodeValToRGB")
-        ramp.color_ramp.elements[0].color = srgb("#3f95e0")
-        ramp.color_ramp.elements[1].position = 0.95
-        ramp.color_ramp.elements[1].color = srgb("#c4ebff")
-        nt.links.new(grad.outputs["Color"], ramp.inputs["Fac"])
-        vor = nt.nodes.new("ShaderNodeTexVoronoi")
-        vor.feature = "DISTANCE_TO_EDGE"
-        vor.inputs["Scale"].default_value = 0.9
-        edge = nt.nodes.new("ShaderNodeMath")
-        edge.operation = "LESS_THAN"
-        edge.inputs[1].default_value = 0.025
-        geo = nt.nodes.new("ShaderNodeNewGeometry")         # world units: round cells, any aspect
-        nt.links.new(geo.outputs["Position"], vor.inputs["Vector"])
-        nt.links.new(vor.outputs["Distance"], edge.inputs[0])
-        k = nt.nodes.new("ShaderNodeMath")
-        k.operation = "MULTIPLY"
-        k.inputs[1].default_value = 0.06
-        nt.links.new(edge.outputs[0], k.inputs[0])
-        mixp = nt.nodes.new("ShaderNodeMix")
-        mixp.data_type = "RGBA"
-        nt.links.new(k.outputs[0], mixp.inputs["Factor"])
-        nt.links.new(ramp.outputs["Color"], rgba_sock(mixp.inputs, "A"))
-        rgba_sock(mixp.inputs, "B").default_value = (1, 1, 1, 1)
-        nt.links.new(rgba_sock(mixp.outputs, "Result"), p.inputs["Base Color"])
-    if kind == "velvet":
-        p.inputs["Sheen Weight"].default_value = 0.6
-    if kind in ("glass", "lacquer"):
-        # A satin coat: the light shows as a soft glow, not a mirror image of the lamp.
-        p.inputs["Specular IOR Level"].default_value = 0.25
-    # Slate and glass get faint veins, so they read as stone rather than paint.
-    if kind in ("slate", "glass"):
-        vein = nt.nodes.new("ShaderNodeTexWave")
-        vein.bands_direction = "DIAGONAL"
-        vein.inputs["Scale"].default_value = 0.7
-        vein.inputs["Distortion"].default_value = 18.0
-        vein.inputs["Detail"].default_value = 8.0
-        vein.inputs["Detail Scale"].default_value = 2.0
-        ramp = nt.nodes.new("ShaderNodeValToRGB")
-        ramp.color_ramp.elements[0].position = 0.955
-        ramp.color_ramp.elements[0].color = srgb(color)
-        lighter = [min(1.0, c * (1.5 if kind == "slate" else 2.2)) for c in srgb(color)[:3]] + [1]
-        ramp.color_ramp.elements[1].color = lighter
-        nt.links.new(vein.outputs["Fac"], ramp.inputs["Fac"])
-        nt.links.new(ramp.outputs["Color"], p.inputs["Base Color"])
-    return m
-
-
 def build_playmat(rank, portrait):
-    color, inlay, kind = MATS[rank]
+    field, rim = MATS[rank]
     scene = bpy.context.scene
-    w, h = (10.8, 19.2) if portrait else (19.2, 10.8)
+    w, h = (10.8, 23.4) if portrait else (23.4, 10.8)
+    short = min(w, h)
     scene.render.resolution_x, scene.render.resolution_y = int(w * 100), int(h * 100)
     scene.camera.data.ortho_scale = max(w, h)
     scene.render.film_transparent = False
-    # The card rig is for cards: a table gets only its own pool of light and a dim sky.
+    scene.view_settings.exposure = 0.0
     for name in ("Key", "Fill", "Rim"):
         ob = bpy.data.objects.get(name)
         if ob:
             bpy.data.objects.remove(ob, do_unlink=True)
-    scene.world.node_tree.nodes["Background"].inputs[1].default_value = 0.12
-    bpy.ops.mesh.primitive_plane_add(size=1, location=(0, 0, 0))
-    table = bpy.context.active_object
-    table.scale = (w + 0.4, h + 0.4, 1)
-    table.data.materials.append(surface_mat(color, kind))
-    metal = mat("Inlay", srgb(inlay), rough=0.3, metal=1.0)
-    if kind == "void":
-        metal = iridescent(mat("Inlay", srgb(inlay), rough=0.15, metal=1.0), 560.0)
-    m = 0.45
-    slab("Inlay", w - 2 * m, h - 2 * m, 0.6, 0.0, 0.015, metal, bevel=0.005,
-         hole=(w - 2 * m - 0.07, h - 2 * m - 0.07, 0.56))
-    slab("Inlay2", w - 2 * m - 0.3, h - 2 * m - 0.3, 0.45, 0.0, 0.01, metal, bevel=0.004,
-         hole=(w - 2 * m - 0.34, h - 2 * m - 0.34, 0.43))
-    for sx in (-1, 1):
-        for sy in (-1, 1):
-            cx, cy = sx * (w / 2 - m - 0.15), sy * (h / 2 - m - 0.15)
-            pip((cx, cy, 0.02), 0.14, metal)
-    # A soft pool of light in the middle, falling off to the edges.
+    bg = scene.world.node_tree.nodes["Background"]
+    bg.inputs[0].default_value = (1, 1, 1, 1)
+    bg.inputs[1].default_value = 0.45
+
+    # The room: a flat near-white floor that shows in the corners.
+    bpy.ops.mesh.primitive_plane_add(size=1, location=(0, 0, -0.5))
+    room = bpy.context.active_object
+    room.scale = (w * 2, h * 2, 1)
+    room_mat = mat("Room", srgb(ROOM), rough=0.9)
+    p = room_mat.node_tree.nodes["Principled BSDF"]
+    p.inputs["Emission Color"].default_value = srgb(ROOM)
+    p.inputs["Emission Strength"].default_value = 1.0
+    p.inputs["Base Color"].default_value = (0, 0, 0, 1)
+    room.data.materials.append(room_mat)
+
+    # The board: a rounded slab, its rim colour, with a soft rounded edge.
+    corner = BOARD_CORNER * short
+    band = BOARD_RIM * short
+    rim_mat = mat("Rim", srgb(rim), rough=0.35, coat=0.4)
+    if rank == "endless":
+        rim_mat = iridescent(rim_mat, 480.0)
+    slab("Board", w, h, corner, -0.3, 0.3, rim_mat, bevel=0.16)
+
+    # The field, inset in the rim and a hair proud of it, with its own soft edge. Its colour is
+    # set rather than lit (emission), so the pale tint comes out as picked: a touch lighter in
+    # the middle, falling to the field colour at the edges.
+    field_mat = mat("Field", srgb(field), rough=0.85)
+    nt = field_mat.node_tree
+    pf = nt.nodes["Principled BSDF"]
+    pf.inputs["Base Color"].default_value = [c * 0.2 for c in srgb(field)[:3]] + [1]
+    tc = nt.nodes.new("ShaderNodeTexCoord")
+    sc = nt.nodes.new("ShaderNodeMapping")
+    sc.inputs["Scale"].default_value = (1.2, 1.2, 1.0)       # Generated is 0..1 across the field:
+    sc.inputs["Location"].default_value = (-0.6, -0.6, 0.0)  # centre it, -0.6..0.6
+    grad = nt.nodes.new("ShaderNodeTexGradient")
+    grad.gradient_type = "SPHERICAL"
+    nt.links.new(tc.outputs["Generated"], sc.inputs["Vector"])
+    nt.links.new(sc.outputs["Vector"], grad.inputs["Vector"])
+    ramp = nt.nodes.new("ShaderNodeValToRGB")
+    ramp.color_ramp.elements[0].color = srgb(field)
+    ramp.color_ramp.elements[1].color = srgb(lighten(field, 0.55))
+    ramp.color_ramp.elements[1].position = 0.55           # a broad plateau, not a point of light
+    ramp.color_ramp.interpolation = "EASE"
+    nt.links.new(grad.outputs["Color"], ramp.inputs["Fac"])
+    nt.links.new(ramp.outputs["Color"], pf.inputs["Emission Color"])
+    pf.inputs["Emission Strength"].default_value = 0.92
+    pf.inputs["Specular IOR Level"].default_value = 0.0   # no hot spot of the lamp in the middle
+    slab("Field", w - 2 * band, h - 2 * band, corner - band, 0.0, 0.02, field_mat, bevel=0.03)
+
+    # Soft light: a broad pool from above, and a low key from the top left that puts a gloss on
+    # the rim's rounded edge.
     d = bpy.data.lights.new("Pool", "AREA")
     d.shape = "ELLIPSE"
-    d.size, d.size_y = w * 0.9, h * 0.9
-    d.energy = {"glass": 1000, "void": 700, "pocket": 700}.get(kind, 1300)
+    d.size, d.size_y = w * 1.2, h * 1.2
+    d.energy = 650
     o = bpy.data.objects.new("Pool", d)
-    o.location = (0, 0, 6)
+    o.location = (0, 0, 7)
+    o.visible_camera = False      # the camera looks straight through it
+    o.visible_glossy = False      # and no reflection of it sits in the middle of the field
     scene.collection.objects.link(o)
+    k = bpy.data.lights.new("Key", "AREA")
+    k.size = short
+    k.energy = 400
+    ko = bpy.data.objects.new("Key", k)
+    ko.location = (-w * 0.6, h * 0.6, 4)
+    ko.rotation_euler = (math.radians(-40), math.radians(-35), 0)
+    scene.collection.objects.link(ko)
 
 
 # ----------------------------------------------------------------------------------------------

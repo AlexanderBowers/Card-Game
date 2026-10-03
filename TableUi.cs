@@ -210,7 +210,11 @@ public sealed class TableUi
     private Texture2D _chipEmpty;
 
     /// The target on the table: gold on the dark mat.
-    private static readonly Color TableGold = new Color(1f, 0.85f, 0.35f);
+    /// The ink for words printed straight onto the board (the target, the stage line). Dark,
+    /// because the boards are light (2026-10-02); it was gold on dark felt.
+    private static readonly Color BoardInk = new Color(0.2f, 0.27f, 0.36f);
+    /// An empty win chip, inked so its outline reads on a light board.
+    private static readonly Color EmptyChipInk = new Color(0.29f, 0.37f, 0.47f, 0.75f);
 
     // The collection log's reward. There is one back now, so the reward is the gilding alone.
     private static readonly Color CollectorBackTint = new Color(1.45f, 1.2f, 0.45f);
@@ -900,7 +904,11 @@ public sealed class TableUi
         int i = 0;
         foreach (Node child in chips.GetChildren())
         {
-            if (child is TextureRect chip) chip.Texture = i < wins ? _chipWon : _chipEmpty;
+            if (child is TextureRect chip)
+            {
+                chip.Texture = i < wins ? _chipWon : _chipEmpty;
+                chip.Modulate = i < wins ? Colors.White : EmptyChipInk;
+            }
             i++;
         }
     }
@@ -917,7 +925,9 @@ public sealed class TableUi
         Cards.RankCardTint = (run == null) ? Colors.White : run.CurrentRank.CardTint;
         _playmatTint = PlaymatTintFor(table);
 
-        RenderingServer.SetDefaultClearColor(table);
+        // Whatever shows round the board is the same near-white room in 2D and 3D (2026-10-02:
+        // the boards are light now, and the old dark rank colour read as a grey surround).
+        RenderingServer.SetDefaultClearColor(TableWorld3D.RoomColor);
         if (L == null) return;
         // A rank's own painted playmat (playmats/playmat_<rank>_<portrait|landscape>.png) replaces the
         // tinted shared one; without it the shared mat is tinted as before.
@@ -1055,7 +1065,7 @@ public sealed class TableUi
         {
             string heading = run.Endless ? "ENDLESS" : "FINAL";
             _targetLabel.Text = $"{heading}  -  TARGET {State.TargetScore}{run.FinaleRulesLine("\n")}";
-            _targetLabel.AddThemeColorOverride("font_color", TableGold);
+            _targetLabel.AddThemeColorOverride("font_color", BoardInk);
             return;
         }
 
@@ -1069,7 +1079,7 @@ public sealed class TableUi
         // A target that changes quietly is the game changing its own rules behind the player's back.
         string direction = run.CurrentTarget > run.PreviousTarget ? "up" : "down";
         _targetLabel.Text = $"TARGET  {State.TargetScore}   ({direction} from {run.PreviousTarget})";
-        _targetLabel.AddThemeColorOverride("font_color", TableGold);
+        _targetLabel.AddThemeColorOverride("font_color", BoardInk);
     }
 
     /// A tappable modifier card: an invisible Button (so the theme's touch-friendly hit area
