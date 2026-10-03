@@ -8,10 +8,18 @@ using Godot;
 /// makes the shine slide - the way Pocket's cards catch the light. On top of that, a slow idle
 /// sway keeps the shine alive when the phone is still (and on desktop, which has no sensor).
 /// Battery saver turns the sensor off; the sway stays.
+///
+/// It also keeps the board's live layer going (board_fx.gdshaderinc): its clock, and whether it
+/// shows at all - card animations off or battery saver on ease it away and stop the clock.
 /// </summary>
 public partial class ShineDriver : Node
 {
     public const string TiltParam = "card_tilt";
+    public const string BoardTimeParam = "board_fx_time";
+    public const string BoardOnParam = "board_fx_on";
+
+    private double _boardTime;
+    private float _boardOn = 1f;
 
     private Vector3 _rest;
     private bool _haveRest;
@@ -39,5 +47,12 @@ public partial class ShineDriver : Node
         Vector2 want = sensed + sway;
         _tilt = _tilt.Lerp(want, (float)Mathf.Min(1.0, delta * 8.0));
         RenderingServer.GlobalShaderParameterSet(TiltParam, _tilt);
+
+        bool boardLive = GameSettings.CardAnimations && !GameSettings.BatterySaver;
+        _boardOn = Mathf.MoveToward(_boardOn, boardLive ? 1f : 0f, (float)delta * 2f);
+        if (_boardOn > 0f) _boardTime += delta;
+        // Wraps at 70 s, a whole number of every cycle in the shader (14 s laps, 5 s waves and rings).
+        RenderingServer.GlobalShaderParameterSet(BoardTimeParam, (float)(_boardTime % 70.0));
+        RenderingServer.GlobalShaderParameterSet(BoardOnParam, _boardOn);
     }
 }

@@ -941,6 +941,7 @@ public sealed class TableUi
             Texture2D mat = Cards.Art($"playmats/playmat_{boardKey}_{(L.Portrait ? "portrait" : "landscape")}.png");
             L.Background.Texture = mat ?? authored;
             L.Background.SelfModulate = mat != null ? Colors.White : _playmatTint;
+            ApplyBoardFx(L.Background, mat != null);
         }
         // Both decks share Player 1's back for now (the gilded back is a profile reward, so it
         // shows in local 2-player too). Pass 43 gave each player their own deck so that, with
@@ -950,6 +951,30 @@ public sealed class TableUi
         // both players share yours.
         SetDeckBack(L.Deck, GildedDeck ? null : Cards.Art($"backs/card_back_{CardViews.PlayerDeckKey}.png"));
         SetDeckBack(L.P2Deck, Cards.Art($"backs/card_back_{Cards.DeckKeyFor(true)}.png"));
+    }
+
+    // The board's live layer on the flat table (board_2d.gdshader): the same rim gleam, lattice
+    // and rings as the 3D board. Only on a painted board - the old shared mat has no rim to light.
+    private static ShaderMaterial _boardFx2D;
+
+    private static void ApplyBoardFx(TextureRect background, bool painted)
+    {
+        if (!painted)
+        {
+            background.Material = null;
+            return;
+        }
+        if (_boardFx2D == null && ResourceLoader.Exists("res://board_2d.gdshader"))
+            _boardFx2D = new ShaderMaterial { Shader = GD.Load<Shader>("res://board_2d.gdshader") };
+        if (_boardFx2D == null) return;
+        background.Material = _boardFx2D;
+        void Fit() => _boardFx2D.SetShaderParameter("board_size", background.Size);
+        if (!background.HasMeta("boardFx"))
+        {
+            background.SetMeta("boardFx", true);
+            background.Resized += Fit;
+        }
+        Fit();
     }
 
     private void SetDeckBack(TextureRect deck, Texture2D back)

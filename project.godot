@@ -74,3 +74,11 @@ card_tilt={
 "type": "vec2",
 "value": Vector2(0, 0)
 }
+board_fx_time={
+"type": "float",
+"value": 0.0
+}
+board_fx_on={
+"type": "float",
+"value": 1.0
+}
