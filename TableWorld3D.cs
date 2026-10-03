@@ -41,6 +41,12 @@ public partial class TableWorld3D : Node3D
     private DirectionalLight3D _sun;
     private MeshInstance3D _mat;
     private StandardMaterial3D _matMaterial;
+    private MeshInstance3D _slab;
+
+    /// How deep the tabletop is under the playmat, in world units (one unit = PixelsPerUnit layout
+    /// pixels, so 0.8 is about a card's width). It only shows from the side, which is
+    /// exactly what the swing-in looks at: a mat lying on the floor read as paper (2026-10-02).
+    private const float TableThickness = 0.8f;
     private WorldEnvironment _env;
 
     private bool _active;
@@ -110,7 +116,8 @@ public partial class TableWorld3D : Node3D
         _env = new WorldEnvironment { Environment = environment };
         AddChild(_env);
 
-        // The playmat, and a darker table round it that only shows during the swing-in.
+        // The playmat, the tabletop under it, and a darker floor round it that only shows during the
+        // swing-in.
         _matMaterial = new StandardMaterial3D
         {
             Roughness = 0.9f,
@@ -120,6 +127,19 @@ public partial class TableWorld3D : Node3D
         _mat.CastShadow = GeometryInstance3D.ShadowCastingSetting.Off;
         AddChild(_mat);
 
+        // The tabletop under the mat: a dark wooden slab whose sides show while the camera swings
+        // in. A unit-square box, scaled with the mat in PlaceMat; its top sits a hair under the
+        // mat so the two never fight over the same depth.
+        StandardMaterial3D slabMaterial = new StandardMaterial3D { AlbedoColor = new Color(0.46f, 0.29f, 0.17f), Roughness = 0.6f };
+        _slab = new MeshInstance3D
+        {
+            Mesh = new BoxMesh { Size = new Vector3(1f, TableThickness, 1f) },
+            MaterialOverride = slabMaterial,
+            CastShadow = GeometryInstance3D.ShadowCastingSetting.Off,
+        };
+        _slab.Position = new Vector3(0f, -TableThickness / 2f - 0.002f, 0f);
+        AddChild(_slab);
+
         StandardMaterial3D floorMaterial = new StandardMaterial3D { AlbedoColor = new Color(0.12f, 0.1f, 0.09f), Roughness = 0.8f };
         MeshInstance3D floor = new MeshInstance3D
         {
@@ -127,7 +147,7 @@ public partial class TableWorld3D : Node3D
             MaterialOverride = floorMaterial,
             CastShadow = GeometryInstance3D.ShadowCastingSetting.Off,
         };
-        floor.Position = new Vector3(0f, -0.02f, 0f);
+        floor.Position = new Vector3(0f, -TableThickness - 0.02f, 0f);
         AddChild(floor);
 
         _slotOutline = Outline(new Vector2I(140, 190), 14f, 3f, new Color(1f, 1f, 1f, 0.42f), new Color(1f, 1f, 1f, 0.07f));
@@ -137,6 +157,11 @@ public partial class TableWorld3D : Node3D
     public override void _ExitTree()
     {
         if (Instance == this) Instance = null;
+        // Leaving mid swing-in (Restart, back to the menu, quitting): the scene is going away, so
+        // whatever the landing was going to start (the stage intro) must not run. It used to, and
+        // tried to add the intro to a root that was busy tearing down - an error and a
+        // NullReferenceException on every exit during the swing.
+        _swingDone = null;
         if (_active) SetActive(false);
     }
 
@@ -203,7 +228,7 @@ public partial class TableWorld3D : Node3D
     {
         _swing = 1f;
         Control canvas = _ui.Layout?.Canvas;
-        if (canvas != null && canvas.Modulate.A < 1f)
+        if (canvas != null && canvas.IsInsideTree() && canvas.Modulate.A < 1f)
         {
             Tween fade = canvas.CreateTween();
             fade.TweenProperty(canvas, "modulate:a", 1f, 0.35f);
@@ -356,6 +381,7 @@ public partial class TableWorld3D : Node3D
         if (bg != null) _matMaterial.AlbedoColor = bg.SelfModulate;
         Vector3 scale = new Vector3(view.X / PixelsPerUnit * 1.3f, 1f, view.Y / PixelsPerUnit * 1.3f);
         if (!_mat.Scale.IsEqualApprox(scale)) _mat.Scale = scale;
+        if (!_slab.Scale.IsEqualApprox(scale)) _slab.Scale = scale; // Y stays 1: the box carries its own depth
     }
 
     private void MirrorBoard(Control board, Vector2 view, TableLayout layout)
