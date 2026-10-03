@@ -748,13 +748,55 @@ ROOM = "#eef1f6"             # the near-white room round the board
 MATS = {
     #            field      rim
     "classic":  ("#dcedfa", "#7cbdea"),
-    "bronze":   ("#f7e9da", "#dea072"),
+    "bronze":   ("#e4f0e3", "#86bf98"),   # leans green, like the old felt - softly (2026-10-02)
     "silver":   ("#e6ebf0", "#a3b5c6"),
     "gold":     ("#f9f0d2", "#e9c055"),
     "ruby":     ("#f9e3e6", "#df8797"),
     "obsidian": ("#ebe5f6", "#9a82d3"),
     "endless":  ("#e6e3f8", "#b3a9ea"),
 }
+
+
+def blend(a, b, t):
+    """Mix two '#rrggbb' colours: 0 = a, 1 = b."""
+    ca = [int(a.lstrip("#")[i:i + 2], 16) for i in (0, 2, 4)]
+    cb = [int(b.lstrip("#")[i:i + 2], 16) for i in (0, 2, 4)]
+    return "#%02x%02x%02x" % tuple(round(x + (y - x) * t) for x, y in zip(ca, cb))
+
+
+def star(name, outer, inner, points, z, material, outline=None):
+    """A flat star (points alternate outer/inner radius), or with `outline` just its edge."""
+    pts = []
+    for i in range(points * 2):
+        a = math.pi / 2 + math.pi * i / points
+        r = outer if i % 2 == 0 else inner
+        pts.append((r * math.cos(a), r * math.sin(a)))
+    me = bpy.data.meshes.new(name)
+    bm = bmesh.new()
+    if outline:
+        # The edge as a strip: each corner pulled in towards the centre by `outline`.
+        outer_v = [bm.verts.new((x, y, 0)) for x, y in pts]
+        inner_v = []
+        for x, y in pts:
+            d = math.hypot(x, y)
+            k = max(0.0, (d - outline * 2.2) / d)
+            inner_v.append(bm.verts.new((x * k, y * k, 0)))
+        n = len(pts)
+        for i in range(n):
+            j = (i + 1) % n
+            bm.faces.new((outer_v[i], outer_v[j], inner_v[j], inner_v[i]))
+    else:
+        c = bm.verts.new((0, 0, 0))
+        ring = [bm.verts.new((x, y, 0)) for x, y in pts]
+        for i in range(len(ring)):
+            bm.faces.new((c, ring[i], ring[(i + 1) % len(ring)]))
+    bm.to_mesh(me)
+    bm.free()
+    ob = bpy.data.objects.new(name, me)
+    bpy.context.scene.collection.objects.link(ob)
+    ob.location.z = z
+    ob.data.materials.append(material)
+    return ob
 
 
 def build_playmat(rank, portrait):
@@ -814,10 +856,85 @@ def build_playmat(rank, portrait):
     ramp.color_ramp.elements[1].position = 0.55           # a broad plateau, not a point of light
     ramp.color_ramp.interpolation = "EASE"
     nt.links.new(grad.outputs["Color"], ramp.inputs["Fac"])
-    nt.links.new(ramp.outputs["Color"], pf.inputs["Emission Color"])
+
+    # The pattern in the middle (2026-10-02: "a sort of design or pattern in the middle"): a fine
+    # diamond lattice in the rim's colour, strongest at the centre and gone well before the
+    # boards, so it frames the middle of the table without sitting under any card.
+    pos = nt.nodes.new("ShaderNodeNewGeometry")             # world units: square diamonds, any aspect
+    lattice = None
+    for angle in (45.0, -45.0):
+        rot = nt.nodes.new("ShaderNodeMapping")
+        rot.inputs["Rotation"].default_value = (0.0, 0.0, math.radians(angle))
+        nt.links.new(pos.outputs["Position"], rot.inputs["Vector"])
+        wave = nt.nodes.new("ShaderNodeTexWave")
+        wave.wave_type = "BANDS"
+        wave.bands_direction = "X"
+        wave.wave_profile = "SIN"
+        wave.inputs["Scale"].default_value = 0.9 / short * 10.8   # same diamond size on both shapes
+        wave.inputs["Distortion"].default_value = 0.0
+        wave.inputs["Detail"].default_value = 0.0
+        nt.links.new(rot.outputs["Vector"], wave.inputs["Vector"])
+        line = nt.nodes.new("ShaderNodeMapRange")              # only the crest: a thin line
+        line.inputs["From Min"].default_value = 0.93
+        line.inputs["From Max"].default_value = 1.0
+        nt.links.new(wave.outputs["Fac"], line.inputs["Value"])
+        if lattice is None:
+            lattice = line
+        else:
+            both = nt.nodes.new("ShaderNodeMath")
+            both.operation = "MAXIMUM"
+            nt.links.new(lattice.outputs[0], both.inputs[0])
+            nt.links.new(line.outputs[0], both.inputs[1])
+            lattice = both
+    # Fade: full at the centre, nothing past ~0.62 of the short side.
+    centre = nt.nodes.new("ShaderNodeVectorMath")
+    centre.operation = "LENGTH"
+    nt.links.new(pos.outputs["Position"], centre.inputs[0])
+    fade = nt.nodes.new("ShaderNodeMapRange")
+    fade.inputs["From Min"].default_value = 0.12 * short
+    fade.inputs["From Max"].default_value = 0.62 * short
+    fade.inputs["To Min"].default_value = 1.0
+    fade.inputs["To Max"].default_value = 0.0
+    fade.interpolation_type = "SMOOTHSTEP"
+    nt.links.new(centre.outputs["Value"], fade.inputs["Value"])
+    amount = nt.nodes.new("ShaderNodeMath")
+    amount.operation = "MULTIPLY"
+    nt.links.new(lattice.outputs[0], amount.inputs[0])
+    nt.links.new(fade.outputs[0], amount.inputs[1])
+    strength = nt.nodes.new("ShaderNodeMath")
+    strength.operation = "MULTIPLY"
+    strength.inputs[1].default_value = 0.30                  # a whisper, not a print
+    nt.links.new(amount.outputs[0], strength.inputs[0])
+    tint = nt.nodes.new("ShaderNodeMix")
+    tint.data_type = "RGBA"
+    nt.links.new(strength.outputs[0], tint.inputs["Factor"])
+    nt.links.new(ramp.outputs["Color"], rgba_sock(tint.inputs, "A"))
+    rgba_sock(tint.inputs, "B").default_value = srgb(rim)
+    nt.links.new(rgba_sock(tint.outputs, "Result"), pf.inputs["Emission Color"])
     pf.inputs["Emission Strength"].default_value = 0.92
     pf.inputs["Specular IOR Level"].default_value = 0.0   # no hot spot of the lamp in the middle
     slab("Field", w - 2 * band, h - 2 * band, corner - band, 0.0, 0.02, field_mat, bevel=0.03)
+
+    # The emblem: two fine rings and an eight-point star, pressed into the field in tints of
+    # the rim, under the game's own centre ring.
+    def flat(name, hexcol):
+        m = mat(name, srgb(hexcol), rough=0.85)
+        pm = m.node_tree.nodes["Principled BSDF"]
+        pm.inputs["Base Color"].default_value = [c * 0.2 for c in srgb(hexcol)[:3]] + [1]
+        pm.inputs["Emission Color"].default_value = srgb(hexcol)
+        pm.inputs["Emission Strength"].default_value = 0.92
+        pm.inputs["Specular IOR Level"].default_value = 0.0
+        return m
+
+    line_mat = flat("EmblemLine", blend(field, rim, 0.45))
+    fill_mat = flat("EmblemFill", blend(field, rim, 0.14))
+    z = 0.021
+    for radius, width in ((0.30, 0.010), (0.255, 0.004)):
+        r_out, r_in = radius * short, (radius - width) * short
+        slab("Ring", 2 * r_out, 2 * r_out, r_out, z, 0.004, line_mat, bevel=0.0,
+             hole=(2 * r_in, 2 * r_in, r_in))
+    star("Star", 0.21 * short, 0.085 * short, 8, z, fill_mat)
+    star("StarLine", 0.21 * short, 0.085 * short, 8, z + 0.001, line_mat, outline=0.006 * short)
 
     # Soft light: a broad pool from above, and a low key from the top left that puts a gloss on
     # the rim's rounded edge.
