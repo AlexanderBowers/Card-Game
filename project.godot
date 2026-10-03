@@ -66,11 +66,19 @@ sensors/enable_gravity=true
 textures/canvas_textures/default_texture_filter=3
 renderer/rendering_method="mobile"
 textures/vram_compression/import_etc2_astc=true
-environment/defaults/default_clear_color=Color(0.1, 0.14, 0.16, 1)
+environment/defaults/default_clear_color=Color(0.933, 0.945, 0.965, 1)
 
 [shader_globals]
 
 card_tilt={
 "type": "vec2",
 "value": Vector2(0, 0)
+}
+board_fx_time={
+"type": "float",
+"value": 0.0
+}
+board_fx_on={
+"type": "float",
+"value": 1.0
 }

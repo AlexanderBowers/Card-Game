@@ -38,15 +38,26 @@ public partial class TableWorld3D : Node3D
     public TableUi Ui { get; set; }
     private TableUi _ui => Ui;
     private Camera3D _camera;
-    private DirectionalLight3D _sun;
     private MeshInstance3D _mat;
-    private StandardMaterial3D _matMaterial;
-    private MeshInstance3D _slab;
+    private ShaderMaterial _boardMaterial;   // board_3d.gdshader: the art, its shading and its live layer
+    private Vector2 _matSize;                   // the size the board mesh was last built at
+    private Texture2D _boardTexture;
 
-    /// How deep the tabletop is under the playmat, in world units (one unit = PixelsPerUnit layout
-    /// pixels, so 0.8 is about a card's width). It only shows from the side, which is
-    /// exactly what the swing-in looks at: a mat lying on the floor read as paper (2026-10-02).
-    private const float TableThickness = 0.8f;
+    /// How deep the board is, in world units (one unit = PixelsPerUnit layout pixels, so 0.5 is
+    /// about half a card's width). A mat lying on the floor read as paper (2026-10-02); 0.8 read
+    /// as a heavy wall once the board was rounded and light.
+    private const float TableThickness = 0.5f;
+
+    /// The board's corner radius as a fraction of its short side, and the radius of its rounded
+    /// top edge. MatCorner must match BOARD_CORNER in tools/cardgen/cardgen.py, which paints the
+    /// playmat with exactly this outline (and the room colour outside it).
+    private const float MatCorner = 0.10f;
+    private const float EdgeRadius = 0.14f;
+
+
+    /// The room round the board: near-white, like the playmats' corners (playtest, 2026-10-02:
+    /// "I don't like that grey background ... more of a whiter background").
+    public static readonly Color RoomColor = new Color(0.933f, 0.945f, 0.965f);
     private WorldEnvironment _env;
 
     private bool _active;
@@ -77,6 +88,8 @@ public partial class TableWorld3D : Node3D
         public StandardMaterial3D Material;
         public StandardMaterial3D StackMaterial; // decks: the cards under the top one; cards: the edge
         public ShaderMaterial Shine;             // cards only: the additive gloss and foil overlay
+        public MeshInstance3D Shadow;            // cards and decks: the soft blob on the table
+        public StandardMaterial3D ShadowMaterial;
     }
 
     private enum Kind { Card, Slot, Deck, Line, Ring }
@@ -93,21 +106,15 @@ public partial class TableWorld3D : Node3D
         _camera = new Camera3D { Fov = FieldOfView, Near = 0.05f, Far = 200f };
         AddChild(_camera);
 
-        _sun = new DirectionalLight3D
-        {
-            LightEnergy = 0.75f,
-            ShadowEnabled = true,
-            ShadowBlur = 2.5f,
-            DirectionalShadowMaxDistance = 40f,
-            DirectionalShadowMode = DirectionalLight3D.ShadowMode.Orthogonal,
-        };
-        _sun.RotationDegrees = new Vector3(-62f, -28f, 0f);
-        AddChild(_sun);
+        // No light and no shadow map (2026-10-02). Everything on the table is unshaded - the
+        // renders carry their own light, the board's edge is shaded by vertex colour - and each
+        // card or deck casts a soft blob shadow of its own (see BlobShadow). The shadow map drew
+        // a huge black wedge across the board on the S25's GPU, and it cost battery anyway.
 
         Godot.Environment environment = new Godot.Environment
         {
             BackgroundMode = Godot.Environment.BGMode.Color,
-            BackgroundColor = new Color(0.07f, 0.09f, 0.13f),
+            BackgroundColor = RoomColor,
             AmbientLightSource = Godot.Environment.AmbientSource.Color,
             AmbientLightColor = Colors.White,
             AmbientLightEnergy = 0.5f,
@@ -116,31 +123,20 @@ public partial class TableWorld3D : Node3D
         _env = new WorldEnvironment { Environment = environment };
         AddChild(_env);
 
-        // The playmat, the tabletop under it, and a darker floor round it that only shows during the
-        // swing-in.
-        _matMaterial = new StandardMaterial3D
-        {
-            Roughness = 0.9f,
-            TextureFilter = BaseMaterial3D.TextureFilterEnum.LinearWithMipmapsAnisotropic,
-        };
-        _mat = new MeshInstance3D { Mesh = new PlaneMesh { Size = Vector2.One }, MaterialOverride = _matMaterial };
+        // The board: one rounded slab whose top is the playmat (BuildBoard). Its rounded edge and
+        // sides take their colour from the mat's own rim, so every board's edge matches its art.
+        _boardMaterial = new ShaderMaterial { Shader = GD.Load<Shader>("res://board_3d.gdshader") };
+        _mat = new MeshInstance3D { MaterialOverride = _boardMaterial };
         _mat.CastShadow = GeometryInstance3D.ShadowCastingSetting.Off;
         AddChild(_mat);
 
-        // The tabletop under the mat: a dark wooden slab whose sides show while the camera swings
-        // in. A unit-square box, scaled with the mat in PlaceMat; its top sits a hair under the
-        // mat so the two never fight over the same depth.
-        StandardMaterial3D slabMaterial = new StandardMaterial3D { AlbedoColor = new Color(0.46f, 0.29f, 0.17f), Roughness = 0.6f };
-        _slab = new MeshInstance3D
+        // The room: a flat, unlit near-white floor the same colour as the background, so there is
+        // no horizon - the board just sits in a bright space.
+        StandardMaterial3D floorMaterial = new StandardMaterial3D
         {
-            Mesh = new BoxMesh { Size = new Vector3(1f, TableThickness, 1f) },
-            MaterialOverride = slabMaterial,
-            CastShadow = GeometryInstance3D.ShadowCastingSetting.Off,
+            AlbedoColor = RoomColor,
+            ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
         };
-        _slab.Position = new Vector3(0f, -TableThickness / 2f - 0.002f, 0f);
-        AddChild(_slab);
-
-        StandardMaterial3D floorMaterial = new StandardMaterial3D { AlbedoColor = new Color(0.12f, 0.1f, 0.09f), Roughness = 0.8f };
         MeshInstance3D floor = new MeshInstance3D
         {
             Mesh = new PlaneMesh { Size = new Vector2(400f, 400f) },
@@ -150,7 +146,8 @@ public partial class TableWorld3D : Node3D
         floor.Position = new Vector3(0f, -TableThickness - 0.02f, 0f);
         AddChild(floor);
 
-        _slotOutline = Outline(new Vector2I(140, 190), 14f, 3f, new Color(1f, 1f, 1f, 0.42f), new Color(1f, 1f, 1f, 0.07f));
+        // Slots are inked, not white: the boards are light (2026-10-02).
+        _slotOutline = Outline(new Vector2I(140, 190), 14f, 3f, new Color(0.29f, 0.37f, 0.47f, 0.4f), new Color(0.29f, 0.37f, 0.47f, 0.06f));
         SetActive(GameSettings.Table3D);
     }
 
@@ -263,7 +260,6 @@ public partial class TableWorld3D : Node3D
 
         if (layout.Background != null && layout.Background.Visible) layout.Background.Visible = false;
         SetTilt(layout, false);
-        _sun.ShadowEnabled = !GameSettings.BatterySaver;
 
         if (_swing < 1f)
         {
@@ -374,14 +370,108 @@ public partial class TableWorld3D : Node3D
 
     private void PlaceMat(TableLayout layout, Vector2 view)
     {
-        // The playmat the 2D table would have shown (ApplyRankTheme picks it), a little larger than
-        // the screen so the far corners stay covered once the camera tilts.
+        // The playmat the 2D table would have shown (ApplyRankTheme picks it).
         TextureRect bg = layout.Background;
-        if (bg != null && _matMaterial.AlbedoTexture != bg.Texture) _matMaterial.AlbedoTexture = bg.Texture;
-        if (bg != null) _matMaterial.AlbedoColor = bg.SelfModulate;
-        Vector3 scale = new Vector3(view.X / PixelsPerUnit * 1.3f, 1f, view.Y / PixelsPerUnit * 1.3f);
-        if (!_mat.Scale.IsEqualApprox(scale)) _mat.Scale = scale;
-        if (!_slab.Scale.IsEqualApprox(scale)) _slab.Scale = scale; // Y stays 1: the box carries its own depth
+        if (bg != null && bg.Texture != _boardTexture)
+        {
+            _boardTexture = bg.Texture;
+            _boardMaterial.SetShaderParameter("board_tex", _boardTexture);
+        }
+        // The board is the screen's size, so its rim runs along the screen's edges where the table
+        // is at layout scale; tilted, the far corners come into view with the room beyond them.
+        Vector2 size = view / PixelsPerUnit;
+        if (!size.IsEqualApprox(_matSize))
+        {
+            _matSize = size;
+            _mat.Mesh = BuildBoard(size.X, size.Y);
+            _boardMaterial.SetShaderParameter("board_size", size);
+        }
+    }
+
+    /// The board: a rounded rectangle (MatCorner) with a rounded top edge (EdgeRadius) and straight
+    /// sides down to TableThickness, top at y = 0. The top is UV-mapped to the whole playmat; the
+    /// edge and sides reuse the UV just inside the rim, so they wear the rim's colour.
+    private static ArrayMesh BuildBoard(float w, float h)
+    {
+        const int cornerSegments = 12;
+        const int edgeSegments = 5;
+        float corner = MatCorner * Mathf.Min(w, h);
+        float edge = Mathf.Min(EdgeRadius, corner * 0.5f);
+
+        // The outline, as corner centres + outward directions, counter-clockwise from +X.
+        List<(Vector2 centre, Vector2 dir)> outline = new List<(Vector2, Vector2)>();
+        Vector2[] centres =
+        {
+            new Vector2(w / 2 - corner, h / 2 - corner), new Vector2(-w / 2 + corner, h / 2 - corner),
+            new Vector2(-w / 2 + corner, -h / 2 + corner), new Vector2(w / 2 - corner, -h / 2 + corner),
+        };
+        for (int c = 0; c < 4; c++)
+        {
+            for (int i = 0; i <= cornerSegments; i++)
+            {
+                float a = Mathf.DegToRad(c * 90f + 90f * i / cornerSegments);
+                outline.Add((centres[c], new Vector2(Mathf.Cos(a), Mathf.Sin(a))));
+            }
+        }
+
+        Vector2 Uv(Vector2 p) => new Vector2(p.X / w + 0.5f, p.Y / h + 0.5f);
+        // The rim's colour: a little inside the outline, past the anti-aliased edge of the art.
+        float rimInset = 0.03f * Mathf.Min(w, h); // inside the rim band (cardgen BOARD_RIM is 0.045)
+
+        SurfaceTool st = new SurfaceTool();
+        st.Begin(Mesh.PrimitiveType.Triangles);
+
+        // Top: a fan from the middle to the outline inset by the edge radius.
+        int n = outline.Count;
+        Vector2 Ring(int i, float inset) => outline[i].centre + outline[i].dir * (corner - inset);
+        for (int i = 0; i < n; i++)
+        {
+            Vector2 a = Ring(i, edge), b = Ring((i + 1) % n, edge);
+            foreach (Vector2 p in new[] { Vector2.Zero, b, a })
+            {
+                st.SetColor(Colors.White);
+                st.SetNormal(Vector3.Up);
+                st.SetUV(Uv(p));
+                st.AddVertex(new Vector3(p.X, 0f, p.Y));
+            }
+        }
+
+        // The rounded edge (a quarter circle) and then the straight side.
+        List<(float inset, float drop, float up)> profile = new List<(float, float, float)>();
+        for (int k = 0; k <= edgeSegments; k++)
+        {
+            float t = Mathf.Pi / 2f * k / edgeSegments;
+            profile.Add((edge * (1f - Mathf.Sin(t)), edge * (1f - Mathf.Cos(t)), Mathf.Cos(t)));
+        }
+        profile.Add((0f, TableThickness, 0f));
+
+        for (int r = 0; r < profile.Count - 1; r++)
+        {
+            var (i0, d0, u0) = profile[r];
+            var (i1, d1, u1) = profile[r + 1];
+            if (r == profile.Count - 2) u0 = 0f; // the side is straight down: flat normals
+            for (int i = 0; i < n; i++)
+            {
+                int j = (i + 1) % n;
+                Vector2 pa0 = Ring(i, i0), pb0 = Ring(j, i0), pa1 = Ring(i, i1), pb1 = Ring(j, i1);
+                Vector3 Normal(int idx, float up) =>
+                    new Vector3(outline[idx].dir.X * Mathf.Sqrt(1f - up * up), up, outline[idx].dir.Y * Mathf.Sqrt(1f - up * up));
+                void V(Vector2 p, float drop, int idx, float up)
+                {
+                    // The board is unshaded, so its shape is in the vertex colour: full on top,
+                    // shading off round the edge, and the sides a step darker.
+                    float shade = Mathf.Lerp(0.8f, 1f, up);
+                    st.SetColor(new Color(shade, shade, shade));
+                    st.SetNormal(Normal(idx, up));
+                    st.SetUV(Uv(Ring(idx, rimInset)));
+                    st.AddVertex(new Vector3(p.X, -drop, p.Y));
+                }
+                V(pa0, d0, i, u0); V(pb0, d0, j, u0); V(pb1, d1, j, u1);
+                V(pa0, d0, i, u0); V(pb1, d1, j, u1); V(pa1, d1, i, u1);
+            }
+        }
+
+        return st.Commit();
     }
 
     private void MirrorBoard(Control board, Vector2 view, TableLayout layout)
@@ -434,7 +524,12 @@ public partial class TableWorld3D : Node3D
         float width = across.Length() / PixelsPerUnit;
         float height = down.Length() / PixelsPerUnit;
         float angle = Mathf.Atan2(across.Y, across.X);
-        if (width < 0.001f || height < 0.001f) { piece.Mesh.Visible = false; return; }
+        if (width < 0.001f || height < 0.001f)
+        {
+            piece.Mesh.Visible = false;
+            if (piece.Shadow != null) piece.Shadow.Visible = false;
+            return;
+        }
 
         // Lift: a card in flight rides above the table, higher the bigger the 2D animation draws
         // it (the Modifier's hover); everything else lies on the felt in a fixed stacking order.
@@ -489,6 +584,8 @@ public partial class TableWorld3D : Node3D
             if (piece.StackMaterial.Transparency != mode) piece.StackMaterial.Transparency = mode;
         }
 
+        if (piece.Shadow != null) PlaceShadow(piece, position, angle, width, height, tint.A);
+
         if (piece.Shine != null)
         {
             // The gloss reads the same face texture for its shape, and the 2D card's own foil
@@ -539,13 +636,12 @@ public partial class TableWorld3D : Node3D
         {
             Mesh = new QuadMesh { Size = Vector2.One },
             MaterialOverride = material,
-            CastShadow = kind is Kind.Card or Kind.Deck
-                ? GeometryInstance3D.ShadowCastingSetting.On
-                : GeometryInstance3D.ShadowCastingSetting.Off,
+            CastShadow = GeometryInstance3D.ShadowCastingSetting.Off,
         };
         AddChild(mesh);
 
         Piece piece = new Piece { Mesh = mesh, Material = material };
+        if (kind is Kind.Card or Kind.Deck) MakeShadow(piece);
         if (kind == Kind.Card)
         {
             // A card has an edge: a darker copy of its face a hair underneath, so a card on the
@@ -599,7 +695,81 @@ public partial class TableWorld3D : Node3D
     private const int DeckLayers = 6;
     private const float DeckLayerGap = 0.022f;
 
-    private static void FreePiece(Piece piece) => piece.Mesh?.QueueFree();
+    private static void FreePiece(Piece piece)
+    {
+        piece.Mesh?.QueueFree();
+        piece.Shadow?.QueueFree();
+    }
+
+    // ------------------------------------------------------------------
+    // Blob shadows (2026-10-02, replacing the shadow map)
+    //
+    // Each card and deck lays a soft rounded shadow on the table, a little down and to the right
+    // of it. The higher a card flies, the further the shadow falls, the wider and fainter it gets
+    // - which is all a shadow map was doing for us, without a map to go wrong on a phone GPU.
+    // ------------------------------------------------------------------
+    private const float ShadowPad = 0.2f;        // blob texture margin, as a fraction of each side
+    private static ImageTexture _blob;
+
+    private void MakeShadow(Piece piece)
+    {
+        _blob ??= BlobTexture();
+        piece.ShadowMaterial = new StandardMaterial3D
+        {
+            ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
+            Transparency = BaseMaterial3D.TransparencyEnum.Alpha,
+            AlbedoTexture = _blob,
+            AlbedoColor = new Color(0.12f, 0.16f, 0.24f, 0f),
+            CullMode = BaseMaterial3D.CullModeEnum.Disabled,
+            DepthDrawMode = BaseMaterial3D.DepthDrawModeEnum.Disabled,
+        };
+        piece.Shadow = new MeshInstance3D
+        {
+            Mesh = new QuadMesh { Size = Vector2.One },
+            MaterialOverride = piece.ShadowMaterial,
+            CastShadow = GeometryInstance3D.ShadowCastingSetting.Off,
+        };
+        AddChild(piece.Shadow);
+    }
+
+    private static void PlaceShadow(Piece piece, Vector3 position, float angle, float width, float height, float alpha)
+    {
+        float lift = Mathf.Max(0f, position.Y);
+        float spread = (1f + lift * 0.45f) / (1f - 2f * ShadowPad);
+        Vector3 at = new Vector3(position.X + 0.03f + lift * 0.28f, 0.008f, position.Z + 0.05f + lift * 0.4f);
+        Basis basis = new Basis(Vector3.Up, -angle) * new Basis(Vector3.Right, -Mathf.Pi / 2f)
+                      * Basis.FromScale(new Vector3(width * spread, height * spread, 1f));
+        Transform3D next = new Transform3D(basis, at);
+        if (!next.IsEqualApprox(piece.Shadow.Transform)) piece.Shadow.Transform = next;
+        piece.Shadow.Visible = true;
+        float strength = Mathf.Lerp(0.34f, 0.12f, Mathf.Clamp(lift / 1.6f, 0f, 1f)) * alpha;
+        Color c = piece.ShadowMaterial.AlbedoColor;
+        if (!Mathf.IsEqualApprox(c.A, strength)) piece.ShadowMaterial.AlbedoColor = new Color(c, strength);
+    }
+
+    /// A soft rounded rectangle in the middle of a transparent margin (ShadowPad each side).
+    private static ImageTexture BlobTexture()
+    {
+        const int w = 112, h = 144;
+        Image image = Image.CreateEmpty(w, h, false, Image.Format.Rgba8);
+        Vector2 core = new Vector2(w, h) * (0.5f - ShadowPad);
+        float radius = w * (1f - 2f * ShadowPad) * 0.14f;
+        float soft = w * ShadowPad * 0.9f;
+        for (int y = 0; y < h; y++)
+        {
+            for (int x = 0; x < w; x++)
+            {
+                Vector2 p = new Vector2(x + 0.5f - w / 2f, y + 0.5f - h / 2f);
+                Vector2 q = new Vector2(Mathf.Abs(p.X), Mathf.Abs(p.Y)) - core + new Vector2(radius, radius);
+                float d = new Vector2(Mathf.Max(q.X, 0f), Mathf.Max(q.Y, 0f)).Length()
+                          + Mathf.Min(Mathf.Max(q.X, q.Y), 0f) - radius;
+                float a = 1f - Mathf.SmoothStep(-soft * 0.35f, soft, d);
+                image.SetPixel(x, y, new Color(1f, 1f, 1f, a));
+            }
+        }
+        image.GenerateMipmaps();
+        return ImageTexture.CreateFromImage(image);
+    }
 
     // ------------------------------------------------------------------
     // Outlines (the empty slot, the centre ring, the impact ring), drawn once into textures
