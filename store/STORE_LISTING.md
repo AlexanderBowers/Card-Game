@@ -53,11 +53,13 @@ Easy to learn in one match, with a short guided tutorial, and plenty to master.
 
 **Graphics**
 - App icon 512×512: `assets/aimfor20_art/store_icon_512.png` (the "±20" logo on cream)
-- Feature graphic 1024×500: `store/feature_graphic_1024x500.png`
-- Phone screenshots (2–8): capture on the S25, then **crop to 9:18 (1080×2160)** — Play rejects
-  screenshots whose long side is more than twice the short side, and the S25's 19.5:9 is over that.
-  Suggested set: (1) a stage mid-set with a Modifier picked up and the green on-target glow;
-  (2) the Market; (3) a special card being played; (4) the Collection; (5) the Shop;
+- Feature graphic 1024×500: `store/feature_graphic_1024x500.png` (the light Bronze board; rebuild with `python tools/cardgen/featuregen.py`)
+- Phone screenshots (2–8): take them on the S25, then run
+  `python tools/cardgen/storeshots.py <folder>`. Play rejects screenshots whose long side is more
+  than twice the short side, and the S25's 19.5:9 is over that; the script pads the sides with the
+  game's near-white room colour (instead of cropping off the score or hand) and writes the results
+  to `<folder>/play`. Suggested set: (1) a stage mid-set with a Modifier picked up and the green
+  on-target glow; (2) the Market; (3) a special card being played; (4) the Collection; (5) the Shop;
   (6) Endless mode on its night table.
 
 **Category**: Games → Card · **Tags**: Card, Casual, Strategy, Single player, Offline

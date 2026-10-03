@@ -1,6 +1,6 @@
 """Compose the Play Store feature graphic (1024x500).
 
-Logo + tagline on the left, two "Modifier math" rows in the middle
+The light Bronze board in the white room; logo + tagline on the left, two "Modifier math" rows in the middle
 (16 [+4] = 20 and 22 [-2] = 20), and the Trade Hands / Veto cards fanned
 on the right. Run from tools/cardgen:  python featuregen.py
 """
@@ -19,6 +19,7 @@ BLUE = (47, 111, 224)
 RED = (226, 60, 74)
 GREEN = (46, 170, 92)
 CREAM = (255, 248, 232)
+ROOM = (238, 241, 246)  # TableWorld3D.RoomColor
 TAGLINE = "Draw, Play, Hold!"
 
 
@@ -141,22 +142,25 @@ def equation(base, y, start, mod_card, result, start_colour, x0):
     badge(base, bx, y, start, start_colour)
     shadow_paste(base, card(mod_card, 140), bx + S(40) + S(62), y, angle=-4, blur=6, offset=(4, 6))
     eq_x = bx + S(40) + S(124) + S(24)
-    outlined_text(d, (eq_x, y), "=", 40, CREAM, ow=4, inline=False)
+    outlined_text(d, (eq_x, y), "=", 40, (255, 255, 255), ow=4, inline=False)
     badge(base, eq_x + S(24) + S(40), y, result, GREEN, glow=(120, 255, 150))
 
 
 def main():
     base = Image.new("RGBA", (S(W), S(H)))
+    # the light Bronze board, whole and rounded, in the near-white room (as in the game)
+    base.paste(ROOM + (255,), (0, 0, S(W), S(H)))
     mat = Image.open(os.path.join(R, "playmats", "playmat_bronze_landscape.png")).convert("RGBA")
-    base.alpha_composite(cover(mat, S(W), S(H)))
+    mh = round(mat.height * S(W) / mat.width)
+    base.alpha_composite(mat.resize((S(W), mh), Image.LANCZOS), (0, (S(H) - mh) // 2))
 
-    # darken the left third so the logo and tagline read cleanly
+    # a soft white glow behind the logo and tagline so they lift off the board
     vg = Image.new("L", (S(W), S(H)), 0)
-    ImageDraw.Draw(vg).ellipse([S(-260), S(-120), S(560), S(620)], fill=150)
-    vg = vg.filter(ImageFilter.GaussianBlur(S(80)))
-    dark = Image.new("RGBA", (S(W), S(H)), (6, 16, 12, 255))
-    dark.putalpha(vg)
-    base.alpha_composite(dark)
+    ImageDraw.Draw(vg).ellipse([S(-80), S(40), S(420), S(420)], fill=140)
+    vg = vg.filter(ImageFilter.GaussianBlur(S(60)))
+    glow = Image.new("RGBA", (S(W), S(H)), (255, 255, 255, 255))
+    glow.putalpha(vg)
+    base.alpha_composite(glow)
 
     # logo + tagline
     logo = Image.open(os.path.join(R, "brand", "logo_1600x800.png")).convert("RGBA")

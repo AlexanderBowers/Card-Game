@@ -18,3 +18,7 @@ tests/**/obj/
 
 # Claude preview renders and scratch output (not game assets)
 /Claude outputs/
+
+# cardgen scratch output (featuregen/logogen inputs and outputs)
+tools/cardgen/renders/
+tools/cardgen/brand_out/
