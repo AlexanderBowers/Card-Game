@@ -39,15 +39,15 @@ def build_logo(w, h, square=False):
     # The middle card is the Classic deck's back (the "20" in a ring), upright and in front; the
     # -1 and +2 Modifiers fan out behind it.
     if square:
-        scene.camera.data.ortho_scale = 11.2
-        placed(lambda: cg.build_modifier(-1), -2.8, -0.2, 0.0, 13, 0.7)
-        placed(lambda: cg.build_modifier(2), 2.8, -0.2, 0.0, -13, 0.7)
-        placed(cg.build_back_classic, 0.0, 0.1, 0.5, 0, 0.86)
+        scene.camera.data.ortho_scale = 11.8
+        placed(lambda: cg.build_modifier(-1), -2.75, -0.7, 0.0, 33, 0.66)
+        placed(lambda: cg.build_modifier(2), 2.75, -0.7, 0.0, -33, 0.66)
+        placed(cg.build_back_classic, 0.0, 0.25, 0.5, 0, 0.82)
         return
     # Wide: camera height 9 units.
     scene.camera.data.ortho_scale = 9.0 * max(1.0, w / h)
-    placed(lambda: cg.build_modifier(-1), -4.7, -0.1, 0.0, 12, 0.92)
-    placed(lambda: cg.build_modifier(2), 4.7, -0.1, 0.0, -12, 0.92)
+    placed(lambda: cg.build_modifier(-1), -4.3, -0.2, 0.0, 20, 0.92)
+    placed(lambda: cg.build_modifier(2), 4.3, -0.2, 0.0, -20, 0.92)
     placed(cg.build_back_classic, 0.0, 0.0, 0.5, 0, 1.0)
 
 
