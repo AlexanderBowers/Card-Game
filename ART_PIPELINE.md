@@ -1,4 +1,4 @@
-# Aim for 20 — Art pipeline (Blender + Krita → Godot)
+# Critical Count — Art pipeline (Blender + Krita → Godot)
 
 Goal: cards and tables with the finish of **Pokémon TCG Pocket** — clean, bright, tactile, and
 obviously "premium" when you pick a card up. Art is made in **Blender** (3D-rendered pieces) and

@@ -1,6 +1,6 @@
 name: Android Release AAB + APK
 
-# Builds the signed, store-bound AAB (preset "Android Release", package com.cloudydaygames.aimfor20)
+# Builds the signed, store-bound AAB (preset "Android Release", package com.cloudydaygames.criticalcount)
 # on every push to the `release` branch, and on demand. `main` keeps building debug APKs for the
 # phone (android.yml); `release` only ever receives merges from `main` (plus hotfixes that are
 # merged back). Upload to Play is manual for now: download the AAB artifact from this run.
@@ -176,10 +176,10 @@ jobs:
           set -euo pipefail
           export GODOT_ANDROID_KEYSTORE_RELEASE_PATH="$HOME/release.keystore"
           set +e
-          godot --headless --path . --verbose --export-release "Android Release" build/AimFor20.aab 2>&1 | tee build/export.log
+          godot --headless --path . --verbose --export-release "Android Release" build/CriticalCount.aab 2>&1 | tee build/export.log
           STATUS=${PIPESTATUS[0]}
           set -e
-          if [ "${STATUS}" != "0" ] || [ ! -s build/AimFor20.aab ]; then
+          if [ "${STATUS}" != "0" ] || [ ! -s build/CriticalCount.aab ]; then
             {
               echo "## Godot release export failed (exit ${STATUS})"
               echo '```'
@@ -193,7 +193,7 @@ jobs:
 
       - name: Export Android Release APK too (same key and version, for sideloading)
         # Flip ONLY the release preset's output format to APK (0) and export again. Same
-        # package (com.cloudydaygames.aimfor20), same signature as the AAB, so it is exactly
+        # package (com.cloudydaygames.criticalcount), same signature as the AAB, so it is exactly
         # what Play will serve - and it installs beside the debug build (different package).
         env:
           GODOT_ANDROID_KEYSTORE_RELEASE_USER: ${{ secrets.ANDROID_RELEASE_KEYSTORE_USER || 'cloudyday_alias' }}
@@ -213,10 +213,10 @@ jobs:
           PY
           grep -n "export_format" export_presets.cfg
           set +e
-          godot --headless --path . --verbose --export-release "Android Release" build/AimFor20-release.apk 2>&1 | tee build/export-apk.log
+          godot --headless --path . --verbose --export-release "Android Release" build/CriticalCount-release.apk 2>&1 | tee build/export-apk.log
           STATUS=${PIPESTATUS[0]}
           set -e
-          if [ "${STATUS}" != "0" ] || [ ! -s build/AimFor20-release.apk ]; then
+          if [ "${STATUS}" != "0" ] || [ ! -s build/CriticalCount-release.apk ]; then
             {
               echo "## Godot release APK export failed (exit ${STATUS})"
               echo '```'
@@ -239,15 +239,15 @@ jobs:
       - name: Upload AAB (download this and upload it to Play Console)
         uses: actions/upload-artifact@v4
         with:
-          name: AimFor20-release-${{ github.run_number }}
-          path: build/AimFor20.aab
+          name: CriticalCount-release-${{ github.run_number }}
+          path: build/CriticalCount.aab
           retention-days: 90
 
       - name: Upload release APK as workflow artifact
         uses: actions/upload-artifact@v4
         with:
-          name: AimFor20-release-apk-${{ github.run_number }}
-          path: build/AimFor20-release.apk
+          name: CriticalCount-release-apk-${{ github.run_number }}
+          path: build/CriticalCount-release.apk
           retention-days: 90
 
       - name: Publish GitHub Release (APK to sideload, AAB for Play)
@@ -258,10 +258,10 @@ jobs:
           prerelease: true
           make_latest: "false"
           body: |
-            Signed store build (com.cloudydaygames.aimfor20), version 0.9.${{ github.run_number }} (code ${{ github.run_number }}), from ${{ github.sha }}.
-            - AimFor20-release.apk: install on a phone directly.
-            - AimFor20.aab: upload to Play Console.
+            Signed store build (com.cloudydaygames.criticalcount), version 0.9.${{ github.run_number }} (code ${{ github.run_number }}), from ${{ github.sha }}.
+            - CriticalCount-release.apk: install on a phone directly.
+            - CriticalCount.aab: upload to Play Console.
             This build shows LIVE ads - don't tap them on your own phone (AdMob counts that as invalid clicks).
           files: |
-            build/AimFor20-release.apk
-            build/AimFor20.aab
+            build/CriticalCount-release.apk
+            build/CriticalCount.aab

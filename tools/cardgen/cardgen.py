@@ -1,5 +1,5 @@
 """
-Aim for 20 - card renderer (Blender, headless via the bpy module).
+Critical Count - card renderer (Blender, headless via the bpy module).
 
 Builds each card as a small 3D object - a bevelled rounded slab, a raised metal rim, a recessed
 inner panel, embossed numbers, domed enamel pips, bar-built signs - lights it with ONE fixed rig
