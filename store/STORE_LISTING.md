@@ -1,7 +1,7 @@
-# Aim for 20 — Play Store listing and beta setup
+# Critical Count — Play Store listing and beta setup
 
 Everything to paste into Google Play Console and AdMob for the first **internal testing** release.
-Package: `com.cloudydaygames.aimfor20` (permanent from the first upload).
+Package: `com.cloudydaygames.criticalcount` (permanent from the first upload).
 
 ---
 
@@ -15,26 +15,26 @@ site from a separate small public repo, or Google Sites — then make this repo 
 
 ## 2. AdMob → Privacy & messaging
 
-1. **European regulations** message: app Aim for 20 · English · "Do not consent" on · Countries
+1. **European regulations** message: app Critical Count · English · "Do not consent" on · Countries
    subject to GDPR · paste the privacy policy URL · **Publish**.
-2. **US state regulations** message: app Aim for 20 · English · all current and future states ·
+2. **US state regulations** message: app Critical Count · English · all current and future states ·
    **Publish**.
 
 ## 3. Play Console — create the app
 
-- App name **Aim for 20** · default language English (United States) · **Game** · **Free**.
+- App name **Critical Count** · default language English (United States) · **Game** · **Free**.
 - Accept the declarations (Developer Program Policies, US export laws).
 
 ## 4. Store listing
 
-**App name** (30): `Aim for 20`
+**App name** (30): `Critical Count`
 
 **Short description** (80): `A quick, clever card duel: build your score to 20 without going over.`
 
 **Full description**:
 
 ```
-Aim for 20 is a fast, friendly card duel. Draw from your deck, play Modifiers from your hand,
+Critical Count is a fast, friendly card duel. Draw from your deck, play Modifiers from your hand,
 and land as close to 20 as you can - without going over.
 
 Every set is a little bet with yourself: draw one more card, or hold? Your Modifiers let you fix
@@ -52,12 +52,14 @@ Easy to learn in one match, with a short guided tutorial, and plenty to master.
 ```
 
 **Graphics**
-- App icon 512×512: `assets/aimfor20_art/store_icon_512.png` (the "±20" logo on cream)
-- Feature graphic 1024×500: `store/feature_graphic_1024x500.png`
-- Phone screenshots (2–8): capture on the S25, then **crop to 9:18 (1080×2160)** — Play rejects
-  screenshots whose long side is more than twice the short side, and the S25's 19.5:9 is over that.
-  Suggested set: (1) a stage mid-set with a Modifier picked up and the green on-target glow;
-  (2) the Market; (3) a special card being played; (4) the Collection; (5) the Shop;
+- App icon 512×512: `assets/aimfor20_art/store_icon_512.png` (the −1 card, Classic "20" card back and +2 card on cream; `tools/cardgen/logogen.py --square` then `icongen.py`)
+- Feature graphic 1024×500: `store/feature_graphic_1024x500.png` (the light Bronze board; rebuild with `python tools/cardgen/featuregen.py`)
+- Phone screenshots (2–8): take them on the S25, then run
+  `python tools/cardgen/storeshots.py <folder>`. Play rejects screenshots whose long side is more
+  than twice the short side, and the S25's 19.5:9 is over that; the script pads the sides with the
+  game's near-white room colour (instead of cropping off the score or hand) and writes the results
+  to `<folder>/play`. Suggested set: (1) a stage mid-set with a Modifier picked up and the green
+  on-target glow; (2) the Market; (3) a special card being played; (4) the Collection; (5) the Shop;
   (6) Endless mode on its night table.
 
 **Category**: Games → Card · **Tags**: Card, Casual, Strategy, Single player, Offline

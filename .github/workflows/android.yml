@@ -183,10 +183,10 @@ jobs:
           echo "ANDROID_HOME=${ANDROID_HOME:-<unset>}  JAVA_HOME=${JAVA_HOME:-<unset>}"
           ls "${ANDROID_HOME}/build-tools" "${ANDROID_HOME}/platform-tools" 2>&1 | head -20
           set +e
-          godot --headless --path . --verbose --export-debug "Android" build/AimFor20.apk 2>&1 | tee build/export.log
+          godot --headless --path . --verbose --export-debug "Android" build/CriticalCount.apk 2>&1 | tee build/export.log
           STATUS=${PIPESTATUS[0]}
           set -e
-          if [ "${STATUS}" != "0" ] || [ ! -s build/AimFor20.apk ]; then
+          if [ "${STATUS}" != "0" ] || [ ! -s build/CriticalCount.apk ]; then
             # Full log tail into the job summary (public), key lines into annotations.
             {
               echo "## Godot export failed (exit ${STATUS})"
@@ -211,8 +211,8 @@ jobs:
       - name: Upload APK as workflow artifact
         uses: actions/upload-artifact@v4
         with:
-          name: AimFor20-android-${{ github.run_number }}
-          path: build/AimFor20.apk
+          name: CriticalCount-android-${{ github.run_number }}
+          path: build/CriticalCount.apk
 
       - name: Name the release after the branch
         id: rel
@@ -239,4 +239,4 @@ jobs:
           body: |
             Debug APK built from ${{ github.ref_name }} at ${{ github.sha }}
             ${{ github.event.head_commit.message }}
-          files: build/AimFor20.apk
+          files: build/CriticalCount.apk
