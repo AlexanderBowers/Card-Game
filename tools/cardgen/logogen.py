@@ -62,14 +62,14 @@ def build_logo(w, h, square=False):
     # -1 and +2 Modifiers fan out behind it.
     if square:
         scene.camera.data.ortho_scale = 10.6
-        placed(lambda: logo_modifier(-1), -2.05, -0.35, 0.0, 11, 0.66)
-        placed(lambda: logo_modifier(2, mirror=True), 2.05, -0.35, 0.0, -11, 0.66)
+        placed(lambda: logo_modifier(-1), -1.8, -0.35, 0.0, 11, 0.66)
+        placed(lambda: logo_modifier(2, mirror=True), 1.8, -0.35, 0.0, -11, 0.66)
         placed(cg.build_back_classic, 0.0, 0.25, 0.5, 0, 0.82)
         return
     # Wide: camera height 9 units.
     scene.camera.data.ortho_scale = 9.0 * max(1.0, w / h)
-    placed(lambda: logo_modifier(-1), -3.55, -0.05, 0.0, 7, 0.92)
-    placed(lambda: logo_modifier(2, mirror=True), 3.55, -0.05, 0.0, -7, 0.92)
+    placed(lambda: logo_modifier(-1), -3.2, -0.05, 0.0, 7, 0.92)
+    placed(lambda: logo_modifier(2, mirror=True), 3.2, -0.05, 0.0, -7, 0.92)
     placed(cg.build_back_classic, 0.0, 0.0, 0.5, 0, 1.0)
 
 
