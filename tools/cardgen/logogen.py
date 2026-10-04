@@ -2,7 +2,7 @@
 Critical Count - the logo (Alexander's direction, 2026-10-03): the Classic deck's card back - the
 "20" in a ring - upright in the middle and in front, with the real -1 Modifier card fanned out
 on the left and the real +2 on the right (its corner numbers moved to the top right so they
-show past the middle card - see mirrored_modifier).
+show past the middle card - see logo_modifier).
 
 Everything is built in ONE Blender scene from cardgen.py's own builders (build_back_classic,
 build_modifier), so the three cards share the card light rig and match the in-game art exactly.
@@ -34,16 +34,25 @@ def placed(build, x, y, z, rot_deg, scale):
     return root
 
 
-def mirrored_modifier(value):
-    """A Modifier with its corner numbers swapped to the top-RIGHT and bottom-left. Not how the
-    in-game card looks - the logo's right-hand card fans out behind the middle one, and this keeps
-    its "+2" in view (Alexander, 2026-10-04). The text is moved, not flipped, so it still reads."""
-    before = set(bpy.data.objects)
-    cg.build_modifier(value)
-    for o in bpy.data.objects:
-        if o not in before and o.type == "FONT" and o.name.split(".")[0] in ("TL", "BR"):
-            o.location.x = -o.location.x
-            o.data.align_x = "RIGHT"
+def logo_modifier(value, mirror=False):
+    """A Modifier card for the logo: the same frame, face and pips as build_modifier, but with a
+    smaller centre sign and bigger corner numbers so "-1" / "+2" read at icon size (Alexander,
+    2026-10-04). mirror=True puts the numbers top-RIGHT / bottom-left so the +2 on the right of
+    the fan shows past the middle card. Text is moved, not flipped, so it still reads. Logo only -
+    the in-game cards are unchanged."""
+    L = cg.base_card("plus" if value > 0 else "minus")
+    ink = cg.ink_mat(L["ink"])
+    label = ("+" if value > 0 else "-") + str(abs(value))
+    size = 2.35
+    z = cg.THICK + 0.012
+    x = cg.CARD_W / 2 - cg.FRAME - 0.14
+    y = cg.CARD_H / 2 - cg.FRAME - 0.10 - size * 0.42
+    sx, align = (-1, "RIGHT") if mirror else (1, "LEFT")
+    cg.text("TL", label, size, (-x * sx, y, z), ink, align=align)
+    cg.text("BR", label, size, (x * sx, -y, z), ink, rot=math.pi, align=align)
+    cg.sign(value > 0, 0.0, 0.35, 0.85, ink)
+    for px, py in cg.pip_layout(abs(value), 0.0, -1.05, 2.0, 1.4, 0.2):
+        cg.pip((px, py, cg.THICK + 0.02), 0.2, ink)
 
 
 def build_logo(w, h, square=False):
@@ -52,15 +61,15 @@ def build_logo(w, h, square=False):
     # The middle card is the Classic deck's back (the "20" in a ring), upright and in front; the
     # -1 and +2 Modifiers fan out behind it.
     if square:
-        scene.camera.data.ortho_scale = 11.8
-        placed(lambda: cg.build_modifier(-1), -2.75, -0.7, 0.0, 33, 0.66)
-        placed(lambda: mirrored_modifier(2), 2.75, -0.7, 0.0, -33, 0.66)
+        scene.camera.data.ortho_scale = 10.6
+        placed(lambda: logo_modifier(-1), -2.05, -0.35, 0.0, 11, 0.66)
+        placed(lambda: logo_modifier(2, mirror=True), 2.05, -0.35, 0.0, -11, 0.66)
         placed(cg.build_back_classic, 0.0, 0.25, 0.5, 0, 0.82)
         return
     # Wide: camera height 9 units.
     scene.camera.data.ortho_scale = 9.0 * max(1.0, w / h)
-    placed(lambda: cg.build_modifier(-1), -4.3, -0.2, 0.0, 20, 0.92)
-    placed(lambda: mirrored_modifier(2), 4.3, -0.2, 0.0, -20, 0.92)
+    placed(lambda: logo_modifier(-1), -3.55, -0.05, 0.0, 7, 0.92)
+    placed(lambda: logo_modifier(2, mirror=True), 3.55, -0.05, 0.0, -7, 0.92)
     placed(cg.build_back_classic, 0.0, 0.0, 0.5, 0, 1.0)
 
 
