@@ -1,34 +1,32 @@
-"""Make phone screenshots fit Google Play's 2:1 limit without cutting anything off.
+"""Make phone screenshots fit Google Play's 9:16 / 16:9 rule without cutting anything off.
 
-Play rejects a screenshot whose long side is more than twice its short side. The S25's
-19.5:9 screen is taller than that, so instead of cropping off the score or the hand, this
-pads the short side with the game's room colour (the near-white behind the board), which
-looks like part of the game.
+Play's store listing takes phone screenshots only at exactly 16:9 or 9:16 (2026-10-04: the
+console rejects other ratios). The S25's 19.5:9 screen is taller than that, so instead of
+cropping off the score or the hand, this pads with the game's room colour (the near-white
+behind the board), which looks like part of the game.
 
     python storeshots.py <folder of screenshots> [out folder]
 
-Writes PNGs to <folder>/play (or the out folder). Shots that already fit are copied as-is.
+Writes PNGs to <folder>/play (or the out folder).
 """
 import os
 import sys
 from PIL import Image
 
 ROOM = (238, 241, 246)  # TableWorld3D.RoomColor
-MAX_RATIO = 2.0
 
 
 def fit(im):
+    """Pad to exactly 9:16 (or 16:9). Play's phone screenshots must be one of those two ratios;
+    the S25's 19.5:9 is taller, so the short side is padded with the room colour and the long
+    side is rounded up to a multiple of 16 so the ratio comes out exact."""
     w, h = im.size
-    long_side, short_side = max(w, h), min(w, h)
-    if long_side <= short_side * MAX_RATIO:
-        return im
-    need = -(-long_side // 2)  # ceil(long / 2): the short side that makes exactly 2:1
-    if h > w:
-        out = Image.new("RGB", (need, h), ROOM)
-        out.paste(im, ((need - w) // 2, 0))
-    else:
-        out = Image.new("RGB", (w, need), ROOM)
-        out.paste(im, (0, (need - h) // 2))
+    portrait = h >= w
+    long_side, short_side = (h, w) if portrait else (w, h)
+    k = max(-(-long_side // 16), -(-short_side // 9))  # smallest k with 16k >= long, 9k >= short
+    L, S = 16 * k, 9 * k
+    out = Image.new("RGB", (S, L) if portrait else (L, S), ROOM)
+    out.paste(im.convert("RGB"), ((out.width - w) // 2, (out.height - h) // 2))
     return out
 
 
