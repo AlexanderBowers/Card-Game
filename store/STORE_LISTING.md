@@ -52,7 +52,7 @@ Easy to learn in one match, with a short guided tutorial, and plenty to master.
 ```
 
 **Graphics**
-- App icon 512×512: `assets/aimfor20_art/store_icon_512.png` (the −1 card, Classic "20" emblem and +2 card on cream; `tools/cardgen/logogen.py --square` then `icongen.py`)
+- App icon 512×512: `assets/aimfor20_art/store_icon_512.png` (the −1 card, Classic "20" card back and +2 card on cream; `tools/cardgen/logogen.py --square` then `icongen.py`)
 - Feature graphic 1024×500: `store/feature_graphic_1024x500.png` (the light Bronze board; rebuild with `python tools/cardgen/featuregen.py`)
 - Phone screenshots (2–8): take them on the S25, then run
   `python tools/cardgen/storeshots.py <folder>`. Play rejects screenshots whose long side is more
