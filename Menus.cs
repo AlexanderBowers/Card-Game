@@ -652,12 +652,14 @@ public sealed class Menus
         }
 
         _startMenuBox.AddChild(MenuSpacer());
+        // Explicit lines, not autowrap (tester, 2026-10-06: "the second line seems to be cut off"):
+        // an autowrapping label reports one line's height before it has been laid out, and this
+        // panel hugs its content, so the wrapped second line was clipped.
         Label footer = OverlayUi.MakeLabel(
-            $"Best streak {run.EndlessBest}.   The rules are re-rolled every match; "
-            + $"past a streak of {EndlessRules.ThirdRuleStreak} the opponent carries three specials.",
+            $"Best streak: {run.EndlessBest}\n"
+            + "Every match, the opponent carries two new special Modifiers.\n"
+            + $"After a streak of {EndlessRules.ThirdRuleStreak}, they carry three.",
             MenuNoteFont, OverlayUi.Muted);
-        footer.AutowrapMode = TextServer.AutowrapMode.WordSmart;
-        footer.CustomMinimumSize = new Vector2(MenuButtonWidth, 0);
         _startMenuBox.AddChild(footer);
 
         _startMenuBox.AddChild(MenuSpacer());

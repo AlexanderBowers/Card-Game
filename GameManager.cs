@@ -277,7 +277,7 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
         }
 
         string title = run.Endless ? $"Endless Match {run.EndlessStreak + 1}" : $"Stage {run.MatchNumber}";
-        StageIntro.Play(this, title, $"Target: {_gameState.TargetScore}", () =>
+        StageIntro.Play(this, title, $"Target: {_gameState.TargetScore}{run.FinaleRulesLine("\n")}", () =>
         {
             _arrivalPending = false;
             _ui.DeferRefresh();

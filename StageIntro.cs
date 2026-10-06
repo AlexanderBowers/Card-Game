@@ -37,7 +37,14 @@ public static class StageIntro
         box.AddThemeConstantOverride("separation", 4);
         panel.AddChild(box);
         box.AddChild(OverlayUi.MakeLabel(title, 64));
-        if (!string.IsNullOrEmpty(subtitle)) box.AddChild(OverlayUi.MakeLabel(subtitle, 36));
+        if (!string.IsNullOrEmpty(subtitle))
+        {
+            // The first line is the target; any line after it (the finale's and endless's
+            // "Opponent's specials: ...") is smaller, so three card names still fit a phone.
+            string[] lines = subtitle.Split('\n', 2);
+            box.AddChild(OverlayUi.MakeLabel(lines[0], 36));
+            if (lines.Length > 1) box.AddChild(OverlayUi.MakeLabel(lines[1], 24, OverlayUi.Muted));
+        }
 
         Vector2 view = layer.GetViewport().GetVisibleRect().Size;
         Vector2 size = panel.GetCombinedMinimumSize();

@@ -266,15 +266,19 @@ public partial class RunData
     public List<CardEffect> CurrentRolledEffects =>
         (CurrentStep.Randomised && RolledStep == StepIndex) ? RolledEffects : null;
 
-    /// "Rules: Copy + Shave" for the finale (and every endless match), after the prefix; empty on
-    /// any other rung.
+    /// "Opponent's specials: Copy + Shave" for the finale (and every endless match), after the
+    /// prefix; empty on any other rung.
+    ///
+    /// It said "Rules: Copy + Shave" until a tester asked what those rules were (2026-10-06). They
+    /// are not rules at all: they are the special Modifiers the opponent carries this match, so the
+    /// line says exactly that. Each card is still explained by its coach mark when it is played.
     public string FinaleRulesLine(string prefix)
     {
         List<CardEffect> rolled = CurrentRolledEffects;
         if (rolled == null || rolled.Count == 0) return string.Empty;
         List<string> names = new List<string>();
         foreach (CardEffect effect in rolled) names.Add(CardEffects.Label(effect));
-        return $"{prefix}Rules: {string.Join(" + ", names)}";
+        return $"{prefix}Opponent's specials: {string.Join(" + ", names)}";
     }
 
     /// Rolls the current rung's rules if it is randomised and has not been rolled. Safe to call
