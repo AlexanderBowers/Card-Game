@@ -365,8 +365,25 @@ void fragment() {
     /// the next, deferred, refresh.
     private float CaptionHeightFor(float width, Vector2 vp)
     {
-        _spotlightLabel.CustomMinimumSize = new Vector2(Mathf.Max(80f, width - 40f), 0f);
-        return Mathf.Max(_spotlightCaption.GetCombinedMinimumSize().Y, vp.Y * 0.08f);
+        float labelWidth = Mathf.Max(80f, width - 40f);
+        _spotlightLabel.CustomMinimumSize = new Vector2(labelWidth, 0f);
+        // Give the label that width NOW, so it re-wraps before anything asks it for a minimum:
+        // a stale tall minimum would also stop the panel shrinking to the height set below.
+        _spotlightLabel.Size = new Vector2(labelWidth, _spotlightLabel.Size.Y);
+
+        // Playtest 2026-10-05: a coach mark's first frame came up as a white pillar the height of
+        // the screen. An autowrapping Label reports the height it wrapped to at its LAST width
+        // (a narrow one, before it is laid out at this width), and the panel took that. So the
+        // text is measured here at the width it is about to get, and only the rest of the
+        // panel - margins, the button row - is read off the controls (the stale label height is
+        // in both minimums, so it cancels out of the difference).
+        Font font = _spotlightLabel.GetThemeFont("font");
+        int fontSize = _spotlightLabel.GetThemeFontSize("font_size");
+        float textHeight = font != null
+            ? font.GetMultilineStringSize(_spotlightLabel.Text, HorizontalAlignment.Left, labelWidth, fontSize).Y
+            : _spotlightLabel.GetCombinedMinimumSize().Y;
+        float chrome = _spotlightCaption.GetCombinedMinimumSize().Y - _spotlightLabel.GetCombinedMinimumSize().Y;
+        return Mathf.Max(chrome + textHeight + 4f, vp.Y * 0.06f);
     }
 
     private static void SetRect(Control control, float x, float y, float width, float height)

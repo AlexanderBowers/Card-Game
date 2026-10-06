@@ -586,32 +586,67 @@ public sealed class TableMoments
             t.Chain();
         }
 
-        // 1. Fold: into a stack in the middle of their own hand, a little smaller (0.18s).
-        for (int i = 0; i < fliers.Count; i++)
+        // Playtest 2026-10-05 (S25 recording): each stack read as ONE card, and it flew straight
+        // over the boards, so the trade looked like two cards being played. Now:
+        //  - the stack gathers a little in from the hand (the hands are cropped at the screen's
+        //    edge, so a stack at the hand's own middle was half off screen);
+        //  - its cards stay visibly fanned in the stack - a small offset and tilt each;
+        //  - the two stacks travel on arcs that bow out to opposite sides, passing each other
+        //    in the middle instead of sliding down the centre of the boards.
+        Vector2 screenMiddle = _root.GetViewport().GetVisibleRect().GetCenter();
+        Vector2 p1Gather = p1Centre.Lerp(screenMiddle, 0.18f);
+        Vector2 p2Gather = p2Centre.Lerp(screenMiddle, 0.18f);
+
+        int p1Count = 0, p2Count = 0;
+        List<(TextureRect Flier, bool FromP1, int K)> stacked = new List<(TextureRect, bool, int)>();
+        foreach ((TextureRect flier, _, Control destination) in fliers)
         {
-            (TextureRect flier, _, Control destination) = fliers[i];
-            bool fromP1Side = destination == p2Hand;
-            Vector2 home = fromP1Side ? p1Centre : p2Centre;
-            Vector2 stagger = new Vector2(i % 4 * 3f, -(i % 4) * 3f);
-            t.TweenProperty(flier, "global_position", home + stagger - flier.Size / 2f, 0.18f)
-             .SetTrans(Tween.TransitionType.Cubic).SetEase(Tween.EaseType.In);
-            t.TweenProperty(flier, "scale", flier.Scale * 0.85f, 0.18f);
+            bool p1Side = destination == p2Hand;
+            stacked.Add((flier, p1Side, p1Side ? p1Count++ : p2Count++));
         }
 
-        // 2. Pass: the stacks cross to the other side (0.3s); they overlap half way, with the swish.
-        t.Chain().TweenCallback(Callable.From(() => { })); // a step boundary for the crossing
-        for (int i = 0; i < fliers.Count; i++)
+        Vector2 StackOffset(int k, int count) => new Vector2((k - (count - 1) / 2f) * 9f, -k * 4f);
+        float StackTilt(int k, int count) => Mathf.DegToRad((k - (count - 1) / 2f) * 6f);
+
+        // 1. Fold: into a fanned stack just in from their own hand, a little smaller (0.18s).
+        foreach ((TextureRect flier, bool p1Side, int k) in stacked)
         {
-            (TextureRect flier, _, Control destination) = fliers[i];
-            bool toP2 = destination == p2Hand;
-            Vector2 there = toP2 ? p2Centre : p1Centre;
-            Vector2 stagger = new Vector2(i % 4 * 3f, -(i % 4) * 3f);
-            t.TweenProperty(flier, "global_position", there + stagger - flier.Size / 2f, 0.30f)
-             .SetTrans(Tween.TransitionType.Cubic).SetEase(Tween.EaseType.InOut);
-            t.TweenProperty(flier, "rotation", toP2 ? p2Rot : p1Rot, 0.30f)
+            int count = p1Side ? p1Count : p2Count;
+            Vector2 home = p1Side ? p1Gather : p2Gather;
+            float baseRot = p1Side ? p1Rot : p2Rot;
+            t.TweenProperty(flier, "global_position", home + StackOffset(k, count) - flier.Size / 2f, 0.18f)
+             .SetTrans(Tween.TransitionType.Cubic).SetEase(Tween.EaseType.Out);
+            t.TweenProperty(flier, "scale", flier.Scale * 0.85f, 0.18f);
+            t.TweenProperty(flier, "rotation", baseRot + StackTilt(k, count), 0.18f);
+        }
+
+        // 2. Pass: each stack arcs across to the other side (0.32s), bowing out to its own side
+        // of the table so the two pass each other half way - with the swish as they do.
+        t.Chain().TweenCallback(Callable.From(() => { })); // a step boundary for the crossing
+        foreach ((TextureRect flier, bool p1Side, int k) in stacked)
+        {
+            int count = p1Side ? p1Count : p2Count;
+            Vector2 from = (p1Side ? p1Gather : p2Gather) + StackOffset(k, count);
+            Vector2 to = (p1Side ? p2Gather : p1Gather) + StackOffset(k, count);
+            Vector2 across = to - from;
+            // The curve peaks at half the control point's offset: about a quarter of the screen's
+            // width out from the straight line, never off its edge.
+            float bowLength = Mathf.Min(across.Length() * 0.3f, screenMiddle.X);
+            Vector2 bow = new Vector2(-across.Y, across.X).Normalized() * bowLength;
+            Vector2 control = (from + to) / 2f + bow; // the two stacks bow opposite ways: `across` is reversed
+            Vector2 half = flier.Size / 2f;
+            TextureRect f = flier;
+            t.TweenMethod(Callable.From<float>(u =>
+            {
+                if (!GodotObject.IsInstanceValid(f)) return;
+                float a = 1f - u;
+                f.GlobalPosition = a * a * from + 2f * a * u * control + u * u * to - half; // quadratic Bezier
+            }), 0f, 1f, 0.32f).SetTrans(Tween.TransitionType.Sine).SetEase(Tween.EaseType.InOut);
+            float endRot = (p1Side ? p2Rot : p1Rot) + StackTilt(k, count);
+            t.TweenProperty(flier, "rotation", endRot, 0.32f)
              .SetTrans(Tween.TransitionType.Cubic).SetEase(Tween.EaseType.InOut);
         }
-        t.TweenCallback(Callable.From(() => _sfxSlide?.Play())).SetDelay(0.15f);
+        t.TweenCallback(Callable.From(() => _sfxSlide?.Play())).SetDelay(0.16f);
 
         // 3. Unfold into a fan on the new owner's side: aimed at where the hand now draws each card.
         t.Chain().TweenCallback(Callable.From(() => Unfold(fliers, p1Hand, p2Hand)));
