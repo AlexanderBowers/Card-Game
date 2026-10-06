@@ -155,13 +155,16 @@ public sealed class Teaching
     private ShaderMaterial _shadeMaterial;
 
     private const string ShadeShader = @"shader_type canvas_item;
+uniform vec4 hole1 = vec4(0.0);
 uniform vec4 hole2 = vec4(0.0);
 varying vec2 world;
 void vertex() { world = (MODEL_MATRIX * vec4(VERTEX, 0.0, 1.0)).xy; }
+bool inside(vec4 h, vec2 p) { return h.z > 0.0 && p.x >= h.x && p.x <= h.x + h.z && p.y >= h.y && p.y <= h.y + h.w; }
 void fragment() {
-    if (hole2.z > 0.0 && world.x >= hole2.x && world.x <= hole2.x + hole2.z
-        && world.y >= hole2.y && world.y <= hole2.y + hole2.w) COLOR.a = 0.0;
+    if (inside(hole1, world) || inside(hole2, world)) COLOR.a = 0.0;
 }";
+
+    private ColorRect _spotlightDim;
 
     /// A hole cut in a dim, made of FOUR rects around the highlighted control rather than a
     /// shader. Cheap, no material, correct at every scale and orientation - and it degrades
@@ -180,10 +183,21 @@ void fragment() {
         Color shade = new Color(0.02f, 0.05f, 0.1f, 0.72f);
         _shadeMaterial = new ShaderMaterial { Shader = new Shader { Code = ShadeShader } };
         _shadeMaterial.SetShaderParameter("hole2", Vector4.Zero);
+        _shadeMaterial.SetShaderParameter("hole1", Vector4.Zero);
+
+        // The DIM is one full-screen rect with the holes cut out by the shader (playtest,
+        // 2026-10-06: a hairline left un-dimmed above the card). Four dim rects meeting edge to
+        // edge leave a seam wherever their shared edge falls between two screen pixels - and the
+        // canvas is scaled to fit the phone, so that is most edges. The four rects stay, now
+        // invisible, because they are still the input gate (see above).
+        _spotlightDim = new ColorRect { Color = shade, MouseFilter = Control.MouseFilterEnum.Ignore, Material = _shadeMaterial };
+        _spotlightOverlay.AddChild(_spotlightDim);
+        _spotlightDim.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
+
         _spotlightShades = new ColorRect[4];
         for (int i = 0; i < _spotlightShades.Length; i++)
         {
-            ColorRect rect = new ColorRect { Color = shade, MouseFilter = Control.MouseFilterEnum.Stop, Material = _shadeMaterial };
+            ColorRect rect = new ColorRect { Color = new Color(0, 0, 0, 0), MouseFilter = Control.MouseFilterEnum.Stop };
             _spotlightOverlay.AddChild(rect);
             _spotlightShades[i] = rect;
         }
@@ -277,6 +291,7 @@ void fragment() {
         SetRect(_spotlightShades[2], 0f, top, left, bottom - top);             // left
         SetRect(_spotlightShades[3], right, top, vp.X - right, bottom - top);  // right
 
+        _shadeMaterial?.SetShaderParameter("hole1", new Vector4(left, top, right - left, bottom - top));
         SetRect(_spotlightHoleBlock, left, top, right - left, bottom - top);
         _spotlightHoleBlock.Visible = blockHole;
 
@@ -715,6 +730,9 @@ void fragment() {
     private readonly Queue<CoachMark> _coachQueue = new Queue<CoachMark>();
 
     private CoachMark? _coachShowing;
+
+    /// A coach mark is on screen (the bot waits while one is).
+    public bool CoachShowing => _coachShowing.HasValue;
 
     /// Where the highlight goes: the middle panel's banner when the card was played AT you (the
     /// banner is the thing that just narrated it), your own hand when it is a card you now hold.

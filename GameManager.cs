@@ -564,7 +564,9 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
         await ToSignal(GetTree().CreateTimer(seconds), SceneTreeTimer.SignalName.Timeout);
         // The bot does not act half way through a big moment (yours or its own): it waits for
         // the picture to catch up, as you have to.
-        while (IsInsideTree() && _ui.Moments.Busy)
+        // Nor while a coach mark is explaining a card: the player is reading, not playing
+        // (2026-10-06: the bot held under a Copy coach mark).
+        while (IsInsideTree() && (_ui.Moments.Busy || _teaching.CoachShowing))
             await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
         return IsInsideTree(); // false: the scene was restarted or exited while it waited
     }

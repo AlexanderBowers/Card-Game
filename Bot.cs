@@ -150,6 +150,10 @@ public sealed class Bot
     private const double NoviceSkipsModifier = 0.45;
     private const double NoviceSkipsRescue = 0.3;
 
+    /// How long, after its first second, the bot holding a Trade Totals gives the player to Hold
+    /// before it may take their score (ProcessTurn step 1b).
+    private const double HoldReactionSeconds = 3.0;
+
     /// The first rung: see DrawAssist.BotAvoidsTarget.
     private bool StageOne => DrawAssist.BotAvoidsTarget(_table.Run, _table.VsBot);
 
@@ -181,6 +185,17 @@ public sealed class Bot
 
         //1. Wait a moment to let the player see the AI's drawn card
         if (!await _table.Pause(1.0)) return; // the scene was restarted or left mid-turn
+
+        //1b. A fair chance to hold first (playtest, 2026-10-06: "I didn't have a chance to hold
+        //    before the score was stolen from me"). Trade Totals is the one card a Hold protects
+        //    you from, and the bot used to fire it about a second after the deal - before a player
+        //    who had just drawn onto the target could press Hold. Holding a Trade Totals, the bot
+        //    now waits until the player has decided (held or ended the turn) or the window runs out.
+        if (You.CanAct && Me.Modifiers.Exists(c => c.Effect == CardEffect.TradeTotals))
+        {
+            for (double waited = 0; waited < HoldReactionSeconds && You.CanAct; waited += 0.1)
+                if (!await _table.Pause(0.1)) return;
+        }
 
         //2. First, whether to reach across the table at all. At most one such card per turn, and
         //   only when it decides the set - see TryPlayEffectCard.
