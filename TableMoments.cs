@@ -412,6 +412,106 @@ public sealed class TableMoments
     }
 
     // ------------------------------------------------------------------
+    // Trade Totals: the two numbers swap places
+    // ------------------------------------------------------------------
+
+    /// After the Trade Totals card lands, each score box lets go of its number: the two numbers
+    /// arc across the table past each other and drop into the other box, which then shows it.
+    /// (2026-10-05: the verification pass found Trade Totals was the one effect with no moment -
+    /// both scores simply changed.)
+    public void PlayTradeTotals(Control boxA, int aBefore, Control boxB, int bBefore, Action swapShown, float delay)
+    {
+        if (!Usable(boxA) || !Usable(boxB))
+        {
+            swapShown?.Invoke();
+            return;
+        }
+        bool swapped = false;
+        Action once = () => { if (swapped) return; swapped = true; swapShown?.Invoke(); };
+        _cleanup.Add(once);
+
+        float s = ScaleOf(boxA);
+        Vector2 a = CentreOf(boxA), b = CentreOf(boxB);
+        Label fromA = FlyingNumber(aBefore.ToString(), a, s);
+        Label fromB = FlyingNumber(bBefore.ToString(), b, s);
+        _cleanup.Add(() =>
+        {
+            if (GodotObject.IsInstanceValid(fromA)) fromA.QueueFree();
+            if (GodotObject.IsInstanceValid(fromB)) fromB.QueueFree();
+        });
+
+        Vector2 across = b - a;
+        Vector2 bow = new Vector2(-across.Y, across.X).Normalized() * Mathf.Min(across.Length() * 0.35f, 260f * s);
+
+        Tween t = NewTween();
+        if (delay > 0f) t.TweenInterval(delay);
+        t.TweenCallback(Callable.From(() =>
+        {
+            _sfxSlide?.Play();
+            fromA.Visible = true;
+            fromB.Visible = true;
+            PulseBox(boxA);
+            PulseBox(boxB);
+        }));
+        t.SetParallel(true);
+        t.TweenMethod(Callable.From<float>(u => ArcTo(fromA, a, b, (a + b) / 2f + bow, u)), 0f, 1f, 0.38f)
+         .SetTrans(Tween.TransitionType.Sine).SetEase(Tween.EaseType.InOut);
+        t.TweenMethod(Callable.From<float>(u => ArcTo(fromB, b, a, (a + b) / 2f - bow, u)), 0f, 1f, 0.38f)
+         .SetTrans(Tween.TransitionType.Sine).SetEase(Tween.EaseType.InOut);
+        t.Chain().TweenCallback(Callable.From(() =>
+        {
+            once();
+            _sfxImpact?.Play();
+            if (GodotObject.IsInstanceValid(fromA)) fromA.QueueFree();
+            if (GodotObject.IsInstanceValid(fromB)) fromB.QueueFree();
+            PulseBox(boxA);
+            PulseBox(boxB);
+        }));
+
+        SkipIfAnimationsOff();
+    }
+
+    private Label FlyingNumber(string text, Vector2 centre, float s)
+    {
+        Label label = new Label
+        {
+            Text = text,
+            MouseFilter = Control.MouseFilterEnum.Ignore,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center,
+            Size = new Vector2(120f, 80f),
+            Visible = false,
+        };
+        label.AddThemeFontSizeOverride("font_size", 56);
+        label.AddThemeColorOverride("font_color", new Color(0.17f, 0.21f, 0.29f));
+        label.AddThemeColorOverride("font_outline_color", Colors.White);
+        label.AddThemeConstantOverride("outline_size", 10);
+        label.PivotOffset = label.Size / 2f;
+        label.Scale = Vector2.One * s;
+        _root.AddChild(label);
+        PlaceCentred(label, centre);
+        return label;
+    }
+
+    private static void ArcTo(Control c, Vector2 from, Vector2 to, Vector2 control, float u)
+    {
+        if (!GodotObject.IsInstanceValid(c)) return;
+        float a = 1f - u;
+        PlaceCentred(c, a * a * from + 2f * a * u * control + u * u * to);
+    }
+
+    /// One quick swell of a score box about its middle.
+    private void PulseBox(Control box)
+    {
+        if (!Usable(box)) return;
+        box.PivotOffset = box.Size / 2f;
+        Tween t = NewTween();
+        t.TweenProperty(box, "scale", new Vector2(1.12f, 1.12f), 0.08f).SetTrans(Tween.TransitionType.Sine).SetEase(Tween.EaseType.Out);
+        t.TweenProperty(box, "scale", Vector2.One, 0.14f).SetTrans(Tween.TransitionType.Sine).SetEase(Tween.EaseType.In);
+        _cleanup.Add(() => { if (GodotObject.IsInstanceValid(box)) box.Scale = Vector2.One; });
+    }
+
+    // ------------------------------------------------------------------
     // Copy: the card turns into the other card
     // ------------------------------------------------------------------
 

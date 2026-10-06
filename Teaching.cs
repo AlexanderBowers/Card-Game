@@ -296,6 +296,12 @@ void fragment() {
         Rect2 h1 = new Rect2(left, top, right - left, bottom - top);
         Rect2 placed = PlaceCaption(h1, hole2, vp);
         SetRect(_spotlightCaption, placed.Position.X, placed.Position.Y, placed.Size.X, placed.Size.Y);
+
+        // If the panel could not shrink to that height yet (its label has not wrapped at the new
+        // width - see ShowCoachMark), keep it invisible for the frame rather than flash a pillar.
+        // SettleSpotlight places it again on the next frame, when it can.
+        float alpha = _spotlightCaption.Size.Y > placed.Size.Y + 4f ? 0f : 1f;
+        _spotlightCaption.Modulate = new Color(1f, 1f, 1f, alpha);
     }
 
     private const float CaptionGap = 16f;     // between the hole and the caption
@@ -538,6 +544,8 @@ void fragment() {
         // A coach-mark borrows the same overlay, so it has to be re-placed on a rotation too.
         if (_coachShowing.HasValue)
         {
+            _spotlightSkip.Visible = false; // one line, once ever: nothing to skip
+            _spotlightNext.Visible = true;
             PlaceSpotlight(CoachTarget(_coachShowing.Value), blockHole: true);
             return;
         }
@@ -548,6 +556,11 @@ void fragment() {
         ApplyTutorialEmphasis(_tutorialIndex);
         _spotlightLabel.Text = TutorialTextFor(_tutorialIndex);
         _spotlightNext.Visible = !doStep;   // a DO step is finished by doing it, not by a button
+        // Skip only where it means something (playtest, 2026-10-05: "skip buttons where they
+        // shouldn't"): the reading steps before the player is asked to do anything. Not on a DO
+        // step - a lone Skip there sat where the step's own button would be and invited the wrong
+        // tap - and not on the last step, which ends the walkthrough anyway.
+        _spotlightSkip.Visible = _tutorialIndex < 2; // steps 0-1: the score and the deck
         Control target = TutorialTarget(_tutorialIndex);
         // A picked-up card rises and grows out of its slot: open the hole upward to show all of it.
         float extraTop = (_tutorialIndex == 2 && target != null && _host.SelectedFor(_host.Player1) != null)
@@ -637,12 +650,15 @@ void fragment() {
 
         try
         {
+            // Re-placed on BOTH frames: after the first the caption's label has wrapped at its new
+            // width (so the panel can shrink to the right height), after the second the layout
+            // underneath has settled too.
             for (int i = 0; i < 2; i++)
             {
                 await _root.ToSignal(_root.GetTree(), SceneTree.SignalName.ProcessFrame);
                 if (!_root.IsInsideTree()) return;
+                PlaceCurrentSpotlight();
             }
-            PlaceCurrentSpotlight();
         }
         finally
         {
@@ -763,7 +779,12 @@ void fragment() {
 
         _root.MoveChild(_spotlightOverlay, _root.GetChildCount() - 1);
         _spotlightOverlay.Visible = true;
-        PlaceSpotlight(CoachTarget(mark), blockHole: true);
+        // Placed now AND again once the caption has been laid out (SettleSpotlight). THE BUG
+        // (S25, 2026-10-05: a white pillar the height of the screen): the caption had never been
+        // laid out at this width, so the panel's minimum was the wrapped-per-word height of its
+        // label, and setting its size could not go below that. This used to be placed once and
+        // never again, so the pillar stayed until something else happened to refresh it.
+        RefreshSpotlight();
     }
 
     private void DismissCoachMark()

@@ -246,6 +246,10 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
         // change to both of them.
         bool tutorial = _teaching.PrepareForMatch();
 
+        // Until the camera has swung in and the stage banner has crossed, the table is still
+        // arriving: the first deal's refresh must not put a coach mark up under the swing.
+        _arrivalPending = !tutorial;
+
         _table.DealMatchHands(); // the hand has to last all three sets of the match
 
         StartNewSet(); // UpdateUI enables the Draw Card / Hold buttons
@@ -255,14 +259,29 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
         else ShowStageIntro();
     }
 
+    /// The camera is still swinging in, or the stage banner is still crossing: the table has not
+    /// arrived yet, so nothing that wants the player's attention (a coach mark) should start.
+    private bool TableArriving => _arrivalPending || (_ui.World3D?.Swinging ?? false) || StageIntro.Playing > 0;
+    private bool _arrivalPending;
+
     /// "Stage 2 / Target: 20" sliding across at the start of a ladder match (StageIntro).
+    /// Once it has gone, a refresh lets any coach mark that waited for it appear.
     private void ShowStageIntro()
     {
         RunData run = _inRun ? RunData.Instance : null;
-        if (run == null) return;
+        if (run == null)
+        {
+            _arrivalPending = false;
+            _ui.DeferRefresh();
+            return;
+        }
 
         string title = run.Endless ? $"Endless Match {run.EndlessStreak + 1}" : $"Stage {run.MatchNumber}";
-        StageIntro.Play(this, title, $"Target: {_gameState.TargetScore}");
+        StageIntro.Play(this, title, $"Target: {_gameState.TargetScore}", () =>
+        {
+            _arrivalPending = false;
+            _ui.DeferRefresh();
+        });
     }
 
     /// Puts the solo scene onto the ladder: picks up the run in progress (or starts one), and takes
@@ -461,8 +480,10 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
     void ITableUiHost.AfterRefresh()
     {
         _teaching.CheckTutorialProgress();
-        // A coach mark waits for a big moment to finish rather than landing on top of it.
-        if (!_ui.Moments.Busy) _teaching.DrainCoachMarks();
+        // A coach mark waits for a big moment to finish rather than landing on top of it - and
+        // for the table to arrive: the camera's swing-in and the stage banner (playtest,
+        // 2026-10-05: the +/- Modifier's mark appeared while the camera was still panning).
+        if (!_ui.Moments.Busy && !TableArriving) _teaching.DrainCoachMarks();
     }
 
     // ------------------------------------------------------------------
@@ -590,6 +611,10 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
                 _ui.PlayShave(target, opponentBefore);
                 break;
 
+            case CardEffect.TradeTotals:
+                _ui.PlayTradeTotals(owner, ownerBefore, target, opponentBefore);
+                break;
+
             case CardEffect.TradeHands:
                 // Taken now: the hands on screen still hold the old cards (the played one already
                 // lifted out); the refresh below rebuilds them traded, hidden until the fans land.
@@ -611,7 +636,9 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
 
         // The ladder's promise, kept: you meet a card when it is used on you, and the game says
         // once what it was. Only the bot's cards - your own were introduced when you were dealt them.
-        if (owner == _player2) _teaching.QueueCoachMark(card, fromOpponent: true);
+        // Against the bot only: local 2-player has a person in the room to explain (and the
+        // harness pass of 2026-10-05 caught Player 2's cards raising coach marks there).
+        if (owner == _player2 && _isVsBot) _teaching.QueueCoachMark(card, fromOpponent: true);
         _ui.Refresh();
 
         // A re-opened BOT has to be sent round again: ResolveTurn refuses to move while either

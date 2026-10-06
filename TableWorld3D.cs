@@ -206,6 +206,9 @@ public partial class TableWorld3D : Node3D
     /// Whether a match start should play the swing-in (the 3D table is on).
     public bool CanSwing => _active;
 
+    /// The camera is still sweeping in (coach marks wait for it to land).
+    public bool Swinging => _active && _swing < 1f;
+
     /// The camera sweeps in from high and to the side and settles on the table. The 2D layer
     /// (hands, buttons, scores) fades in once it lands; `done` runs then.
     public void SwingIn(Action done)

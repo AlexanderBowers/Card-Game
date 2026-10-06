@@ -10,9 +10,10 @@ using System.Collections.Generic;
 /// Full screen (2026-10-05, after "difficult to scroll" on the old centred panel): built like How
 /// to Play - a dim backdrop and a panel anchored to all four edges, clear of the notch and the
 /// gesture bar.
-///   - Portrait stacks: the Deck (12, 4 x 3) at the top and always visible, the Collection below it
-///     in the only scroll area, the counter and Start the Match pinned at the bottom.
-///   - Landscape keeps the two side by side, both filling the height.
+///   - The Collection on the left (the only thing that scrolls), the Deck on the right - the
+///     original arrangement, which Alexander preferred to a stacked one (2026-10-05). In portrait
+///     the Deck is two columns of six; in landscape whichever shape gives the biggest cards.
+///   - The counter and Start the Match are pinned at the bottom.
 /// Card size is worked out from the room the panel actually has, so cards grow on big screens.
 ///
 /// Writes RunData.SideDeck (indices into RunData.Inventory) when Start the Match is pressed, so a
@@ -130,7 +131,7 @@ public partial class DeckOverlay : Control
         _body.AddChild(_deckSection);
         _deckLabel = OverlayUi.MakeLabel("Deck (12)", 20);
         _deckSection.AddChild(_deckLabel);
-        _slotGrid = new GridContainer { Columns = PortraitColumns, SizeFlagsHorizontal = SizeFlags.ShrinkCenter };
+        _slotGrid = new GridContainer { Columns = 2, SizeFlagsHorizontal = SizeFlags.ShrinkCenter };
         _slotGrid.AddThemeConstantOverride("h_separation", GridGap);
         _slotGrid.AddThemeConstantOverride("v_separation", GridGap);
         _deckSection.AddChild(_slotGrid);
@@ -156,6 +157,9 @@ public partial class DeckOverlay : Control
         _collectionGrid.AddThemeConstantOverride("h_separation", GridGap);
         _collectionGrid.AddThemeConstantOverride("v_separation", GridGap);
         _collectionScroll.AddChild(_collectionGrid);
+
+        // Collection on the left, Deck on the right (the original layout, kept full screen).
+        _body.MoveChild(_collectionSection, 0);
 
         // Pinned at the bottom.
         _countLabel = OverlayUi.MakeLabel("", 22, OverlayUi.MedalGold);
@@ -250,66 +254,51 @@ public partial class DeckOverlay : Control
         if ((room - _laidOutFor).Length() < 2f) return; // already laid out for this size
         _laidOutFor = room;
 
+        // 2026-10-05 (S25): back to the earlier format - the Collection on the left, the Deck on
+        // the right - but full screen. Stacking the Deck over the Collection was cumbersome: with
+        // 30+ Modifiers owned and 12 chosen, the Collection got a sliver of the screen.
+        //   Portrait: the Deck is two columns of six, for readability; the Collection takes the
+        //   rest of the width (at least three columns) and the full height, and scrolls.
+        //   Landscape: the Deck takes whichever of 3x4 / 4x3 / 6x2 gives the biggest cards.
         _portrait = view.Y > view.X;
-        _body.Vertical = _portrait;
+        _body.Vertical = false;
 
         float aspect = _baseCardSize.Y / Mathf.Max(1f, _baseCardSize.X);
         float labelH = _deckLabel.GetCombinedMinimumSize().Y;
-        float width;
+        float gridH = room.Y - labelH - SectionGap;
+        const int MinCollectionColumns = 3;
 
-        if (_portrait)
+        int deckColumns = 2;
+        float width = 0f;
+        foreach (int columns in _portrait ? new[] { 2 } : new[] { 3, 4, 6 })
         {
-            // Four across. Height: the deck's three rows plus at least a row and a quarter of
-            // the collection, so there is always a peek of what scrolls.
-            // (Less the Collection's scroll bar, which sits beside its four columns.)
-            float byWidth = (room.X - (PortraitColumns - 1) * GridGap - ScrollBarRoom) / PortraitColumns;
-            float spare = room.Y - 2 * (labelH + SectionGap) - BodyGap - 3 * GridGap;
-            float byHeight = spare / 4.25f / aspect;
-            width = Mathf.Min(byWidth, byHeight);
-
-            _slotGrid.Columns = PortraitColumns;
-            _collectionColumns = PortraitColumns;
-            _deckSection.SizeFlagsVertical = SizeFlags.ShrinkBegin;
-            _deckSection.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+            int rows = (RunData.SideDeckSize + columns - 1) / columns;
+            float byHeight = (gridH - (rows - 1) * GridGap) / rows / aspect;
+            // The deck's columns plus at least three of the Collection's, across the width.
+            int across = columns + MinCollectionColumns;
+            float byWidth = (room.X - BodyGap - ScrollBarRoom - (across - 2) * GridGap) / across;
+            float w = Mathf.Min(byHeight, byWidth);
+            if (w > width) { width = w; deckColumns = columns; }
         }
-        else
-        {
-            // Side by side, both filling the height. The deck sets the card size: 3 x 4 or 4 x 3,
-            // whichever gives the bigger cards (a phone on its side is short, so usually 4 x 3).
-            float gridH = room.Y - labelH - SectionGap;
-            int deckColumns = LandscapeDeckColumns;
-            width = 0f;
-            foreach (int columns in new[] { 3, 4 })
-            {
-                int rows = (RunData.SideDeckSize + columns - 1) / columns;
-                float byHeight = (gridH - (rows - 1) * GridGap) / rows / aspect;
-                float byWidth = (room.X * 0.45f - (columns - 1) * GridGap) / columns;
-                float w = Mathf.Min(byWidth, byHeight);
-                if (w > width) { width = w; deckColumns = columns; }
-            }
 
-            float deckWidth = deckColumns * width + (deckColumns - 1) * GridGap;
-            float collectionRoom = room.X - deckWidth - BodyGap - ScrollBarRoom;
-            _collectionColumns = Mathf.Clamp(
-                Mathf.FloorToInt((collectionRoom + GridGap) / (width + GridGap)), 3, 8);
+        // Never tiny, never silly-big.
+        width = Mathf.Clamp(width, _baseCardSize.X * 0.5f, _baseCardSize.X * 2.2f);
+        _cardSize = new Vector2(Mathf.Floor(width), Mathf.Floor(width * aspect));
 
-            _slotGrid.Columns = deckColumns;
-            _deckSection.SizeFlagsVertical = SizeFlags.ExpandFill;
-            _deckSection.SizeFlagsHorizontal = SizeFlags.ShrinkBegin;
-        }
+        float deckWidth = deckColumns * _cardSize.X + (deckColumns - 1) * GridGap;
+        float collectionRoom = room.X - deckWidth - BodyGap - ScrollBarRoom;
+        _collectionColumns = Mathf.Clamp(
+            Mathf.FloorToInt((collectionRoom + GridGap) / (_cardSize.X + GridGap)), 1, 8);
+
+        _slotGrid.Columns = deckColumns;
+        _collectionGrid.Columns = _collectionColumns;
+        _deckSection.SizeFlagsVertical = SizeFlags.ExpandFill;
+        _deckSection.SizeFlagsHorizontal = SizeFlags.ShrinkEnd;
         _collectionSection.SizeFlagsVertical = SizeFlags.ExpandFill;
         _collectionSection.SizeFlagsHorizontal = SizeFlags.ExpandFill;
 
-        // Never tiny, never silly-big.
-        width = Mathf.Clamp(width, _baseCardSize.X * 0.6f, _baseCardSize.X * 2.2f);
-        _cardSize = new Vector2(Mathf.Floor(width), Mathf.Floor(width * aspect));
-        _collectionGrid.Columns = _collectionColumns;
-
         // How tall the Collection's window is, for the "scroll for more" hint.
-        float collectionLabelH = labelH + SectionGap;
-        _collectionViewH = _portrait
-            ? room.Y - 2 * collectionLabelH - BodyGap - (3 * _cardSize.Y + 2 * GridGap)
-            : room.Y - collectionLabelH;
+        _collectionViewH = gridH;
 
         Refresh();
     }

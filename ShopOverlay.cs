@@ -29,7 +29,6 @@ public partial class ShopOverlay : Control
 
     private Label _subtitle;
     private Label _medalLabel;
-    private HBoxContainer _offerRow;
     private Button _continueButton;
     private bool _built;
 
@@ -202,6 +201,26 @@ public partial class ShopOverlay : Control
         Build();
     }
 
+    // ------------------------------------------------------------------
+    // The screen (2026-10-05: full screen - "it's far too small"). Built like How to Play and the
+    // deck screen: a backdrop and a panel anchored to all four edges, clear of the notch and the
+    // gesture bar, and the cards sized to the room it has. Four offers sit 2 x 2 in portrait and
+    // in one row in landscape.
+    // ------------------------------------------------------------------
+    private PanelContainer _panel;
+    private Control _top;
+    private Control _bottom;
+    private GridContainer _offerGrid;
+    private int _columns = 2;
+    private float _cellWidth = 200f;
+    private Vector2 _laidOutFor;
+
+    private const int PanelPad = 20;
+    private const int BoxGap = 12;
+    private const int CellGap = 18;
+    private const float BelowCardFixed = 24f + 52f + 3 * 6f; // price + Buy + gaps
+    private const float EffectTextRoom = 22f + 56f + 2 * 6f;  // name + up to three lines of rule
+
     private void Build()
     {
         if (_built) return;
@@ -211,27 +230,71 @@ public partial class ShopOverlay : Control
         MouseFilter = Control.MouseFilterEnum.Stop;
         SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
 
-        OverlayUi.AddDim(this);
-        VBoxContainer box = OverlayUi.AddPanel(this, contentMargin: 24, separation: 14);
+        ColorRect dim = new ColorRect { Color = OverlayUi.DimColor, MouseFilter = Control.MouseFilterEnum.Stop };
+        AddChild(dim);
+        dim.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
 
-        box.AddChild(OverlayUi.MakeLabel("The Market", 30));
+        _panel = new PanelContainer { MouseFilter = Control.MouseFilterEnum.Stop };
+        OverlayUi.StylePanel(_panel, PanelPad);
+        AddChild(_panel);
+        OverlayUi.FillScreen(_panel);
+
+        VBoxContainer box = new VBoxContainer();
+        box.AddThemeConstantOverride("separation", BoxGap);
+        _panel.AddChild(box);
+
+        VBoxContainer top = new VBoxContainer();
+        top.AddThemeConstantOverride("separation", 6);
+        box.AddChild(top);
+        _top = top;
+        top.AddChild(OverlayUi.MakeLabel("The Market", 34));
         _subtitle = OverlayUi.MakeLabel("", 20, OverlayUi.Muted);
-        box.AddChild(_subtitle);
+        top.AddChild(_subtitle);
+        _medalLabel = OverlayUi.MakeLabel("", 26, OverlayUi.MedalGold);
+        top.AddChild(_medalLabel);
 
-        _medalLabel = OverlayUi.MakeLabel("", 24, OverlayUi.MedalGold);
-        box.AddChild(_medalLabel);
+        // The offers fill everything between the header and the button, centred in it.
+        CenterContainer middle = new CenterContainer { SizeFlagsVertical = Control.SizeFlags.ExpandFill };
+        box.AddChild(middle);
+        _offerGrid = new GridContainer { Columns = 2 };
+        _offerGrid.AddThemeConstantOverride("h_separation", CellGap);
+        _offerGrid.AddThemeConstantOverride("v_separation", CellGap);
+        middle.AddChild(_offerGrid);
 
-        _offerRow = new HBoxContainer { Alignment = BoxContainer.AlignmentMode.Center };
-        _offerRow.AddThemeConstantOverride("separation", 14);
-        box.AddChild(_offerRow);
-
-        box.AddChild(OverlayUi.MakeLabel(
+        VBoxContainer bottom = new VBoxContainer();
+        bottom.AddThemeConstantOverride("separation", 10);
+        box.AddChild(bottom);
+        _bottom = bottom;
+        Label note = OverlayUi.MakeLabel(
             "Modifiers you buy are yours to keep - a lost run never takes them away.\nYou choose which twelve go in your deck next.",
-            16, OverlayUi.Muted));
+            17, OverlayUi.Muted);
+        note.AutowrapMode = TextServer.AutowrapMode.WordSmart;
+        bottom.AddChild(note);
 
-        _continueButton = new Button { Text = "Continue to your Deck" };
+        _continueButton = new Button { Text = "Continue to your Deck", CustomMinimumSize = new Vector2(300, 52) };
+        OverlayUi.StyleButton(_continueButton, primary: true);
         _continueButton.Pressed += Close;
-        box.AddChild(_continueButton);
+        CenterContainer buttonRow = new CenterContainer();
+        buttonRow.AddChild(_continueButton);
+        bottom.AddChild(buttonRow);
+    }
+
+    public override void _Ready()
+    {
+        GetViewport().SizeChanged += OnViewportResized;
+    }
+
+    public override void _ExitTree()
+    {
+        Viewport viewport = GetViewport();
+        if (viewport != null) viewport.SizeChanged -= OnViewportResized;
+    }
+
+    private void OnViewportResized()
+    {
+        if (_panel == null) return;
+        OverlayUi.FillScreen(_panel);
+        if (Visible) CallDeferred(nameof(LayoutForSize));
     }
 
     public void Open(Vector2 cardSize, Action onDone)
@@ -256,8 +319,11 @@ public partial class ShopOverlay : Control
         // Above the set-end overlay and any stray animation card.
         Node parent = GetParent();
         if (parent != null) parent.MoveChild(this, parent.GetChildCount() - 1);
+        OverlayUi.FillScreen(_panel);
         Visible = true;
-        Refresh();
+        _laidOutFor = Vector2.Zero;
+        LayoutForSize();
+        CallDeferred(nameof(LayoutForSize)); // again once the header and footer have measured
     }
 
     private void Close()
@@ -266,6 +332,39 @@ public partial class ShopOverlay : Control
         Action done = _onDone;
         _onDone = null;
         done?.Invoke();
+    }
+
+    /// Card size from the room the panel has (worked out from the screen, never read back off the
+    /// grid, which is as big as the cards it was last given).
+    private void LayoutForSize()
+    {
+        if (!Visible || _panel == null) return;
+
+        Vector2 view = GetViewportRect().Size;
+        float panelW = view.X - _panel.OffsetLeft + _panel.OffsetRight;
+        float panelH = view.Y - _panel.OffsetTop + _panel.OffsetBottom;
+        float chrome = _top.GetCombinedMinimumSize().Y + _bottom.GetCombinedMinimumSize().Y + 2 * BoxGap;
+        Vector2 room = new Vector2(panelW - 2 * PanelPad, panelH - 2 * PanelPad - chrome);
+        if (room.X < 10 || room.Y < 10) return;
+        if ((room - _laidOutFor).Length() < 2f) return;
+        _laidOutFor = room;
+
+        bool portrait = view.Y > view.X;
+        _columns = portrait ? 2 : Math.Max(1, _offers.Count);
+        int rows = (_offers.Count + _columns - 1) / _columns;
+
+        bool anyEffect = _offers.Exists(o => o.Def.Effect != CardEffect.None);
+        float below = BelowCardFixed + (anyEffect ? EffectTextRoom : 0f);
+        float aspect = TableUi.BaseCardSize.Y / TableUi.BaseCardSize.X;
+
+        _cellWidth = (room.X - (_columns - 1) * CellGap) / _columns;
+        float byWidth = _cellWidth * (portrait ? 0.8f : 0.7f);
+        float byHeight = ((room.Y - (rows - 1) * CellGap) / rows - below) / aspect;
+        float width = Mathf.Clamp(Mathf.Min(byWidth, byHeight), 60f, 260f);
+        _cardSize = new Vector2(Mathf.Floor(width), Mathf.Floor(width * aspect));
+        _offerGrid.Columns = _columns;
+
+        Refresh();
     }
 
     // ------------------------------------------------------------------
@@ -277,30 +376,37 @@ public partial class ShopOverlay : Control
         if (run == null) return;
 
         _medalLabel.Text = $"Medals: {run.Medals}";
-        OverlayUi.ClearChildren(_offerRow);
+        OverlayUi.ClearChildren(_offerGrid);
 
+        float textWidth = Mathf.Max(_cardSize.X * 1.2f, _cellWidth - 12f);
         foreach (Offer offer in _offers)
         {
-            VBoxContainer column = new VBoxContainer { Alignment = BoxContainer.AlignmentMode.Center };
+            VBoxContainer column = new VBoxContainer
+            {
+                Alignment = BoxContainer.AlignmentMode.Begin,
+                CustomMinimumSize = new Vector2(textWidth, 0),
+            };
             column.AddThemeConstantOverride("separation", 6);
-            _offerRow.AddChild(column);
+            _offerGrid.AddChild(column);
 
             Control view = _cardFactory(offer.Def.ToCard(), _cardSize);
             if (offer.Sold) view.Modulate = new Color(1f, 1f, 1f, 0.4f);
-            column.AddChild(OverlayUi.CardButton(view, _cardSize, null));
+            Button card = OverlayUi.CardButton(view, _cardSize, null);
+            card.SizeFlagsHorizontal = Control.SizeFlags.ShrinkCenter;
+            column.AddChild(card);
 
             column.AddChild(OverlayUi.MakeLabel(
                 offer.Sold ? "bought" : $"{offer.Price} medals",
-                16, offer.Sold ? OverlayUi.Muted : OverlayUi.MedalGold));
+                20, offer.Sold ? OverlayUi.Muted : OverlayUi.MedalGold));
 
             // An effect card is a rule, not a number, and the face only has room for a glyph. The
             // market is where the player decides whether to spend a match's winnings on one, so
             // it is the one screen that has to spell the rule out.
             if (offer.Def.Effect != CardEffect.None)
             {
-                column.AddChild(OverlayUi.MakeLabel(CardEffects.Label(offer.Def.Effect), 16));
-                Label rule = OverlayUi.MakeLabel(CardEffects.Description(offer.Def.Effect), 13, OverlayUi.Muted);
-                rule.CustomMinimumSize = new Vector2(_cardSize.X * 2.0f, 0);
+                column.AddChild(OverlayUi.MakeLabel(CardEffects.Label(offer.Def.Effect), 19));
+                Label rule = OverlayUi.MakeLabel(CardEffects.Description(offer.Def.Effect), 16, OverlayUi.Muted);
+                rule.CustomMinimumSize = new Vector2(textWidth, 0);
                 rule.AutowrapMode = TextServer.AutowrapMode.WordSmart;
                 column.AddChild(rule);
             }
@@ -310,7 +416,10 @@ public partial class ShopOverlay : Control
             {
                 Text = offer.Sold ? "Bought" : "Buy",
                 Disabled = offer.Sold || run.Medals < offer.Price,
+                CustomMinimumSize = new Vector2(Mathf.Min(textWidth, 180f), 48),
+                SizeFlagsHorizontal = Control.SizeFlags.ShrinkCenter,
             };
+            OverlayUi.StyleButton(buy, primary: !offer.Sold && run.Medals >= offer.Price);
             buy.Pressed += () => Buy(captured);
             column.AddChild(buy);
         }

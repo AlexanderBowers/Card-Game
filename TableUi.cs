@@ -1252,6 +1252,20 @@ public sealed class TableUi
         Moments.PlayShave(Scores.ScoreBoxOf(target), padlock, () => Scores.ReleaseShown(target), EffectCardLands);
     }
 
+    /// Trade Totals: both scores show their old numbers until the numbers have flown across.
+    public void PlayTradeTotals(Player owner, int ownerBefore, Player target, int targetBefore)
+    {
+        Scores.HoldShown(owner, ownerBefore);
+        Scores.HoldShown(target, targetBefore);
+        Moments.PlayTradeTotals(Scores.ScoreBoxOf(owner), ownerBefore, Scores.ScoreBoxOf(target), targetBefore,
+            () =>
+            {
+                Scores.ReleaseShown(owner);
+                Scores.ReleaseShown(target);
+            },
+            EffectCardLands);
+    }
+
     /// Copy: the owner's drawn card flips into the target's, and the owner's score (held at
     /// `ownerBefore`) ticks over while the card is edge-on.
     public void PlayCopy(Player owner, int ownerBefore, Player target, Control ownerBoard, Control targetBoard)
