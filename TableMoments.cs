@@ -30,7 +30,20 @@ public sealed class TableMoments
     private Control _shield;
 
     /// No moment can hang the game: past this, whatever is left is fast-forwarded.
-    private const ulong SafetyMs = 4000;
+    private const ulong SafetyMs = 8000;
+
+    // How slowly the moments play (playtest, 2026-10-05: Trade Hands was "far too quick"). Every
+    // duration below is written at the original pace; each tween is slowed by its moment's pace
+    // through Tween.SetSpeedScale, so the choreography keeps its proportions. The effect cards'
+    // moments run at nearly half speed; Hold happens far more often, so it is slowed less.
+    // A delay that waits for the effect card's own landing (CardMotion, not slowed) is divided by
+    // the pace so the moment still starts on the impact. A tap still skips straight to the end.
+    private const float EffectPace = 1.9f;
+    private const float HoldPace = 1.35f;
+    private float _pace = EffectPace;
+
+    /// A wait in real seconds, inside a tween slowed by the current pace.
+    private float Real(float seconds) => seconds / _pace;
 
     public TableMoments(Node root, AudioStreamPlayer slide, AudioStreamPlayer impact)
     {
@@ -59,6 +72,7 @@ public sealed class TableMoments
     private Tween NewTween()
     {
         Tween tween = _root.GetTree().CreateTween();
+        tween.SetSpeedScale(1f / _pace);
         if (_live.Count == 0) _startedMs = Time.GetTicksMsec();
         _live.Add(tween);
         tween.Finished += () => OnTweenDone(tween);
@@ -235,6 +249,7 @@ public sealed class TableMoments
     public void PlayHold(Control box, Control badge, Control board, Func<Control> buildLock,
                          Vector2 lockSize, AudioStreamPlayer click)
     {
+        _pace = HoldPace;
         if (!Usable(box) || !Usable(badge))
         {
             if (Usable(badge)) badge.Modulate = Colors.White;
@@ -320,6 +335,7 @@ public sealed class TableMoments
     /// padlock rattles - a locked score was hit.
     public void PlayShave(Control box, Control padlock, Action tickDown, float delay)
     {
+        _pace = EffectPace;
         if (!Usable(box))
         {
             tickDown?.Invoke();
@@ -351,7 +367,7 @@ public sealed class TableMoments
         _cleanup.Add(() => { if (GodotObject.IsInstanceValid(slash)) slash.QueueFree(); });
 
         Tween t = NewTween();
-        if (delay > 0f) t.TweenInterval(delay);
+        if (delay > 0f) t.TweenInterval(Real(delay));
         t.TweenCallback(Callable.From(() => slash.Modulate = Colors.White));
         t.TweenProperty(slash, "scale:x", 1f, 0.14f).SetTrans(Tween.TransitionType.Quad).SetEase(Tween.EaseType.Out);
 
@@ -421,6 +437,7 @@ public sealed class TableMoments
     /// both scores simply changed.)
     public void PlayTradeTotals(Control boxA, int aBefore, Control boxB, int bBefore, Action swapShown, float delay)
     {
+        _pace = EffectPace;
         if (!Usable(boxA) || !Usable(boxB))
         {
             swapShown?.Invoke();
@@ -444,7 +461,7 @@ public sealed class TableMoments
         Vector2 bow = new Vector2(-across.Y, across.X).Normalized() * Mathf.Min(across.Length() * 0.35f, 260f * s);
 
         Tween t = NewTween();
-        if (delay > 0f) t.TweenInterval(delay);
+        if (delay > 0f) t.TweenInterval(Real(delay));
         t.TweenCallback(Callable.From(() =>
         {
             _sfxSlide?.Play();
@@ -520,6 +537,7 @@ public sealed class TableMoments
     /// under cover of the flip) and the score ticks over; then it turns back with a shimmer.
     public void PlayCopy(Control mine, Control theirs, Action redrawAndTick, float delay)
     {
+        _pace = EffectPace;
         if (!Usable(mine))
         {
             redrawAndTick?.Invoke();
@@ -538,7 +556,7 @@ public sealed class TableMoments
         mine.PivotOffset = mine.Size / 2f;
 
         Tween t = NewTween();
-        if (delay > 0f) t.TweenInterval(delay);
+        if (delay > 0f) t.TweenInterval(Real(delay));
         t.TweenCallback(Callable.From(() => { PulseSource(theirs); _sfxSlide?.Play(); }));
         t.TweenProperty(mine, "scale:x", 0f, 0.12f).SetTrans(Tween.TransitionType.Sine).SetEase(Tween.EaseType.In);
         t.TweenCallback(Callable.From(() =>
@@ -637,6 +655,7 @@ public sealed class TableMoments
     /// holding the swapped cards - the model traded first) stay hidden until the fans land in them.
     public void PlayTradeHands(List<HandCard> fromP1, List<HandCard> fromP2, Control p1Hand, Control p2Hand, float delay)
     {
+        _pace = EffectPace;
         if (!Usable(p1Hand) || !Usable(p2Hand))
         {
             FreeLooks(fromP1);
@@ -682,7 +701,7 @@ public sealed class TableMoments
         t.SetParallel(true);
         if (delay > 0f)
         {
-            t.TweenInterval(delay);
+            t.TweenInterval(Real(delay));
             t.Chain();
         }
 
