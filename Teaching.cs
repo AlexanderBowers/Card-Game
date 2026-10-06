@@ -556,11 +556,10 @@ void fragment() {
         ApplyTutorialEmphasis(_tutorialIndex);
         _spotlightLabel.Text = TutorialTextFor(_tutorialIndex);
         _spotlightNext.Visible = !doStep;   // a DO step is finished by doing it, not by a button
-        // Skip only where it means something (playtest, 2026-10-05: "skip buttons where they
-        // shouldn't"): the reading steps before the player is asked to do anything. Not on a DO
-        // step - a lone Skip there sat where the step's own button would be and invited the wrong
-        // tap - and not on the last step, which ends the walkthrough anyway.
-        _spotlightSkip.Visible = _tutorialIndex < 2; // steps 0-1: the score and the deck
+        // Skip on the FIRST step only (playtest, 2026-10-06: still showing on the deck step). It is
+        // the one chance to opt out before the lesson starts; once the player has carried on past
+        // it, every later step finishes with its own button or by doing the thing.
+        _spotlightSkip.Visible = _tutorialIndex == 0;
         Control target = TutorialTarget(_tutorialIndex);
         // A picked-up card rises and grows out of its slot: open the hole upward to show all of it.
         float extraTop = (_tutorialIndex == 2 && target != null && _host.SelectedFor(_host.Player1) != null)
