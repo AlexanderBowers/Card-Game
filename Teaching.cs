@@ -288,32 +288,85 @@ void fragment() {
         // once. Measure first and the panel comes out screen-wide and one line tall, with the text
         // clipped - the same trap the stats row hit with HFlowContainer. Give it the width, and
         // the height follows from it. The floor covers the frame before that height is right.
-        float width = Mathf.Min(vp.X * 0.72f, vp.X - 32f);
-        _spotlightLabel.CustomMinimumSize = new Vector2(Mathf.Max(80f, width - 40f), 0f);
+        //
+        // 2026-10-05: the caption sits DIRECTLY next to the thing it is about - CaptionGap from
+        // the hole, on whichever side has the most room - and is centred on the hole along that
+        // side, so the spotlight and the words read as one unit rather than a hole here and a
+        // caption parked somewhere in the middle of the screen.
+        Rect2 h1 = new Rect2(left, top, right - left, bottom - top);
+        Rect2 placed = PlaceCaption(h1, hole2, vp);
+        SetRect(_spotlightCaption, placed.Position.X, placed.Position.Y, placed.Size.X, placed.Size.Y);
+    }
 
-        // The floor was 14% of the screen, which left a one-line coach mark as a tall box of
-        // empty space in portrait. The real height takes over on the next (deferred) refresh.
-        float height = Mathf.Max(_spotlightCaption.GetCombinedMinimumSize().Y, vp.Y * 0.08f);
-        float x = Mathf.Max(16f, (vp.X - width) / 2f);
-        float y = (bottom + 16f + height <= vp.Y - 16f) ? bottom + 16f : Mathf.Max(16f, top - 16f - height);
+    private const float CaptionGap = 16f;     // between the hole and the caption
+    private const float ScreenMargin = 16f;   // between the caption and the screen's edge
+    private const float SideCaptionMinWidth = 240f;
 
-        // With a second hole the caption must clear that too (pass 46). Try beside each hole,
-        // under then over, and take the first spot that fits on screen and covers neither.
-        if (hole2.HasValue)
+    /// Where the caption goes for this hole: tries the four sides in order of how much room each
+    /// has, and takes the first where it fits on screen without covering either hole. Falls back
+    /// to the roomiest of above/below, clamped onto the screen.
+    private Rect2 PlaceCaption(Rect2 hole, Rect2? hole2, Vector2 vp)
+    {
+        float roomAbove = hole.Position.Y - CaptionGap - ScreenMargin;
+        float roomBelow = vp.Y - hole.End.Y - CaptionGap - ScreenMargin;
+        float roomLeft = hole.Position.X - CaptionGap - ScreenMargin;
+        float roomRight = vp.X - hole.End.X - CaptionGap - ScreenMargin;
+
+        // Sides ranked by room. Above/below get the usual width; left/right get whatever is
+        // beside the hole, and only qualify if that is wide enough to read.
+        var sides = new List<(char Side, float Room)>
         {
-            Rect2 h1 = new Rect2(left, top, right - left, bottom - top);
-            Rect2 h2 = hole2.Value;
-            float[] candidates = { h1.End.Y + 16f, h1.Position.Y - 16f - height, h2.End.Y + 16f, h2.Position.Y - 16f - height };
-            foreach (float cy in candidates)
+            ('a', roomAbove), ('b', roomBelow), ('l', roomLeft), ('r', roomRight),
+        };
+        sides.Sort((x, y) => y.Room.CompareTo(x.Room));
+
+        Rect2? fallback = null;
+        foreach ((char side, float room) in sides)
+        {
+            bool beside = side == 'l' || side == 'r';
+            float width = beside
+                ? Mathf.Min(room, vp.X * 0.6f)
+                : Mathf.Min(vp.X * 0.72f, vp.X - 2f * ScreenMargin);
+            if (beside && width < SideCaptionMinWidth) continue;
+
+            float height = CaptionHeightFor(width, vp);
+            float x, y;
+            switch (side)
             {
-                Rect2 cap = new Rect2(x, cy, width, height);
-                if (cy < 16f || cy + height > vp.Y - 16f) continue;
-                if (cap.Intersects(h1) || cap.Intersects(h2)) continue;
-                y = cy;
-                break;
+                case 'a': x = hole.GetCenter().X - width / 2f; y = hole.Position.Y - CaptionGap - height; break;
+                case 'b': x = hole.GetCenter().X - width / 2f; y = hole.End.Y + CaptionGap; break;
+                case 'l': x = hole.Position.X - CaptionGap - width; y = hole.GetCenter().Y - height / 2f; break;
+                default:  x = hole.End.X + CaptionGap; y = hole.GetCenter().Y - height / 2f; break;
             }
+
+            // Slide along the side to stay on screen; never away from the hole.
+            if (beside) y = Mathf.Clamp(y, ScreenMargin, Mathf.Max(ScreenMargin, vp.Y - ScreenMargin - height));
+            else x = Mathf.Clamp(x, ScreenMargin, Mathf.Max(ScreenMargin, vp.X - ScreenMargin - width));
+
+            Rect2 cap = new Rect2(x, y, width, height);
+            fallback ??= cap;
+            bool onScreen = cap.Position.X >= ScreenMargin - 0.5f && cap.Position.Y >= ScreenMargin - 0.5f
+                         && cap.End.X <= vp.X - ScreenMargin + 0.5f && cap.End.Y <= vp.Y - ScreenMargin + 0.5f;
+            if (!onScreen) continue;
+            if (cap.Intersects(hole) || (hole2.HasValue && cap.Intersects(hole2.Value))) continue;
+            return cap;
         }
-        SetRect(_spotlightCaption, x, y, width, height);
+
+        // Nothing fits cleanly (a hole as big as the screen): the roomiest side, kept on screen.
+        Rect2 f = fallback ?? new Rect2(ScreenMargin, ScreenMargin, vp.X - 2f * ScreenMargin, vp.Y * 0.08f);
+        f.Size = new Vector2(f.Size.X, CaptionHeightFor(f.Size.X, vp)); // the label's width is this one's again
+        float fy = Mathf.Clamp(f.Position.Y, ScreenMargin, Mathf.Max(ScreenMargin, vp.Y - ScreenMargin - f.Size.Y));
+        float fx = Mathf.Clamp(f.Position.X, ScreenMargin, Mathf.Max(ScreenMargin, vp.X - ScreenMargin - f.Size.X));
+        return new Rect2(fx, fy, f.Size.X, f.Size.Y);
+    }
+
+    /// The caption's height at this width. The label is given the width first (see above); the
+    /// floor covers the frame before the wrapped height is right - the real height takes over on
+    /// the next, deferred, refresh.
+    private float CaptionHeightFor(float width, Vector2 vp)
+    {
+        _spotlightLabel.CustomMinimumSize = new Vector2(Mathf.Max(80f, width - 40f), 0f);
+        return Mathf.Max(_spotlightCaption.GetCombinedMinimumSize().Y, vp.Y * 0.08f);
     }
 
     private static void SetRect(Control control, float x, float y, float width, float height)

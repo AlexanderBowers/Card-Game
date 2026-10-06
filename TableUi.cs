@@ -125,6 +125,7 @@ public sealed class TableUi
         Toasts = new Toasts(_host, this, _root);
         Scores = new ScoreDisplay(_host, this, _sfxLock, _sfxOnTarget);
         _motion = new CardMotion(this, _root, _sfxSlide, _sfxPlace, _sfxImpact);
+        Moments = new TableMoments(_root, _sfxSlide, _sfxImpact);
         _root.AddChild(new ShineDriver { Name = "ShineDriver" });
         World3D = new TableWorld3D { Name = "TableWorld3D", Ui = this };
         _root.AddChild(World3D);
@@ -142,6 +143,10 @@ public sealed class TableUi
 
     /// Cards flying onto the boards.
     private readonly CardMotion _motion;
+
+    /// The big moments - Hold, Shave, Copy, Trade Hands - and the gate that holds the game while
+    /// one plays (TableMoments).
+    public TableMoments Moments { get; }
 
     /// The 3D table (prototype): draws the playmat, boards and cards in perspective under the 2D
     /// layer while GameSettings.Table3D is on. See TableWorld3D.
@@ -304,6 +309,9 @@ public sealed class TableUi
         }
 
         TableLayout next = scene.Instantiate<TableLayout>();
+
+        // A moment mid-flight is aimed at the old layout's nodes: land it before they go.
+        Moments.FinishNow();
 
         if (L != null)
         {
@@ -1226,6 +1234,55 @@ public sealed class TableUi
         TextureRect view = FindCardView(card, board);
         if (view == null) return;
         Cards.Redraw(view, card, BoardCardSizeFor(board), board == L?.P2Board);
+    }
+
+    // ------------------------------------------------------------------
+    // The effect moments (2026-10-05). Each is called right after the model has resolved the
+    // effect and before the refresh that follows, so a score held at its old number is never
+    // painted at the new one first. `cardLands` is how long the effect card's own flight onto
+    // the board takes (CardMotion.AnimateModifierPlay: one deferred frame + ~0.44s).
+    // ------------------------------------------------------------------
+    private const float EffectCardLands = 0.45f;
+
+    /// Shave: the slash across the target's score, which shows `before` until it lands.
+    public void PlayShave(Player target, int before)
+    {
+        Scores.HoldShown(target, before);
+        Control padlock = target.IsHolding ? Scores.PadlockOf(target) : null;
+        Moments.PlayShave(Scores.ScoreBoxOf(target), padlock, () => Scores.ReleaseShown(target), EffectCardLands);
+    }
+
+    /// Copy: the owner's drawn card flips into the target's, and the owner's score (held at
+    /// `ownerBefore`) ticks over while the card is edge-on.
+    public void PlayCopy(Player owner, int ownerBefore, Player target, Control ownerBoard, Control targetBoard)
+    {
+        Card mine = owner.LastDrawnCard;
+        Scores.HoldShown(owner, ownerBefore);
+        Moments.PlayCopy(
+            FindCardView(mine, ownerBoard),
+            FindCardView(target.LastDrawnCard, targetBoard),
+            () =>
+            {
+                RefreshCardFace(mine, ownerBoard);
+                Scores.ReleaseShown(owner);
+            },
+            EffectCardLands);
+    }
+
+    /// Trade Hands, step one: copies of both hands as they are drawn now, before the refresh
+    /// rebuilds each with the other's cards. Rescue cards stay with their owner, so stay out.
+    public (List<TableMoments.HandCard> P1, List<TableMoments.HandCard> P2) SnapshotHands()
+    {
+        HashSet<int> rescue = new HashSet<int>();
+        foreach (Card c in P1.Modifiers) if (c.IsRescue) rescue.Add(c.Id);
+        foreach (Card c in P2.Modifiers) if (c.IsRescue) rescue.Add(c.Id);
+        return (TableMoments.Snapshot(L?.P1Hand, rescue), TableMoments.Snapshot(L?.P2Hand, rescue));
+    }
+
+    /// Trade Hands, step two: fold, pass, unfold. Starts as the Trade Hands card slams down.
+    public void PlayTradeHands((List<TableMoments.HandCard> P1, List<TableMoments.HandCard> P2) before)
+    {
+        Moments.PlayTradeHands(before.P1, before.P2, L?.P1Hand, L?.P2Hand, EffectCardLands - 0.15f);
     }
 
     /// Takes a card off a board with an animation that reads as DESTROYED rather than moved: it

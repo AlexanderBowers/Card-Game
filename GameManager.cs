@@ -81,6 +81,8 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
             layoutHost.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
         }
         _ui = new TableUi(this, this, layoutHost, _mirrorToggle);
+        // A big moment held the turn back (ResolveTurn waits while one plays): pick it up again.
+        _ui.Moments.Idle += ResolveTurn;
 
         _menus = new Menus(this, this, _ui, new Menus.Nodes
         {
@@ -335,11 +337,13 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
     {
         if (!_isGameStarted || _gameState.IsGameOver || _setOverPending) return;
 
-        if (_player1.CanAct || _player2.CanAct)
-        {
-            _ui.Refresh(); // one side is still deciding
-            return;
-        }
+        // Paint first: a Hold that has just happened starts its padlock from this refresh. Then,
+        // while any big moment is playing, nothing is resolved - no deal, no set end - until it
+        // finishes and TableMoments.Idle calls back here.
+        _ui.Refresh();
+        if (_ui.Moments.Busy) return;
+
+        if (_player1.CanAct || _player2.CanAct) return; // one side is still deciding
 
         if (SetRules.IsSetOver(_player1, _player2, _gameState.TargetScore))
         {
@@ -457,7 +461,8 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
     void ITableUiHost.AfterRefresh()
     {
         _teaching.CheckTutorialProgress();
-        _teaching.DrainCoachMarks();
+        // A coach mark waits for a big moment to finish rather than landing on top of it.
+        if (!_ui.Moments.Busy) _teaching.DrainCoachMarks();
     }
 
     // ------------------------------------------------------------------
@@ -536,6 +541,10 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
     async Task<bool> IBotTable.Pause(double seconds)
     {
         await ToSignal(GetTree().CreateTimer(seconds), SceneTreeTimer.SignalName.Timeout);
+        // The bot does not act half way through a big moment (yours or its own): it waits for
+        // the picture to catch up, as you have to.
+        while (IsInsideTree() && _ui.Moments.Busy)
+            await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
         return IsInsideTree(); // false: the scene was restarted or exited while it waited
     }
 
@@ -558,6 +567,11 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
     /// card burning, the effect card landing, any redrawn faces, the banner and the coach mark.
     private bool PlayEffectCard(Player owner, Card card, Card chosen = null)
     {
+        // The numbers as they were, for the moments that tick a score over on impact.
+        Player opponent = _table.OpponentOf(owner);
+        int ownerBefore = owner.CurrentScore;
+        int opponentBefore = opponent.CurrentScore;
+
         if (!_table.TryPlayEffect(owner, card, chosen, out Table.EffectPlay play)) return false;
         Player target = play.Target;
 
@@ -568,12 +582,28 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
 
         _ui.InstantiateCardView(card, BoardOf(play.BoardOwner));
 
+        // The big moments (2026-10-05). The model has already changed; these catch the picture up
+        // - and until they finish, ResolveTurn waits and the bot pauses (TableMoments.Busy).
+        switch (card.Effect)
+        {
+            case CardEffect.Shave:
+                _ui.PlayShave(target, opponentBefore);
+                break;
+
+            case CardEffect.TradeHands:
+                // Taken now: the hands on screen still hold the old cards (the played one already
+                // lifted out); the refresh below rebuilds them traded, hidden until the fans land.
+                _ui.PlayTradeHands(_ui.SnapshotHands());
+                break;
+        }
+
         // A card that rewrote a drawn card mutated a Card object that is already face-up on a
-        // board. Without this the board still reads 10 while the score has been paid at 2, which
-        // is the one thing a card called Copy cannot afford to get wrong.
+        // board. Without a redraw the board still reads 10 while the score has been paid at 2,
+        // which is the one thing a card called Copy cannot afford to get wrong - so the card flips
+        // into its new face, and the score ticks over while it is edge-on.
         if (CardEffects.RewritesDrawnCards(card.Effect))
         {
-            _ui.RefreshCardFace(owner.LastDrawnCard, BoardOf(owner));
+            _ui.PlayCopy(owner, ownerBefore, target, BoardOf(owner), BoardOf(target));
             _ui.RefreshCardFace(target.LastDrawnCard, BoardOf(target));
         }
 
@@ -798,10 +828,9 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
             return;
         }
 
-        // The deck screen works in smaller cards than the table: twelve slots and a collection
-        // have to fit side by side on a phone in portrait.
-        Vector2 deckCardSize = _ui.CardSize * 0.7f;
-        _shopOverlay.Open(_ui.CardSize, () => _deckOverlay.Open(deckCardSize, StartNextMatch));
+        // The deck screen is full screen and sizes its own cards to the room it has; the table's
+        // card size only gives it the aspect and the limits.
+        _shopOverlay.Open(_ui.CardSize, () => _deckOverlay.Open(_ui.CardSize, StartNextMatch));
     }
 
     /// Reloading the scene is what resets the board, the scores and the set wins (the same path

@@ -197,6 +197,42 @@ public static class OverlayUi
         return slot;
     }
 
+    /// The notch / status bar (top) and gesture bar (bottom) as insets in canvas units, so a
+    /// full-screen panel can keep its title and its bottom button clear of them. Zero on desktop,
+    /// where the "safe area" is the monitor's work area rather than anything about our window.
+    public static (float Top, float Bottom) SafeInsets(Control anyControl)
+    {
+        if (anyControl == null || !OS.HasFeature("mobile")) return (0f, 0f);
+
+        Vector2I window = DisplayServer.WindowGetSize();
+        if (window.X <= 0 || window.Y <= 0) return (0f, 0f);
+        Rect2I safe = DisplayServer.GetDisplaySafeArea();
+        float scale = anyControl.GetViewportRect().Size.Y / window.Y; // window px -> canvas units
+
+        float top = Mathf.Max(0, safe.Position.Y) * scale;
+        float bottom = Mathf.Max(0, window.Y - safe.End.Y) * scale;
+        return (top, bottom);
+    }
+
+    /// Anchors a panel to all four edges with a margin (smaller on a small phone) and keeps it
+    /// clear of the notch and gesture bar. Call again whenever the viewport changes size.
+    public static void FillScreen(Control panel, float margin = 24f)
+    {
+        if (panel == null) return;
+        Vector2 view = panel.GetViewportRect().Size;
+        // The canvas is 720 on its short side (stretch "expand"), so a phone shows up as a long
+        // aspect rather than a small number: a 19.5:9 phone gets the tighter margin.
+        float aspect = Mathf.Max(view.X, view.Y) / Mathf.Max(1f, Mathf.Min(view.X, view.Y));
+        float m = aspect > 1.9f ? Mathf.Min(margin, 14f) : margin;
+        (float top, float bottom) = SafeInsets(panel);
+
+        panel.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
+        panel.OffsetLeft = m;
+        panel.OffsetRight = -m;
+        panel.OffsetTop = m + top;
+        panel.OffsetBottom = -(m + bottom);
+    }
+
     public static void ClearChildren(Node parent)
     {
         if (parent == null) return;
