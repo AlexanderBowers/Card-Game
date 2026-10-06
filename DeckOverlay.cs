@@ -17,8 +17,7 @@ using System.Collections.Generic;
 /// Card size is worked out from the room the panel actually has, so cards grow on big screens.
 ///
 /// Writes RunData.SideDeck (indices into RunData.Inventory) when Start the Match is pressed, so a
-/// run that is quit here keeps the deck it arrived with rather than a half-built one. Close throws
-/// the changes away and carries on with the deck the player arrived with.
+/// run that is quit here keeps the deck it arrived with rather than a half-built one.
 /// </summary>
 public partial class DeckOverlay : Control
 {
@@ -97,20 +96,15 @@ public partial class DeckOverlay : Control
         box.AddThemeConstantOverride("separation", 10);
         _panel.AddChild(box);
 
-        // Title, with a way out in the top corner.
+        // The title.
         HBoxContainer header = new HBoxContainer();
         _header = header;
         header.AddThemeConstantOverride("separation", 8);
         box.AddChild(header);
-        Control balance = new Control { CustomMinimumSize = new Vector2(96, 0) }; // keeps the title centred
-        header.AddChild(balance);
+        // No corner button (2026-10-05): Start the Match is the one way on from here.
         Label title = OverlayUi.MakeLabel("Your Deck", 30);
         title.SizeFlagsHorizontal = SizeFlags.ExpandFill;
         header.AddChild(title);
-        Button close = new Button { Text = "Close", CustomMinimumSize = new Vector2(96, 44), FocusMode = FocusModeEnum.None };
-        OverlayUi.StyleButton(close);
-        close.Pressed += CloseWithoutSaving;
-        header.AddChild(close);
 
         Label hint = OverlayUi.MakeLabel(
             "Tap a Modifier to move it in or out of your deck.\nFour of your twelve are dealt to you each match.",
@@ -221,9 +215,6 @@ public partial class DeckOverlay : Control
         Finish();
     }
 
-    /// The corner button: out, with the deck the player arrived with.
-    private void CloseWithoutSaving() => Finish();
-
     private void Finish()
     {
         Visible = false;
@@ -259,7 +250,7 @@ public partial class DeckOverlay : Control
         // 30+ Modifiers owned and 12 chosen, the Collection got a sliver of the screen.
         //   Portrait: the Deck is two columns of six, for readability; the Collection takes the
         //   rest of the width (at least three columns) and the full height, and scrolls.
-        //   Landscape: the Deck takes whichever of 3x4 / 4x3 / 6x2 gives the biggest cards.
+        //   Landscape: the Deck takes whichever of 3x4 / 4x3 gives (6x2 looked stretched - 2026-10-05) the biggest cards.
         _portrait = view.Y > view.X;
         _body.Vertical = false;
 
@@ -270,7 +261,7 @@ public partial class DeckOverlay : Control
 
         int deckColumns = 2;
         float width = 0f;
-        foreach (int columns in _portrait ? new[] { 2 } : new[] { 3, 4, 6 })
+        foreach (int columns in _portrait ? new[] { 2 } : new[] { 3, 4 })
         {
             int rows = (RunData.SideDeckSize + columns - 1) / columns;
             float byHeight = (gridH - (rows - 1) * GridGap) / rows / aspect;

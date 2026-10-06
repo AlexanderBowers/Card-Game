@@ -431,7 +431,10 @@ public partial class ShopOverlay : Control
         if (run == null || offer.Sold || run.Medals < offer.Price) return;
 
         run.SpendMedals(offer.Price);
+        bool wasComplete = run.CollectionComplete;
         run.AddToInventory(offer.Def);
+        // The collection log fills by owning now, so the Market is where it completes.
+        if (!wasComplete && run.CollectionComplete) _subtitle.Text = "Collection complete! Your deck now has a gilded back.";
         offer.Sold = true;
         Refresh();
     }

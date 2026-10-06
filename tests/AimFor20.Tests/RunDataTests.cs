@@ -187,16 +187,33 @@ public class RunDataTests
     public void Completing_the_collection_log_switches_the_gilded_back_on_exactly_once()
     {
         RunData run = NewRun();
-        bool completedOnce = false;
+        int completions = 0;
         foreach (string key in CollectionLog.Keys)
         {
-            bool completed = run.MarkCardMet(key);
-            Assert.False(completed && completedOnce);
-            completedOnce |= completed;
+            bool was = run.CollectionComplete;
+            run.AddToInventory(CollectionLog.Entry(key));
+            if (!was && run.CollectionComplete) completions++;
         }
-        Assert.True(completedOnce);
+        Assert.Equal(1, completions);
         Assert.True(run.CollectionComplete);
         Assert.True(run.UseCollectorBack);
+    }
+
+    [Fact]
+    public void The_collection_log_counts_cards_owned_not_cards_met()
+    {
+        RunData run = NewRun();
+        int before = run.CollectionFound;
+
+        // Met but not owned: the bot played a Veto at you. The log does not fill.
+        run.MarkCardMet(CardEffect.Veto.ToString());
+        Assert.False(run.OwnsCard(CardEffect.Veto.ToString()));
+        Assert.Equal(before, run.CollectionFound);
+
+        // Owned: bought in the Market.
+        run.AddToInventory(new ModifierDef(0, false, CardEffect.Veto));
+        Assert.True(run.OwnsCard(CardEffect.Veto.ToString()));
+        Assert.Equal(before + 1, run.CollectionFound);
     }
 
     [Fact]

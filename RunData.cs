@@ -120,7 +120,20 @@ public partial class RunData
         return MarkCardMet(CollectionLog.Key(card));
     }
 
-    public int CollectionFound => CollectionLog.Found(CardsMet);
+    /// The collection log counts what you OWN - a card in your collection (Inventory), bought or
+    /// starter - not every card you have merely met (Alexander, 2026-10-05). CardsMet still drives
+    /// the coach-marks: being shown a card and owning one are different things.
+    public bool OwnsCard(string key) => key != null && Inventory.Exists(def => def.LogKey == key);
+
+    public int CollectionFound
+    {
+        get
+        {
+            HashSet<string> owned = new HashSet<string>();
+            foreach (ModifierDef def in Inventory) if (def.LogKey != null) owned.Add(def.LogKey);
+            return CollectionLog.Found(owned);
+        }
+    }
 
     public bool CollectionComplete => CollectionFound == CollectionLog.Keys.Length;
 
@@ -512,10 +525,11 @@ public partial class RunData
     /// because the collection is append-only (there is no selling).
     public int AddToInventory(ModifierDef def)
     {
+        // Owning is what fills the collection log now, so completion is decided here.
+        bool wasComplete = CollectionComplete;
         Inventory.Add(def);
         // Bought is met. For an effect card that is already true - the market only sells a card
         // you have been shown - so this never skips an explanation.
-        bool wasComplete = CollectionComplete;
         CardsMet.Add(def.LogKey);
         if (!wasComplete && CollectionComplete) CollectorBack = true;
         Save();

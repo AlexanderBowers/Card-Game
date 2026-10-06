@@ -6,11 +6,11 @@ using System;
 /// Opened from the start menu (playtest-feedback-family.md §5.2).
 ///
 /// Four rows of six, and the rows ARE the categories - plus, minus, flip value, special - so the
-/// gaps in a row say what is missing without a single word. A card is "met" when it enters your
-/// collection, is dealt to you, or is played at you by the bot: this is a record of what you have
-/// seen the game do, not of what you happen to own.
+/// gaps in a row say what is missing without a single word. An entry is filled when you OWN that
+/// card (Alexander, 2026-10-05: "only cards you own, not just seen") - it used to fill when you met
+/// one, which let the bot's cards fill your log.
 ///
-/// Reads RunData.CardsMet and never writes it. The one thing this screen changes is the reward
+/// Reads RunData.Inventory (via OwnsCard) and never writes it. The one thing this screen changes is the reward
 /// toggle, which is cosmetic by rule: a family game must not gate strength behind completionism.
 /// </summary>
 public partial class CollectionOverlay : Control
@@ -43,7 +43,7 @@ public partial class CollectionOverlay : Control
 
         box.AddChild(OverlayUi.MakeLabel("Collection", 30));
         box.AddChild(OverlayUi.MakeLabel(
-            "A Modifier joins your collection once you hold it, buy it, or have it played against you.", 15, OverlayUi.Muted));
+            "A Modifier joins your collection once you own it - buy it in the Market and it is yours to keep.", 15, OverlayUi.Muted));
 
         _grid = new GridContainer { Columns = Columns };
         _grid.AddThemeConstantOverride("h_separation", Gap);
@@ -99,7 +99,7 @@ public partial class CollectionOverlay : Control
 
         foreach (string key in CollectionLog.Keys)
         {
-            if (run.HasMetCard(key))
+            if (run.OwnsCard(key))
             {
                 Control view = _cardFactory(CollectionLog.Entry(key).ToCard(), _cardSize);
                 _grid.AddChild(OverlayUi.CardButton(view, _cardSize, null));
@@ -112,12 +112,12 @@ public partial class CollectionOverlay : Control
 
         int found = run.CollectionFound;
         int total = CollectionLog.Keys.Length;
-        _countLabel.Text = $"{found} / {total} found";
+        _countLabel.Text = $"{found} / {total} owned";
 
         bool complete = run.CollectionComplete;
         _rewardLabel.Text = complete
             ? "Complete. Your deck has earned a gilded back."
-            : $"Find all {total} to earn a gilded back for your deck.";
+            : $"Own all {total} to earn a gilded back for your deck.";
         _rewardToggle.Visible = complete;
         _rewardToggle.SetPressedNoSignal(run.CollectorBack);
     }
