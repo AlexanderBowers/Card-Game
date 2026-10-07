@@ -443,8 +443,10 @@ public sealed class Menus
         AddMenuButton("Options", null, () => _host.OpenOptions());
         if (run != null)
             AddMenuButton($"Collection   {run.CollectionFound}/{CollectionLog.Keys.Length}", null, OpenCollection);
+        // "Customizations" (2026-10-07; was "Shop", which clashed with the Modifier Shop). Held
+        // sideways the buttons go two to a row, so the medal count is left off there.
         if (run != null)
-            AddMenuButton($"Shop   {run.Medals} medals", null, OpenShop);
+            AddMenuButton(sideways ? "Customizations" : $"Customizations   {run.Medals} medals", null, OpenShop);
 
         // Quit everywhere but iOS (Alexander, 2026-09-16: "start menu should have quit game").
         // Android allows an app to close itself; Apple's review guidelines reject a quit button,

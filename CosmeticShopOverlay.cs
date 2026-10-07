@@ -51,7 +51,7 @@ public partial class CosmeticShopOverlay : Control
 
         // No outer scroll: the list below scrolls itself, and is sized to the screen in Open.
         VBoxContainer box = OverlayUi.AddPanel(this, contentMargin: 22, separation: 10, scroll: false);
-        box.AddChild(OverlayUi.MakeLabel("Shop", 32));
+        box.AddChild(OverlayUi.MakeLabel("Customizations", 32));
         _medals = OverlayUi.MakeLabel("", 20, OverlayUi.MedalGold);
         box.AddChild(_medals);
 
