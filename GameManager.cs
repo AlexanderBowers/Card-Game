@@ -508,6 +508,8 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
     bool ITableHost.TutorialStaged => _teaching.Staged;
     IReadOnlyList<int> ITableHost.TutorialOpening => Teaching.Opening;
     IReadOnlyList<int> ITableHost.TutorialModifiers => Teaching.Modifiers;
+    bool ITableHost.TutorialOverLesson => _teaching.OverLessonPending;
+    IReadOnlyList<int> ITableHost.TutorialOverDraws => Teaching.OverLessonDraws;
 
     List<CardEffect> ITableHost.UnlockedLocalSpecials() => Menus.UnlockedLocalSpecials();
     void ITableHost.DealBotHand() => _bot.DealHand();

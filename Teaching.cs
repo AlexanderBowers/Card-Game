@@ -117,6 +117,27 @@ public sealed class Teaching
 
     private const int TutorialSteps = 5;
 
+    // ------------------------------------------------------------------
+    // The second lesson: over is not bust (playtest, 2026-10-06 - Alexander's mother did not
+    // know you can go over the target and then play a minus card).
+    //
+    // After a completed staged walkthrough, the next set is stacked: Player 1 draws 10 and 1 on
+    // the opening deal (11), then 10 on the next turn (21). The moment they are over with a minus
+    // card in hand that brings them back, one more DO step appears - the -1 pulses, exactly like
+    // the +4 did, and playing it is the lesson. If they hold at 11 instead, it waits for the next
+    // time they go over in this match.
+    // ------------------------------------------------------------------
+
+    /// Player 1's first draws in the second lesson's set, in draw order.
+    public static readonly int[] OverLessonDraws = { 10, 1, 10 };
+
+    /// The step index the second lesson runs as (after the five walkthrough steps).
+    private const int OverStep = TutorialSteps;
+
+    /// The walkthrough was finished (not skipped) on a staged match, and the second lesson has
+    /// not been shown yet.
+    public bool OverLessonPending { get; private set; }
+
     private const float SpotlightPad = 10f;
 
     /// Set by "Replay the tutorial", which reloads the scene - so it is a static, for the same
@@ -423,6 +444,7 @@ void fragment() {
             case 2: return LessonCardControl() ?? _ui.P1Hand; // pass 49: the one right card
             case 3: return _ui.P1ActionRow;
             case 4: return _ui.P1WinsRow;
+            case OverStep: return LessonCardControl() ?? _ui.P1Hand; // the minus card that saves you
             default: return null;
         }
     }
@@ -437,7 +459,7 @@ void fragment() {
     /// could not be pressed - and the lesson did not need two steps anyway. Tapping the same card
     /// again commits it (the quick path the touch model has always had), so one step teaches both
     /// halves and never has to find a control that only exists mid-gesture.
-    private static bool TutorialIsDoStep(int step) => step == 2 || step == 3;
+    private static bool TutorialIsDoStep(int step) => step == 2 || step == 3 || step == OverStep;
 
     private string TutorialTextFor(int step)
     {
@@ -458,6 +480,14 @@ void fragment() {
             case 4:
                 return $"Win {GameState.SetsToWinMatch} sets to take the match. These are yours "
                      + "so far. That is everything - good luck.";
+            case OverStep:
+            {
+                Card fix = BestModifier();
+                string name = fix != null ? (fix.Value > 0 ? "+" : "") + fix.Value : "minus Modifier";
+                return $"You are at {_host.Player1.CurrentScore}, over {_host.State.TargetScore} - but it is "
+                     + "not a bust until your turn ends. Play a minus Modifier to come back: "
+                     + $"tap the {name}, then tap it again.";
+            }
             default:
                 return string.Empty;
         }
@@ -491,6 +521,10 @@ void fragment() {
         {
             case 2: return _host.Player1.Modifiers.Count < _tutorialModifierCount;
             case 3: return !_host.Player1.CanAct;
+            // Played a card (normally the pulsing minus), or the turn is over some other way.
+            case OverStep:
+                return _host.Player1.Modifiers.Count < _tutorialModifierCount || !_host.Player1.CanAct
+                    || _host.Player1.CurrentScore <= _host.State.TargetScore;
             default: return false;
         }
     }
@@ -535,13 +569,57 @@ void fragment() {
     {
         if (!Running) return;
 
-        _tutorialIndex++;
-        if (_tutorialIndex >= TutorialSteps)
+        // The second lesson is one step on its own.
+        if (_tutorialIndex == OverStep)
         {
             FinishTutorial();
             return;
         }
 
+        _tutorialIndex++;
+        if (_tutorialIndex >= TutorialSteps)
+        {
+            FinishTutorial(walkthroughCompleted: true);
+            return;
+        }
+
+        RefreshSpotlight();
+    }
+
+    /// The second lesson, if it is waiting and the moment has come: Player 1 is over the target,
+    /// can still act, and holds a minus card that brings them back. Watches the screen like the
+    /// rest of the teaching, from CheckTutorialProgress.
+    private void TryStartOverLesson()
+    {
+        if (!OverLessonPending || Running) return;
+        if (!_host.GameStarted || _host.State.IsGameOver || _host.SetOverPending || _host.PromptShowing) return;
+        if (_menus.Covering) return;
+
+        Player you = _host.Player1;
+        if (!you.CanAct || you.CurrentScore <= _host.State.TargetScore) return;
+        Card fix = BestModifier();
+        if (fix == null || fix.Value >= 0) return;
+
+        OverLessonPending = false;
+        StartOverLesson();
+    }
+
+    private async void StartOverLesson()
+    {
+        // Running at once, so the bot stands still (Bot.ProcessTurn checks it) - then the card
+        // that took the player over is allowed to land before the lesson about it appears.
+        Running = true;
+        _tutorialIndex = OverStep;
+        _tutorialModifierCount = _host.Player1.Modifiers.Count;
+
+        for (int i = 0; i < 40; i++)
+        {
+            await _root.ToSignal(_root.GetTree(), SceneTree.SignalName.ProcessFrame);
+            if (!_root.IsInsideTree() || !Running) return;
+        }
+
+        _root.MoveChild(_spotlightOverlay, _root.GetChildCount() - 1);
+        _spotlightOverlay.Visible = true;
         RefreshSpotlight();
     }
 
@@ -577,7 +655,7 @@ void fragment() {
         _spotlightSkip.Visible = _tutorialIndex == 0;
         Control target = TutorialTarget(_tutorialIndex);
         // A picked-up card rises and grows out of its slot: open the hole upward to show all of it.
-        float extraTop = (_tutorialIndex == 2 && target != null && _host.SelectedFor(_host.Player1) != null)
+        float extraTop = ((_tutorialIndex == 2 || _tutorialIndex == OverStep) && target != null && _host.SelectedFor(_host.Player1) != null)
             ? target.Size.Y * 0.5f : 0f;
         PlaceSpotlight(target, blockHole: !doStep, TutorialLookTarget(_tutorialIndex), extraTop);
     }
@@ -625,7 +703,7 @@ void fragment() {
 
     private void ApplyTutorialEmphasis(int step)
     {
-        Card pulseCard = step == 2 && _host.SelectedFor(_host.Player1) == null ? BestModifier() : null;
+        Card pulseCard = (step == 2 || step == OverStep) && _host.SelectedFor(_host.Player1) == null ? BestModifier() : null;
         bool forceHold = step == 3 && OnTargetExactly;
         SetEmphasis(pulseCard, forceHold);
     }
@@ -643,7 +721,7 @@ void fragment() {
     /// A second thing a step points at, to look at only (pass 46). The Modifier step shows the
     /// score as well as the hand: picking a card up previews the score it would make, and that
     /// change is the lesson.
-    private Control TutorialLookTarget(int step) => step == 2 ? _ui.P1ScoreBlock : null;
+    private Control TutorialLookTarget(int step) => (step == 2 || step == OverStep) ? _ui.P1ScoreBlock : null;
 
     /// ...and then again once the layout has actually settled.
     ///
@@ -684,6 +762,7 @@ void fragment() {
     /// step's completion never has to be wired into the five handlers that could cause it.
     public void CheckTutorialProgress()
     {
+        TryStartOverLesson();
         if (!Running || _spotlightOverlay == null || !_spotlightOverlay.Visible) return;
 
         if (TutorialIsDoStep(_tutorialIndex) && TutorialStepDone(_tutorialIndex))
@@ -695,12 +774,15 @@ void fragment() {
         Defer(RefreshSpotlight); // the highlighted control may have moved
     }
 
-    private void FinishTutorial()
+    private void FinishTutorial(bool walkthroughCompleted = false)
     {
         if (!Running) return;
 
         Running = false;
         PendingTutorial = false;
+        // Finished properly (not skipped) on the staged first match: the second lesson - over is
+        // not bust - waits for the next set.
+        if (walkthroughCompleted && Staged) OverLessonPending = true;
         SetEmphasis(null, false); // no pulse or locked Draw Card outlives the lesson
         if (_spotlightOverlay != null) _spotlightOverlay.Visible = false;
         RunData.Instance?.MarkTutorialSeen();
@@ -730,6 +812,9 @@ void fragment() {
     private readonly Queue<CoachMark> _coachQueue = new Queue<CoachMark>();
 
     private CoachMark? _coachShowing;
+
+    /// The effect banner's text, put away while a coach mark is up.
+    private string _bannerHeldForCoach;
 
     /// A coach mark is on screen (the bot waits while one is).
     public bool CoachShowing => _coachShowing.HasValue;
@@ -792,6 +877,12 @@ void fragment() {
 
         _spotlightLabel.Text = CardEffects.Introduction(mark.Card);
         _spotlightNext.Visible = true;
+
+        // The coach mark comes first (playtest, 2026-10-06: the effect banner - "Silver Champion
+        // plays Copy..." - was drawn over the coach mark's caption). The banner steps aside while
+        // the card is explained and comes back when the player taps Got it.
+        _bannerHeldForCoach = _ui.Toasts.EffectBannerText;
+        if (_bannerHeldForCoach != null) _ui.Toasts.ClearEffectBanner();
         _spotlightSkip.Visible = false; // there is nothing to skip: it is one line, once ever
 
         _root.MoveChild(_spotlightOverlay, _root.GetChildCount() - 1);
@@ -814,6 +905,10 @@ void fragment() {
 
         if (_spotlightOverlay != null) _spotlightOverlay.Visible = false;
         if (_spotlightSkip != null) _spotlightSkip.Visible = true;
+
+        // The banner that stepped aside for the coach mark comes back.
+        if (_bannerHeldForCoach != null) _ui.Toasts.ShowEffectBanner(_bannerHeldForCoach);
+        _bannerHeldForCoach = null;
 
         _ui.DeferRefresh(); // which drains the next one, if there is one
     }

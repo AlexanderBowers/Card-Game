@@ -27,6 +27,12 @@ public interface ITableHost
     IReadOnlyList<int> TutorialOpening { get; }
     IReadOnlyList<int> TutorialModifiers { get; }
 
+    /// The tutorial's second lesson (2026-10-06): going over is not a bust while you can still play
+    /// a minus card. While it is waiting to be shown, every set after the first stacks Player 1's
+    /// first draws (TutorialOverDraws, in draw order: 10 and 1 on the opening deal, then 10 = 21).
+    bool TutorialOverLesson { get; }
+    IReadOnlyList<int> TutorialOverDraws { get; }
+
     /// The specials a local 2-player hand may be dealt: only the ones met in single player.
     List<CardEffect> UnlockedLocalSpecials();
 
@@ -334,6 +340,17 @@ public sealed class Table
                 deck.Add(opening[i]);
             }
         }
+        else if (_host.TutorialOverLesson && !_host.State.IsFirstSet)
+        {
+            // The second lesson's set: Player 1 draws off the END of their own pile, so the first
+            // draw is appended last. Removed first, so the deck still holds four of every value.
+            IReadOnlyList<int> draws = _host.TutorialOverDraws;
+            for (int i = draws.Count - 1; i >= 0; i--)
+            {
+                _p1Deck.Remove(draws[i]);
+                _p1Deck.Add(draws[i]);
+            }
+        }
     }
 
     private void ShuffleDeck(List<int> deck)
@@ -372,6 +389,7 @@ public sealed class Table
     private void SteerTopCard(Player owner, List<int> deck, bool opening)
     {
         if (_host.TutorialStaged && _host.State.IsFirstSet) return; // the staged opening is the lesson
+        if (owner == P1 && _host.TutorialOverLesson) return;        // ...and so is the second lesson's
 
         int target = _host.State.TargetScore;
         int? pick = null;

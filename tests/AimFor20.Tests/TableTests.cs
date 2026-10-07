@@ -15,6 +15,8 @@ internal sealed class FakeTableHost : ITableHost
     public bool LocalSpecials { get; set; }
     public bool TutorialStaged { get; set; }
     public IReadOnlyList<int> TutorialOpening { get; set; } = Array.Empty<int>();
+    public bool TutorialOverLesson { get; set; }
+    public IReadOnlyList<int> TutorialOverDraws { get; set; } = Array.Empty<int>();
     public IReadOnlyList<int> TutorialModifiers { get; set; } = Array.Empty<int>();
     public List<CardEffect> LocalSpecialsUnlocked { get; set; } = new List<CardEffect>();
 
@@ -146,6 +148,25 @@ public class TableTests
         Assert.Equal(new[] { 4, 2 }, host.Player1.ActiveCardsOnBoard.Select(c => c.Value));
         Assert.Equal(new[] { 3, 1 }, host.Player2.ActiveCardsOnBoard.Select(c => c.Value));
         Assert.Equal(38, table.Remaining(host.Player1));
+    }
+
+    [Fact]
+    public void The_over_lesson_deals_you_ten_one_ten_in_the_second_set()
+    {
+        var host = new FakeTableHost
+        {
+            TutorialOverLesson = true,
+            TutorialOverDraws = new[] { 10, 1, 10 },
+        };
+        host.State.SetsWonPlayer1 = 1; // not the first set
+        var table = new Table(host);
+        table.StartSet();
+        table.DealTurn();
+        table.DealTurn();
+        table.DealTurn();
+
+        Assert.Equal(new[] { 10, 1, 10 }, host.Player1.ActiveCardsOnBoard.Select(c => c.Value).Take(3));
+        Assert.Equal(40 - host.Player1.ActiveCardsOnBoard.Count, table.Remaining(host.Player1));
     }
 
     [Fact]
