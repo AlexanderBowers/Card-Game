@@ -150,7 +150,46 @@ public static class OverlayUi
         VBoxContainer box = new VBoxContainer { Alignment = BoxContainer.AlignmentMode.Center };
         box.AddThemeConstantOverride("separation", separation);
         panel.AddChild(box);
+        KeepOnScreen(panel);
         return box;
+    }
+
+    /// A centred panel taller or wider than the screen is drawn smaller until it fits, rather
+    /// than running off the edges (size check, 2026-10-06: the start menu lost its title and Quit
+    /// button on a 20:9 phone held sideways - the table canvas leaves 720 units of height there,
+    /// and the bigger text no longer fits in it). Scale, not layout, so nothing re-flows: at
+    /// every size where it already fitted, nothing changes.
+    public static void KeepOnScreen(Control panel, float margin = 10f)
+    {
+        void Fit()
+        {
+            if (!GodotObject.IsInstanceValid(panel) || !panel.IsInsideTree()) return;
+            Vector2 view = panel.GetViewportRect().Size;
+            (float top, float bottom) = SafeInsets(panel);
+            Vector2 room = new Vector2(view.X - 2f * margin, view.Y - 2f * margin - top - bottom);
+            Vector2 size = panel.Size;
+            if (size.X < 1f || size.Y < 1f) return;
+            float s = Mathf.Min(1f, Mathf.Min(room.X / size.X, room.Y / size.Y));
+            panel.PivotOffset = size / 2f;
+            panel.Scale = new Vector2(s, s);
+        }
+
+        Viewport viewport = null;
+        void Attach()
+        {
+            viewport = panel.GetViewport();
+            viewport.SizeChanged += Fit;
+            Callable.From(Fit).CallDeferred();
+        }
+
+        panel.Resized += Fit;
+        panel.TreeEntered += Attach;
+        if (panel.IsInsideTree()) Attach(); // usually already added by the caller
+        panel.TreeExiting += () =>
+        {
+            if (viewport != null && GodotObject.IsInstanceValid(viewport)) viewport.SizeChanged -= Fit;
+            viewport = null;
+        };
     }
 
     /// Body text on every overlay is drawn this much bigger than the size asked for (playtest,
