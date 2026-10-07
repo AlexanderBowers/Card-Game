@@ -29,6 +29,8 @@ public partial class ShopOverlay : Control
 
     private Label _subtitle;
     private Label _medalLabel;
+    private string _subtitleBase;
+    private bool _wide; // a wide phone held sideways: medals join the subtitle, the note is dropped
     private Button _continueButton;
     private bool _built;
 
@@ -210,6 +212,9 @@ public partial class ShopOverlay : Control
     private PanelContainer _panel;
     private Control _top;
     private Control _bottom;
+    private Label _note;
+    private const string NoteTwoLines = "Modifiers you buy are yours to keep - a lost run never takes them away.\nYou choose which twelve go in your deck next.";
+    private const string NoteThreeLines = "Modifiers you buy are yours to keep -\na lost run never takes them away.\nYou choose which twelve go in your deck next.";
     private GridContainer _offerGrid;
     private int _columns = 2;
     private float _cellWidth = 200f;
@@ -265,11 +270,10 @@ public partial class ShopOverlay : Control
         bottom.AddThemeConstantOverride("separation", 10);
         box.AddChild(bottom);
         _bottom = bottom;
-        Label note = OverlayUi.MakeLabel(
+        Label note = _note = OverlayUi.MakeLabel(
             "Modifiers you buy are yours to keep - a lost run never takes them away.\nYou choose which twelve go in your deck next.",
             17, OverlayUi.Muted);
-        note.AutowrapMode = TextServer.AutowrapMode.WordSmart;
-        bottom.AddChild(note);
+        bottom.AddChild(note); // broken into lines by hand in LayoutForSize, never autowrapped
 
         _continueButton = new Button { Text = "Continue to your Deck", CustomMinimumSize = new Vector2(300, 52) };
         OverlayUi.StyleButton(_continueButton, primary: true);
@@ -314,11 +318,12 @@ public partial class ShopOverlay : Control
         foreach (ModifierDef def in RollOffers(_random, run, OfferCount))
             _offers.Add(new Offer { Def = def, Price = PriceOf(def) });
 
-        _subtitle.Text = $"Next: {run.CurrentOpponent} - target {run.CurrentTarget}";
+        _subtitleBase = $"Next: {run.CurrentOpponent} - target {run.CurrentTarget}";
+        _subtitle.Text = _subtitleBase;
 
         // Above the set-end overlay and any stray animation card.
         Node parent = GetParent();
-        if (parent != null) parent.MoveChild(this, parent.GetChildCount() - 1);
+        if (parent != null) OverlayUi.BringToFront(this);
         OverlayUi.FillScreen(_panel);
         Visible = true;
         _laidOutFor = Vector2.Zero;
@@ -340,9 +345,24 @@ public partial class ShopOverlay : Control
     {
         if (!Visible || _panel == null) return;
 
-        Vector2 view = GetViewportRect().Size;
+        Vector2 view = OverlayUi.ViewSize(this);
         float panelW = view.X - _panel.OffsetLeft + _panel.OffsetRight;
         float panelH = view.Y - _panel.OffsetTop + _panel.OffsetBottom;
+        // Size check, 2026-10-07: the header and footer took 410 of a wide phone's 720 units of
+        // height held sideways, and the cards came out a third of the size. The note was an
+        // autowrapping label, which reports the height it wrapped to at some narrower width; it is
+        // now broken into lines by hand for the shape of the screen. Held sideways the medals move
+        // up beside the subtitle, and on a wide phone the note (said again on the deck screen and
+        // in How to Play) is dropped.
+        bool sideways = view.X > view.Y * 1.25f;
+        _wide = sideways;
+        bool dropNote = view.X / Mathf.Max(1f, view.Y) > 1.9f;
+        if (_note != null)
+        {
+            _note.Visible = !dropNote;
+            _note.Text = sideways ? NoteTwoLines : NoteThreeLines;
+        }
+        _medalLabel.Visible = !sideways;
         float chrome = _top.GetCombinedMinimumSize().Y + _bottom.GetCombinedMinimumSize().Y + 2 * BoxGap;
         Vector2 room = new Vector2(panelW - 2 * PanelPad, panelH - 2 * PanelPad - chrome);
         if (room.X < 10 || room.Y < 10) return;
@@ -360,7 +380,9 @@ public partial class ShopOverlay : Control
         _cellWidth = (room.X - (_columns - 1) * CellGap) / _columns;
         float byWidth = _cellWidth * (portrait ? 0.8f : 0.7f);
         float byHeight = ((room.Y - (rows - 1) * CellGap) / rows - below) / aspect;
-        float width = Mathf.Clamp(Mathf.Min(byWidth, byHeight), 60f, 260f);
+        // Up to 360 wide (was 260): a Fold opened or a tablet has the room, and the cards are the
+        // point of the screen (size check, 2026-10-07).
+        float width = Mathf.Clamp(Mathf.Min(byWidth, byHeight), 60f, 360f);
         _cardSize = new Vector2(Mathf.Floor(width), Mathf.Floor(width * aspect));
         _offerGrid.Columns = _columns;
 
@@ -376,6 +398,10 @@ public partial class ShopOverlay : Control
         if (run == null) return;
 
         _medalLabel.Text = $"Medals: {run.Medals}";
+        if (_wide && _subtitleBase != null && _subtitle.Text.StartsWith("Next:"))
+            _subtitle.Text = $"{_subtitleBase}   -   Medals: {run.Medals}";
+        else if (!_wide && _subtitleBase != null && _subtitle.Text.StartsWith("Next:"))
+            _subtitle.Text = _subtitleBase;
         OverlayUi.ClearChildren(_offerGrid);
 
         float textWidth = Mathf.Max(_cardSize.X * 1.2f, _cellWidth - 12f);

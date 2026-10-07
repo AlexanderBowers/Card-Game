@@ -82,7 +82,7 @@ public sealed class Menus
     public void BuildTableMenu()
     {
         _tableMenuOverlay = new Control { Visible = false, MouseFilter = Control.MouseFilterEnum.Stop };
-        _root.AddChild(_tableMenuOverlay);
+        OverlayUi.Host(_root).AddChild(_tableMenuOverlay);
         _tableMenuOverlay.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
         OverlayUi.AddDim(_tableMenuOverlay);
 
@@ -164,7 +164,7 @@ public sealed class Menus
         // The toggle only means anything with two people at one device.
         if (_mirrorToggle != null) _mirrorToggle.Visible = !_host.VsBot;
 
-        _root.MoveChild(_tableMenuOverlay, _root.GetChildCount() - 1); // above every other overlay
+        OverlayUi.BringToFront(_tableMenuOverlay); // above every other overlay
         _tableMenuOverlay.Visible = true;
     }
 
@@ -230,7 +230,7 @@ public sealed class Menus
     public void BuildStartMenu()
     {
         _startMenuOverlay = new Control { Visible = false, MouseFilter = Control.MouseFilterEnum.Stop };
-        _root.AddChild(_startMenuOverlay);
+        OverlayUi.Host(_root).AddChild(_startMenuOverlay);
         _startMenuOverlay.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
 
         // OPAQUE, not OverlayUi.AddDim (Alexander, 2026-09-13). Every other overlay in the game
@@ -282,7 +282,7 @@ public sealed class Menus
         _startMenuBox = OverlayUi.AddPanel(_startMenuOverlay, contentMargin: 32, separation: 12);
 
         _collectionOverlay = new CollectionOverlay();
-        _root.AddChild(_collectionOverlay);
+        OverlayUi.Host(_root).AddChild(_collectionOverlay);
         _collectionOverlay.Setup(_ui.Cards.CreateCardView);
     }
 
@@ -323,7 +323,7 @@ public sealed class Menus
         if (string.IsNullOrWhiteSpace(title)) title = "Card Game";
         // The logo only where there is height to spare: a phone held upright. Landscape spends
         // every pixel of its 720 base on the buttons.
-        Vector2 view = _root.GetViewport().GetVisibleRect().Size;
+        Vector2 view = OverlayUi.HostSize(_root);
         if (MenuLogo != null && view.Y > view.X)
         {
             _startMenuBox.AddChild(new TextureRect
@@ -423,6 +423,22 @@ public sealed class Menus
         AddMenuButton("Local 2-Player", null, FillLocal2PlayerSetup);
 
         _startMenuBox.AddChild(MenuSpacer());
+
+        // Held sideways, the five lesser buttons go two to a row (size check, 2026-10-07): a wide
+        // phone leaves the menu 720 units of height, and one long column made Shop and Quit
+        // something you had to scroll to. Upright, one column, as before.
+        bool sideways = view.X > view.Y * 1.25f;
+        GridContainer pairs = null;
+        if (sideways)
+        {
+            pairs = new GridContainer { Columns = 2, SizeFlagsHorizontal = Control.SizeFlags.ShrinkCenter };
+            pairs.AddThemeConstantOverride("h_separation", 12);
+            pairs.AddThemeConstantOverride("v_separation", 12);
+            _startMenuBox.AddChild(pairs);
+            _menuTarget = pairs;
+            _menuButtonWidthOverride = (MenuButtonWidth - 12f) / 2f;
+        }
+
         AddMenuButton("How to Play", null, ShowHowToPlay);
         AddMenuButton("Options", null, () => _host.OpenOptions());
         if (run != null)
@@ -434,6 +450,9 @@ public sealed class Menus
         // Android allows an app to close itself; Apple's review guidelines reject a quit button,
         // and iOS apps are left to the home gesture.
         if (!OS.HasFeature("ios")) AddMenuButton("Quit Game", null, () => _root.GetTree().Quit());
+
+        _menuTarget = null;
+        _menuButtonWidthOverride = 0f;
 
         // The proof that a lost run did not erase anything - which is the promise the run makes,
         // and the one place the player can be shown it before deciding to climb again.
@@ -452,12 +471,16 @@ public sealed class Menus
     /// One row of the menu: a wide button, and optionally a line under it saying what it does. The
     /// note is a separate label rather than a second line inside the button so that arming the New
     /// Run button has exactly one string to rewrite.
+    private Control _menuTarget;              // where AddMenuButton puts the button; null = the menu box
+    private float _menuButtonWidthOverride;   // 0 = the usual width
+
     private Button AddMenuButton(string text, string note, Action onPressed)
     {
-        Button button = new Button { Text = text, CustomMinimumSize = new Vector2(MenuButtonWidth, MenuButtonHeight) };
+        float width = _menuButtonWidthOverride > 0f ? _menuButtonWidthOverride : MenuButtonWidth;
+        Button button = new Button { Text = text, CustomMinimumSize = new Vector2(width, MenuButtonHeight) };
         button.AddThemeFontSizeOverride("font_size", MenuButtonFont);
         if (onPressed != null) button.Pressed += onPressed;
-        _startMenuBox.AddChild(button);
+        (_menuTarget ?? _startMenuBox).AddChild(button);
 
         if (!string.IsNullOrEmpty(note))
         {
@@ -484,7 +507,7 @@ public sealed class Menus
     private const float MenuSideGutter = 44f;
 
     private float MenuButtonWidth => Mathf.Clamp(
-        _root.GetViewport().GetVisibleRect().Size.X - 2f * MenuSideGutter, 240f, MenuButtonWidthMax);
+        OverlayUi.HostSize(_root).X - 2f * MenuSideGutter, 240f, MenuButtonWidthMax);
 
     private const float MenuButtonHeight = 62; // was 44
 
@@ -528,7 +551,7 @@ public sealed class Menus
         if (_shopOverlay == null)
         {
             _shopOverlay = new CosmeticShopOverlay();
-            _root.AddChild(_shopOverlay);
+            OverlayUi.Host(_root).AddChild(_shopOverlay);
         }
         // Closing refreshes the menu (the medal count on its button) and the table (deck + board).
         _shopOverlay.Open(() => { FillStartMenu(); _ui.ApplyRankTheme(); });
@@ -774,7 +797,7 @@ public sealed class Menus
         //
         // The overlay: dim + centred panel + scrolling rules + Close (and Flip when mirrored).
         _howToPlayOverlay = new Control { Visible = false, MouseFilter = Control.MouseFilterEnum.Stop };
-        _root.AddChild(_howToPlayOverlay);
+        OverlayUi.Host(_root).AddChild(_howToPlayOverlay);
         _howToPlayOverlay.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
 
         ColorRect dim = new ColorRect { Color = OverlayUi.DimColor, MouseFilter = Control.MouseFilterEnum.Ignore };
@@ -845,7 +868,7 @@ public sealed class Menus
         _howToPlayFlipped = false;
         _howToPlayPanel.RotationDegrees = 0f;
         _howToPlayFlipButton.Visible = _ui.IsMirrored;
-        _root.MoveChild(_howToPlayOverlay, _root.GetChildCount() - 1); // above any stray animation card
+        OverlayUi.BringToFront(_howToPlayOverlay); // above any stray animation card
         _howToPlayOverlay.Visible = true;
     }
 

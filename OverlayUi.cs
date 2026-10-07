@@ -122,6 +122,33 @@ public static class OverlayUi
         button.AddThemeColorOverride("font_hover_pressed_color", AccentDeep);
     }
 
+    /// Where an overlay goes: the scene's overlay layer (UiScaler), not the scene root.
+    public static Control Host(Node root) => UiScaler.For(root);
+
+    /// The size an overlay has to lay itself out in: its overlay layer's, or the viewport's for
+    /// anything outside one.
+    public static Vector2 ViewSize(Control c)
+    {
+        for (Node n = c; n != null; n = n.GetParent())
+            if (n is UiScaler scaler) return scaler.Size;
+        return c.GetViewportRect().Size;
+    }
+
+    /// The overlay layer's size under this root.
+    public static Vector2 HostSize(Node root) => UiScaler.For(root).Size;
+
+    /// Above every other overlay - and the layer itself above everything else on the scene root
+    /// (the tutorial's spotlight, a stray animation card), as moving the overlay last on the
+    /// root used to do.
+    public static void BringToFront(Control overlay)
+    {
+        Node parent = overlay.GetParent();
+        if (parent == null) return;
+        parent.MoveChild(overlay, parent.GetChildCount() - 1);
+        if (parent is UiScaler scaler && scaler.GetParent() is Node root)
+            root.MoveChild(scaler, root.GetChildCount() - 1);
+    }
+
     /// The dark wash that separates the overlay from the live table underneath.
     public static void AddDim(Control root)
     {
@@ -135,7 +162,9 @@ public static class OverlayUi
     }
 
     /// A centred panel that hugs its content, and the VBox to fill with it.
-    public static VBoxContainer AddPanel(Control root, int contentMargin = 24, int separation = 12)
+    /// `scroll`: the content sits in a DragScroll, so a panel taller than the screen scrolls
+    /// rather than running off it. Off for a panel that has a scrolling list of its own.
+    public static VBoxContainer AddPanel(Control root, int contentMargin = 24, int separation = 12, bool scroll = true)
     {
         PanelContainer panel = new PanelContainer();
         StylePanel(panel, contentMargin);
@@ -147,32 +176,79 @@ public static class OverlayUi
         panel.GrowHorizontal = Control.GrowDirection.Both;
         panel.GrowVertical = Control.GrowDirection.Both;
 
-        VBoxContainer box = new VBoxContainer { Alignment = BoxContainer.AlignmentMode.Center };
+        VBoxContainer box = new VBoxContainer
+        {
+            Alignment = BoxContainer.AlignmentMode.Center,
+            SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+        };
         box.AddThemeConstantOverride("separation", separation);
-        panel.AddChild(box);
-        KeepOnScreen(panel);
+
+        DragScroll scroller = null;
+        if (scroll)
+        {
+            scroller = new DragScroll();
+            panel.AddChild(scroller);
+            scroller.AddChild(box);
+        }
+        else
+        {
+            panel.AddChild(box);
+        }
+        KeepOnScreen(panel, scroller, box);
         return box;
     }
 
-    /// A centred panel taller or wider than the screen is drawn smaller until it fits, rather
-    /// than running off the edges (size check, 2026-10-06: the start menu lost its title and Quit
-    /// button on a 20:9 phone held sideways - the table canvas leaves 720 units of height there,
-    /// and the bigger text no longer fits in it). Scale, not layout, so nothing re-flows: at
-    /// every size where it already fitted, nothing changes.
-    public static void KeepOnScreen(Control panel, float margin = 10f)
+    /// Fit and fill (size check, 2026-10-06/07). A centred panel never runs off the screen:
+    /// - too TALL: its content scrolls (a DragScroll window as tall as the screen allows), so the
+    ///   text keeps the size it was made bigger for. The start menu, Options and the table menu
+    ///   all outgrow the 720 units of height a wide phone held sideways leaves them.
+    /// - too WIDE, or too tall with nothing to scroll: drawn smaller until it fits - the last
+    ///   resort, which a panel built for a phone held upright should never need.
+    /// At every size where a panel already fitted, nothing changes.
+    public static void KeepOnScreen(Control panel, ScrollContainer scroller = null, Control content = null, float margin = 10f)
     {
+        bool fitting = false;
         void Fit()
         {
-            if (!GodotObject.IsInstanceValid(panel) || !panel.IsInsideTree()) return;
-            Vector2 view = panel.GetViewportRect().Size;
+            if (fitting || !GodotObject.IsInstanceValid(panel) || !panel.IsInsideTree()) return;
+            fitting = true;
+            try { FitNow(); }
+            finally { fitting = false; }
+        }
+
+        void FitNow()
+        {
+            Vector2 view = ViewSize(panel);
             (float top, float bottom) = SafeInsets(panel);
             Vector2 room = new Vector2(view.X - 2f * margin, view.Y - 2f * margin - top - bottom);
-            Vector2 size = panel.Size;
+
+            if (scroller != null && content != null)
+            {
+                float chrome = panel.GetThemeStylebox("panel")?.GetMinimumSize().Y ?? 0f;
+                float wanted = content.GetCombinedMinimumSize().Y;
+                float h = Mathf.Max(80f, Mathf.Min(wanted, room.Y - chrome));
+                if (Mathf.Abs(scroller.CustomMinimumSize.Y - h) > 0.5f)
+                    scroller.CustomMinimumSize = new Vector2(0f, h);
+            }
+
+            // Back to hugging the content: a Control grows to its minimum but never shrinks back on
+            // its own, so a panel that was tall upright stayed tall after turning sideways.
+            panel.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.Center, Control.LayoutPresetMode.Minsize);
+            panel.GrowHorizontal = Control.GrowDirection.Both;
+            panel.GrowVertical = Control.GrowDirection.Both;
+            // Centred in the SAFE area: a status bar is taller than a gesture bar, and a panel
+            // that just fits otherwise tucks its top under the camera.
+            float shift = (top - bottom) / 2f;
+            panel.OffsetTop += shift;
+            panel.OffsetBottom += shift;
+            Vector2 size = panel.GetCombinedMinimumSize();
             if (size.X < 1f || size.Y < 1f) return;
             float s = Mathf.Min(1f, Mathf.Min(room.X / size.X, room.Y / size.Y));
-            panel.PivotOffset = size / 2f;
+            panel.PivotOffset = panel.Size / 2f;
             panel.Scale = new Vector2(s, s);
         }
+
+        if (content != null) content.MinimumSizeChanged += Fit;
 
         Viewport viewport = null;
         void Attach()
@@ -249,14 +325,24 @@ public static class OverlayUi
     /// The notch / status bar (top) and gesture bar (bottom) as insets in canvas units, so a
     /// full-screen panel can keep its title and its bottom button clear of them. Zero on desktop,
     /// where the "safe area" is the monitor's work area rather than anything about our window.
+    /// Pretend notch / gesture-bar insets in WINDOW pixels (top, bottom), for checking layouts on
+    /// a desktop, where the real safe area is always the whole window. Null in the game.
+    public static Vector2? DebugInsetsPx;
+
     public static (float Top, float Bottom) SafeInsets(Control anyControl)
     {
+        if (anyControl != null && DebugInsetsPx.HasValue)
+        {
+            Vector2I w = DisplayServer.WindowGetSize();
+            float k = w.Y > 0 ? ViewSize(anyControl).Y / w.Y : 1f;
+            return (DebugInsetsPx.Value.X * k, DebugInsetsPx.Value.Y * k);
+        }
         if (anyControl == null || !OS.HasFeature("mobile")) return (0f, 0f);
 
         Vector2I window = DisplayServer.WindowGetSize();
         if (window.X <= 0 || window.Y <= 0) return (0f, 0f);
         Rect2I safe = DisplayServer.GetDisplaySafeArea();
-        float scale = anyControl.GetViewportRect().Size.Y / window.Y; // window px -> canvas units
+        float scale = ViewSize(anyControl).Y / window.Y; // window px -> canvas units
 
         float top = Mathf.Max(0, safe.Position.Y) * scale;
         float bottom = Mathf.Max(0, window.Y - safe.End.Y) * scale;
@@ -268,7 +354,7 @@ public static class OverlayUi
     public static void FillScreen(Control panel, float margin = 24f)
     {
         if (panel == null) return;
-        Vector2 view = panel.GetViewportRect().Size;
+        Vector2 view = ViewSize(panel);
         // The canvas is 720 on its short side (stretch "expand"), so a phone shows up as a long
         // aspect rather than a small number: a 19.5:9 phone gets the tighter margin.
         float aspect = Mathf.Max(view.X, view.Y) / Mathf.Max(1f, Mathf.Min(view.X, view.Y));

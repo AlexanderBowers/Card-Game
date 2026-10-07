@@ -39,7 +39,9 @@ public partial class OptionsOverlay : Control
     private const float ButtonWidthMax = 460f;
     private const float ButtonHeight = 62f;
     private Vector2 WideButton => new Vector2(
-        Mathf.Clamp(GetViewport().GetVisibleRect().Size.X - 88f, 240f, ButtonWidthMax), ButtonHeight);
+        Mathf.Clamp(OverlayUi.ViewSize(this).X - 88f, 240f, ButtonWidthMax), ButtonHeight);
+
+    private BoxContainer _columns;
 
     public void Build()
     {
@@ -55,15 +57,28 @@ public partial class OptionsOverlay : Control
         VBoxContainer box = OverlayUi.AddPanel(this, contentMargin: 26, separation: 10);
         box.AddChild(OverlayUi.MakeLabel("Options", TitleFont));
 
+        // Two columns side by side when the screen is held sideways, one under the other upright
+        // (size check, 2026-10-07: as one column it outgrew a wide phone held sideways). Which way
+        // is decided each time the screen opens - see Open.
+        _columns = new BoxContainer { Vertical = true };
+        _columns.AddThemeConstantOverride("separation", 10);
+        box.AddChild(_columns);
+        VBoxContainer colA = new VBoxContainer();
+        colA.AddThemeConstantOverride("separation", 10);
+        _columns.AddChild(colA);
+        VBoxContainer colB = new VBoxContainer();
+        colB.AddThemeConstantOverride("separation", 10);
+        _columns.AddChild(colB);
+
         // --- Sound: the RuneScape-style block, on its own dark stone plate.
-        box.AddChild(SectionLabel("Sound"));
+        colA.AddChild(SectionLabel("Sound"));
         PanelContainer plate = new PanelContainer();
         StyleBoxFlat stone = new StyleBoxFlat { BgColor = PanelStone, BorderColor = PanelEdge };
         stone.SetBorderWidthAll(2);
         stone.SetCornerRadiusAll(4);
         stone.SetContentMarginAll(10);
         plate.AddThemeStyleboxOverride("panel", stone);
-        box.AddChild(plate);
+        colA.AddChild(plate);
 
         VBoxContainer rows = new VBoxContainer();
         rows.AddThemeConstantOverride("separation", 6);
@@ -71,13 +86,13 @@ public partial class OptionsOverlay : Control
         rows.AddChild(VolumeRow(GameSettings.Channel.Master));
         rows.AddChild(VolumeRow(GameSettings.Channel.Music));
         rows.AddChild(VolumeRow(GameSettings.Channel.Sfx));
-        box.AddChild(OverlayUi.MakeLabel("Tap an icon to mute it.", NoteFont, OverlayUi.Muted));
+        colA.AddChild(OverlayUi.MakeLabel("Tap an icon to mute it.", NoteFont, OverlayUi.Muted));
 
         // --- Purchases (monetization-spec.md §4). Only where there is a store to talk to: no ads
         // on this platform means nothing to remove, and the stub store only exists in debug builds.
         VBoxContainer store = new VBoxContainer();
         store.AddThemeConstantOverride("separation", 10);
-        box.AddChild(store);
+        colA.AddChild(store);
         _storeSection = store;
         store.AddChild(SectionLabel("Purchases"));
         _storeRows = new VBoxContainer();
@@ -88,31 +103,31 @@ public partial class OptionsOverlay : Control
         // to change their answer later; the SDK says who they are.
         VBoxContainer privacy = new VBoxContainer();
         privacy.AddThemeConstantOverride("separation", 10);
-        box.AddChild(privacy);
+        colA.AddChild(privacy);
         _privacySection = privacy;
         privacy.AddChild(SectionLabel("Privacy"));
         privacy.AddChild(StoreButton("Privacy Choices", () => AdService.ShowPrivacyOptions(null)));
 
         // --- Graphics. The 3D table (prototype); off is the flat table, and the lighter one.
-        box.AddChild(SectionLabel("Graphics"));
+        colB.AddChild(SectionLabel("Graphics"));
         _table3D = Toggle("3D table", GameSettings.SetTable3D);
-        box.AddChild(_table3D);
+        colB.AddChild(_table3D);
         _showFps = Toggle("Show frame rate", GameSettings.SetShowFps);
-        box.AddChild(_showFps);
+        colB.AddChild(_showFps);
 
         // --- Battery. Little to save today; the switches are here for when the art is heavier.
-        box.AddChild(SectionLabel("Battery"));
+        colB.AddChild(SectionLabel("Battery"));
         _animations = Toggle("Card animations", GameSettings.SetCardAnimations);
-        box.AddChild(_animations);
+        colB.AddChild(_animations);
         _batterySaver = Toggle("Battery saver (30 fps)", GameSettings.SetBatterySaver);
-        box.AddChild(_batterySaver);
+        colB.AddChild(_batterySaver);
 
         // --- Debug. An exported build has no debug rows to show, so it gets no switch either.
         if (OS.IsDebugBuild())
         {
-            box.AddChild(SectionLabel("Debug"));
+            colB.AddChild(SectionLabel("Debug"));
             _debugButtons = Toggle("Show debug buttons", GameSettings.SetShowDebugButtons);
-            box.AddChild(_debugButtons);
+            colB.AddChild(_debugButtons);
         }
 
         _closeButton = new Button { Text = "Close" };
@@ -133,12 +148,14 @@ public partial class OptionsOverlay : Control
         _table3D.SetPressedNoSignal(GameSettings.Table3D);
         _showFps.SetPressedNoSignal(GameSettings.ShowFps);
         _debugButtons?.SetPressedNoSignal(GameSettings.ShowDebugButtons);
+        Vector2 view = OverlayUi.ViewSize(this);
+        if (_columns != null) _columns.Vertical = view.X <= view.Y * 1.25f;
         if (_closeButton != null) _closeButton.CustomMinimumSize = WideButton;
         FillStore(); // sized here too, because WideButton follows the viewport
         if (_privacySection != null) _privacySection.Visible = AdService.PrivacyOptionsRequired;
 
         Node parent = GetParent();
-        if (parent != null) parent.MoveChild(this, parent.GetChildCount() - 1);
+        if (parent != null) OverlayUi.BringToFront(this);
         Visible = true;
     }
 

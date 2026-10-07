@@ -293,6 +293,18 @@ void fragment() {
         if (_spotlightOverlay == null) return;
 
         Vector2 vp = _root.GetViewport().GetVisibleRect().Size;
+
+        // The caption grows on a big screen like every other overlay does (UiScaler): on a tablet
+        // or an opened Fold the canvas is half again a phone's, and 28 units read as fine print.
+        float uiScale = Mathf.Clamp(Mathf.Min(vp.X, vp.Y) / UiScaler.PhoneShortSide, 1f, UiScaler.MaxScale);
+        int captionFont = Mathf.RoundToInt(28f * uiScale);
+        if (_spotlightLabel.GetThemeFontSize("font_size") != captionFont)
+        {
+            _spotlightLabel.AddThemeFontSizeOverride("font_size", captionFont);
+            _spotlightSkip.AddThemeFontSizeOverride("font_size", captionFont);
+            _spotlightNext.AddThemeFontSizeOverride("font_size", captionFont);
+        }
+
         Rect2 hole = (target != null && target.IsInsideTree() && target.Size.X > 1f)
             ? ScreenRectOf(target).Grow(SpotlightPad).GrowIndividual(0f, extraTop, 0f, 0f)
             : new Rect2(vp / 2f, Vector2.Zero); // no target: a plain dim, no hole
@@ -408,6 +420,12 @@ void fragment() {
     private float CaptionHeightFor(float width, Vector2 vp)
     {
         float labelWidth = Mathf.Max(80f, width - 40f);
+        // Once the label HAS wrapped at this width (the settle passes), its own minimum height is
+        // the truth. The font measurement below can come out a line short of the label's real
+        // word wrap, and then the caption was hidden for good as "not shrunk yet" (size check,
+        // 2026-10-07: the deck step showed its hole and no words on an 18:9 phone).
+        bool wrappedHere = Mathf.Abs(_spotlightLabel.Size.X - labelWidth) < 1f;
+        float wrappedHeight = wrappedHere ? _spotlightLabel.GetCombinedMinimumSize().Y : 0f;
         _spotlightLabel.CustomMinimumSize = new Vector2(labelWidth, 0f);
         // Give the label that width NOW, so it re-wraps before anything asks it for a minimum:
         // a stale tall minimum would also stop the panel shrinking to the height set below.
@@ -424,6 +442,7 @@ void fragment() {
         float textHeight = font != null
             ? font.GetMultilineStringSize(_spotlightLabel.Text, HorizontalAlignment.Left, labelWidth, fontSize).Y
             : _spotlightLabel.GetCombinedMinimumSize().Y;
+        textHeight = Mathf.Max(textHeight, wrappedHeight);
         float chrome = _spotlightCaption.GetCombinedMinimumSize().Y - _spotlightLabel.GetCombinedMinimumSize().Y;
         return Mathf.Max(chrome + textHeight + 4f, vp.Y * 0.06f);
     }
@@ -759,6 +778,9 @@ void fragment() {
                 if (!_root.IsInsideTree()) return;
                 PlaceCurrentSpotlight();
             }
+            // Settled: whatever the measurements say, the words are shown. A caption a few pixels
+            // off is a nit; a hole with no words is a broken step.
+            if (_spotlightCaption != null) _spotlightCaption.Modulate = Colors.White;
         }
         finally
         {

@@ -155,7 +155,7 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
     private void BuildOptions()
     {
         _optionsOverlay = new OptionsOverlay();
-        AddChild(_optionsOverlay);
+        OverlayUi.Host(this).AddChild(_optionsOverlay);
         _optionsOverlay.Build();
     }
 
@@ -844,11 +844,11 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
         // but it is the same scene now, so they are built either way and simply never opened.
 
         _shopOverlay = new ShopOverlay();
-        AddChild(_shopOverlay);
+        OverlayUi.Host(this).AddChild(_shopOverlay);
         _shopOverlay.Setup(_ui.Cards.CreateCardView);
 
         _deckOverlay = new DeckOverlay();
-        AddChild(_deckOverlay);
+        OverlayUi.Host(this).AddChild(_deckOverlay);
         _deckOverlay.Setup(_ui.Cards.CreateCardView);
     }
 

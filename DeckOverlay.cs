@@ -201,7 +201,7 @@ public partial class DeckOverlay : Control
         _deck.AddRange(run.SideDeck);
 
         Node parent = GetParent();
-        if (parent != null) parent.MoveChild(this, parent.GetChildCount() - 1);
+        if (parent != null) OverlayUi.BringToFront(this);
         OverlayUi.FillScreen(_panel);
         Visible = true;
         _laidOutFor = Vector2.Zero;
@@ -234,7 +234,7 @@ public partial class DeckOverlay : Control
         // The room is worked out from the SCREEN, not read off the body: the body is as big as
         // its cards ask for, so measuring it after a layout with the wrong card size would feed
         // that size straight back in (and push Start the Match off the bottom).
-        Vector2 view = GetViewportRect().Size;
+        Vector2 view = OverlayUi.ViewSize(this);
         float panelW = view.X - _panel.OffsetLeft + _panel.OffsetRight;
         float panelH = view.Y - _panel.OffsetTop + _panel.OffsetBottom;
         float chrome = _header.GetCombinedMinimumSize().Y + _hint.GetCombinedMinimumSize().Y
@@ -261,7 +261,12 @@ public partial class DeckOverlay : Control
 
         int deckColumns = 2;
         float width = 0f;
-        foreach (int columns in _portrait ? new[] { 2 } : new[] { 3, 4 })
+        // A tall phone keeps two columns of six. A near-square screen held upright (a Fold opened,
+        // an iPad, a Flip's cover) has width to spare and short height, so it may take 3x4 or
+        // 4x3 if that gives bigger cards (size check, 2026-10-07: the cards stayed phone-sized
+        // in a sea of empty panel).
+        bool tallPortrait = _portrait && view.Y / Mathf.Max(1f, view.X) > 1.6f;
+        foreach (int columns in tallPortrait ? new[] { 2 } : _portrait ? new[] { 2, 3, 4 } : new[] { 3, 4 })
         {
             int rows = (RunData.SideDeckSize + columns - 1) / columns;
             float byHeight = (gridH - (rows - 1) * GridGap) / rows / aspect;

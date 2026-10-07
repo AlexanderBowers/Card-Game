@@ -77,13 +77,28 @@ public partial class CollectionOverlay : Control
     public void Open(Vector2 cardSize, Action onClosed = null)
     {
         _onClosed = onClosed;
-        _cardSize = cardSize;
+        _cardSize = FillSize(cardSize);
         if (!_built || RunData.Instance == null) { Close(); return; }
 
         Node parent = GetParent();
-        if (parent != null) parent.MoveChild(this, parent.GetChildCount() - 1);
+        if (parent != null) OverlayUi.BringToFront(this);
         Visible = true;
         Refresh();
+    }
+
+    /// The caller's size is the phone size. A screen with room to spare (a Fold opened, a tablet)
+    /// gets bigger cards, up to 1.8x; a cramped one a little smaller, down to 0.8x, and the panel
+    /// scrolls past that (size check, 2026-10-07).
+    private Vector2 FillSize(Vector2 baseSize)
+    {
+        Vector2 view = OverlayUi.ViewSize(this);
+        float aspect = baseSize.Y / Mathf.Max(1f, baseSize.X);
+        int rows = (CollectionLog.Keys.Length + Columns - 1) / Columns;
+        const float Chrome = 330f; // title, two-line subtitle, count, reward line, Close, margins
+        float byWidth = (view.X * 0.92f - 44f - (Columns - 1) * Gap) / Columns;
+        float byHeight = ((view.Y * 0.92f - Chrome - (rows - 1) * Gap) / rows) / aspect;
+        float w = Mathf.Clamp(Mathf.Min(byWidth, byHeight), baseSize.X * 0.8f, baseSize.X * 1.8f);
+        return new Vector2(Mathf.Floor(w), Mathf.Floor(w * aspect));
     }
 
     private void Close()
