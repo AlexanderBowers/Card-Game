@@ -238,6 +238,11 @@ public sealed class Toasts
         _effectBanner.Text = string.Empty;
     }
 
+    /// The banner's text while it is up, or null.
+    public string EffectBannerText =>
+        _effectToast != null && _effectToast.Visible && _effectBanner != null && !string.IsNullOrEmpty(_effectBanner.Text)
+            ? _effectBanner.Text : null;
+
     public void ClearEffectBanner()
     {
         _effectBannerToken++;

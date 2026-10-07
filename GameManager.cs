@@ -81,6 +81,8 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
             layoutHost.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
         }
         _ui = new TableUi(this, this, layoutHost, _mirrorToggle);
+        // A big moment held the turn back (ResolveTurn waits while one plays): pick it up again.
+        _ui.Moments.Idle += ResolveTurn;
 
         _menus = new Menus(this, this, _ui, new Menus.Nodes
         {
@@ -153,7 +155,7 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
     private void BuildOptions()
     {
         _optionsOverlay = new OptionsOverlay();
-        AddChild(_optionsOverlay);
+        OverlayUi.Host(this).AddChild(_optionsOverlay);
         _optionsOverlay.Build();
     }
 
@@ -234,6 +236,9 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
         _isGameStarted = true;
         _isVsBot = !local2Player;
         _player2.PlayerName = _isVsBot ? "AI Bot" : "Player 2";
+        // In single player you are "You", never "Player 1" (playtest, 2026-10-06: "am I Player
+        // 1?"). Every sentence built from the name reads right for it - see Speech.
+        _player1.PlayerName = _isVsBot ? Speech.You : "Player 1";
 
         // The mode decides what the layout shows (P2's buttons, the mirror), so re-apply it.
         _ui.ApplyResponsiveLayout();
@@ -244,6 +249,10 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
         // change to both of them.
         bool tutorial = _teaching.PrepareForMatch();
 
+        // Until the camera has swung in and the stage banner has crossed, the table is still
+        // arriving: the first deal's refresh must not put a coach mark up under the swing.
+        _arrivalPending = !tutorial;
+
         _table.DealMatchHands(); // the hand has to last all three sets of the match
 
         StartNewSet(); // UpdateUI enables the Draw Card / Hold buttons
@@ -253,14 +262,29 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
         else ShowStageIntro();
     }
 
+    /// The camera is still swinging in, or the stage banner is still crossing: the table has not
+    /// arrived yet, so nothing that wants the player's attention (a coach mark) should start.
+    private bool TableArriving => _arrivalPending || (_ui.World3D?.Swinging ?? false) || StageIntro.Playing > 0;
+    private bool _arrivalPending;
+
     /// "Stage 2 / Target: 20" sliding across at the start of a ladder match (StageIntro).
+    /// Once it has gone, a refresh lets any coach mark that waited for it appear.
     private void ShowStageIntro()
     {
         RunData run = _inRun ? RunData.Instance : null;
-        if (run == null) return;
+        if (run == null)
+        {
+            _arrivalPending = false;
+            _ui.DeferRefresh();
+            return;
+        }
 
         string title = run.Endless ? $"Endless Match {run.EndlessStreak + 1}" : $"Stage {run.MatchNumber}";
-        StageIntro.Play(this, title, $"Target: {_gameState.TargetScore}");
+        StageIntro.Play(this, title, $"Target: {_gameState.TargetScore}{run.FinaleRulesLine("\n")}", () =>
+        {
+            _arrivalPending = false;
+            _ui.DeferRefresh();
+        });
     }
 
     /// Puts the solo scene onto the ladder: picks up the run in progress (or starts one), and takes
@@ -335,11 +359,13 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
     {
         if (!_isGameStarted || _gameState.IsGameOver || _setOverPending) return;
 
-        if (_player1.CanAct || _player2.CanAct)
-        {
-            _ui.Refresh(); // one side is still deciding
-            return;
-        }
+        // Paint first: a Hold that has just happened starts its padlock from this refresh. Then,
+        // while any big moment is playing, nothing is resolved - no deal, no set end - until it
+        // finishes and TableMoments.Idle calls back here.
+        _ui.Refresh();
+        if (_ui.Moments.Busy) return;
+
+        if (_player1.CanAct || _player2.CanAct) return; // one side is still deciding
 
         if (SetRules.IsSetOver(_player1, _player2, _gameState.TargetScore))
         {
@@ -457,7 +483,10 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
     void ITableUiHost.AfterRefresh()
     {
         _teaching.CheckTutorialProgress();
-        _teaching.DrainCoachMarks();
+        // A coach mark waits for a big moment to finish rather than landing on top of it - and
+        // for the table to arrive: the camera's swing-in and the stage banner (playtest,
+        // 2026-10-05: the +/- Modifier's mark appeared while the camera was still panning).
+        if (!_ui.Moments.Busy && !TableArriving) _teaching.DrainCoachMarks();
     }
 
     // ------------------------------------------------------------------
@@ -479,6 +508,10 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
     bool ITableHost.TutorialStaged => _teaching.Staged;
     IReadOnlyList<int> ITableHost.TutorialOpening => Teaching.Opening;
     IReadOnlyList<int> ITableHost.TutorialModifiers => Teaching.Modifiers;
+    bool ITableHost.TutorialOverLesson => _teaching.OverLessonPending;
+    IReadOnlyList<int> ITableHost.TutorialOverDraws => Teaching.OverLessonDraws;
+    bool ITableHost.TutorialFlipLesson => _teaching.FlipLessonMatch;
+    IReadOnlyList<int> ITableHost.TutorialFlipDraws => Table.FlipLessonDraws(_gameState.TargetScore);
 
     List<CardEffect> ITableHost.UnlockedLocalSpecials() => Menus.UnlockedLocalSpecials();
     void ITableHost.DealBotHand() => _bot.DealHand();
@@ -536,6 +569,12 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
     async Task<bool> IBotTable.Pause(double seconds)
     {
         await ToSignal(GetTree().CreateTimer(seconds), SceneTreeTimer.SignalName.Timeout);
+        // The bot does not act half way through a big moment (yours or its own): it waits for
+        // the picture to catch up, as you have to.
+        // Nor while a coach mark is explaining a card: the player is reading, not playing
+        // (2026-10-06: the bot held under a Copy coach mark).
+        while (IsInsideTree() && (_ui.Moments.Busy || _teaching.CoachShowing))
+            await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
         return IsInsideTree(); // false: the scene was restarted or exited while it waited
     }
 
@@ -558,6 +597,11 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
     /// card burning, the effect card landing, any redrawn faces, the banner and the coach mark.
     private bool PlayEffectCard(Player owner, Card card, Card chosen = null)
     {
+        // The numbers as they were, for the moments that tick a score over on impact.
+        Player opponent = _table.OpponentOf(owner);
+        int ownerBefore = owner.CurrentScore;
+        int opponentBefore = opponent.CurrentScore;
+
         if (!_table.TryPlayEffect(owner, card, chosen, out Table.EffectPlay play)) return false;
         Player target = play.Target;
 
@@ -568,20 +612,42 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
 
         _ui.InstantiateCardView(card, BoardOf(play.BoardOwner));
 
+        // The big moments (2026-10-05). The model has already changed; these catch the picture up
+        // - and until they finish, ResolveTurn waits and the bot pauses (TableMoments.Busy).
+        switch (card.Effect)
+        {
+            case CardEffect.Shave:
+                _ui.PlayShave(target, opponentBefore);
+                break;
+
+            case CardEffect.TradeTotals:
+                _ui.PlayTradeTotals(owner, ownerBefore, target, opponentBefore);
+                break;
+
+            case CardEffect.TradeHands:
+                // Taken now: the hands on screen still hold the old cards (the played one already
+                // lifted out); the refresh below rebuilds them traded, hidden until the fans land.
+                _ui.PlayTradeHands(_ui.SnapshotHands());
+                break;
+        }
+
         // A card that rewrote a drawn card mutated a Card object that is already face-up on a
-        // board. Without this the board still reads 10 while the score has been paid at 2, which
-        // is the one thing a card called Copy cannot afford to get wrong.
+        // board. Without a redraw the board still reads 10 while the score has been paid at 2,
+        // which is the one thing a card called Copy cannot afford to get wrong - so the card flips
+        // into its new face, and the score ticks over while it is edge-on.
         if (CardEffects.RewritesDrawnCards(card.Effect))
         {
-            _ui.RefreshCardFace(owner.LastDrawnCard, BoardOf(owner));
-            _ui.RefreshCardFace(target.LastDrawnCard, BoardOf(target));
+            _ui.PlayCopy(owner, ownerBefore, target, BoardOf(owner), BoardOf(target));
+            _ui.RefreshCardFace(CardEffects.CopySource(target), BoardOf(target));
         }
 
         _ui.Toasts.ShowEffectBanner(play.Result.Narration); // the player has to SEE it
 
         // The ladder's promise, kept: you meet a card when it is used on you, and the game says
         // once what it was. Only the bot's cards - your own were introduced when you were dealt them.
-        if (owner == _player2) _teaching.QueueCoachMark(card, fromOpponent: true);
+        // Against the bot only: local 2-player has a person in the room to explain (and the
+        // harness pass of 2026-10-05 caught Player 2's cards raising coach marks there).
+        if (owner == _player2 && _isVsBot) _teaching.QueueCoachMark(card, fromOpponent: true);
         _ui.Refresh();
 
         // A re-opened BOT has to be sent round again: ResolveTurn refuses to move while either
@@ -746,7 +812,8 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
             setInfo.AddThemeFontSizeOverride("font_size", TableUi.SetInfoFont); // back from the big target
             setInfo.Visible = true; // hidden while it had nothing to say (TableUi.Refresh)
         }
-        _prompts.ShowSetEnd(title, matchOver ? string.Empty : why, buttonText, next, secondText, second);
+        // Title only (playtest, 2026-10-07: "remove the reasoning") - the scores are on the table.
+        _prompts.ShowSetEnd(title, string.Empty, buttonText, next, secondText, second);
     }
 
     private string RunHeader()
@@ -756,7 +823,7 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
         // Alexander, 2026-09-30: the middle of the table shows the TARGET, not the stage - "if it's
         // 20, just say 20". The stage is announced once, by the slide-in at the start of the match.
         int target = _gameState.TargetScore;
-        return target == 20 ? "20" : $"Target {target}";
+        return target == 20 ? "20" : $"Target\u00A0{target}"; // never wrapped as "Targe" / "t 23"
     }
 
     /// Drops the run one rung either way and walks straight into that match (the debug row).
@@ -780,11 +847,11 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
         // but it is the same scene now, so they are built either way and simply never opened.
 
         _shopOverlay = new ShopOverlay();
-        AddChild(_shopOverlay);
+        OverlayUi.Host(this).AddChild(_shopOverlay);
         _shopOverlay.Setup(_ui.Cards.CreateCardView);
 
         _deckOverlay = new DeckOverlay();
-        AddChild(_deckOverlay);
+        OverlayUi.Host(this).AddChild(_deckOverlay);
         _deckOverlay.Setup(_ui.Cards.CreateCardView);
     }
 
@@ -798,10 +865,9 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
             return;
         }
 
-        // The deck screen works in smaller cards than the table: twelve slots and a collection
-        // have to fit side by side on a phone in portrait.
-        Vector2 deckCardSize = _ui.CardSize * 0.7f;
-        _shopOverlay.Open(_ui.CardSize, () => _deckOverlay.Open(deckCardSize, StartNextMatch));
+        // The deck screen is full screen and sizes its own cards to the room it has; the table's
+        // card size only gives it the aspect and the limits.
+        _shopOverlay.Open(_ui.CardSize, () => _deckOverlay.Open(_ui.CardSize, StartNextMatch));
     }
 
     /// Reloading the scene is what resets the board, the scores and the set wins (the same path

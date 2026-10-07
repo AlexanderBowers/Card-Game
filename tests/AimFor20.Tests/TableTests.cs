@@ -15,6 +15,10 @@ internal sealed class FakeTableHost : ITableHost
     public bool LocalSpecials { get; set; }
     public bool TutorialStaged { get; set; }
     public IReadOnlyList<int> TutorialOpening { get; set; } = Array.Empty<int>();
+    public bool TutorialOverLesson { get; set; }
+    public bool TutorialFlipLesson { get; set; }
+    public IReadOnlyList<int> TutorialFlipDraws { get; set; } = Array.Empty<int>();
+    public IReadOnlyList<int> TutorialOverDraws { get; set; } = Array.Empty<int>();
     public IReadOnlyList<int> TutorialModifiers { get; set; } = Array.Empty<int>();
     public List<CardEffect> LocalSpecialsUnlocked { get; set; } = new List<CardEffect>();
 
@@ -149,6 +153,41 @@ public class TableTests
     }
 
     [Fact]
+    public void The_over_lesson_deals_you_ten_one_ten_in_the_second_set()
+    {
+        var host = new FakeTableHost
+        {
+            TutorialOverLesson = true,
+            TutorialOverDraws = new[] { 10, 1, 10 },
+        };
+        host.State.SetsWonPlayer1 = 1; // not the first set
+        var table = new Table(host);
+        table.StartSet();
+        table.DealTurn();
+        table.DealTurn();
+        table.DealTurn();
+
+        Assert.Equal(new[] { 10, 1, 10 }, host.Player1.ActiveCardsOnBoard.Select(c => c.Value).Take(3));
+        Assert.Equal(40 - host.Player1.ActiveCardsOnBoard.Count, table.Remaining(host.Player1));
+    }
+
+    [Fact]
+    public void The_flip_lesson_takes_you_one_over_the_target_in_the_first_set()
+    {
+        Assert.Equal(new[] { 10, 1, 10 }, Table.FlipLessonDraws(20));
+        Assert.Equal(24, Table.FlipLessonDraws(23).Sum());
+        Assert.Empty(Table.FlipLessonDraws(18)); // one-card opening: nothing clean to stack
+
+        var host = new FakeTableHost { TutorialFlipLesson = true, TutorialFlipDraws = Table.FlipLessonDraws(20) };
+        var table = new Table(host);
+        table.StartSet();
+        table.DealTurn();
+        table.DealTurn();
+        Assert.Equal(new[] { 10, 1, 10 }, host.Player1.ActiveCardsOnBoard.Select(c => c.Value));
+        Assert.Equal(21, host.Player1.CurrentScore);
+    }
+
+    [Fact]
     public void A_runless_match_deals_a_plain_four_card_hand_and_lets_the_bot_build_its_own()
     {
         var (host, table) = NewTable();
@@ -262,7 +301,7 @@ public class TableWordingTests
     {
         SetRules.Outcome o = SetRules.Describe("You", 22, "Them", 17, 20);
         Assert.Equal(2, o.Winner);
-        Assert.Equal("Them wins the set!", o.Title);
+        Assert.Equal("Them won the set!", o.Title);
         Assert.StartsWith("You busted: 22 is over the target of 20.", o.Why);
         Assert.Equal("Next Set", o.ButtonText);
     }
@@ -273,7 +312,16 @@ public class TableWordingTests
         SetRules.Outcome o = SetRules.Describe("You", 19, "Them", 17, 20);
         Assert.Equal(1, o.Winner);
         Assert.Contains("Both players held.", o.Why);
-        Assert.EndsWith("You is closest to 20.", o.Why);
+        Assert.EndsWith("You are closest to 20.", o.Why);
+        Assert.Equal("You won the set!", o.Title);
+    }
+
+    [Fact]
+    public void An_opponent_by_name_still_reads_in_the_third_person()
+    {
+        SetRules.Outcome o = SetRules.Describe("You", 15, "Gold Champion", 18, 20);
+        Assert.EndsWith("Gold Champion is closest to 20.", o.Why);
+        Assert.Equal("Gold Champion won the set!", o.Title);
     }
 
     [Fact]

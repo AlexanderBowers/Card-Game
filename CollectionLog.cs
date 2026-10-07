@@ -2,8 +2,8 @@ using System;
 using System.Collections.Generic;
 
 /// The collection log's fixed shape (playtest-feedback-family.md §5.2): which entries exist, in
-/// what order, and how a card maps to its entry. Which entries THIS player has found is profile
-/// state, and lives in RunData.CardsMet.
+/// what order, and how a card maps to its entry. Which entries THIS player has is profile state:
+/// the cards they own (RunData.Inventory, via RunData.OwnsCard - 2026-10-05; it used to be CardsMet).
 ///
 /// Read straight from CardsMet - the same set the coach-marks use, so an effect card is "met"
 /// on exactly the occasion the game explained it. Plain and flip-value Modifiers need no

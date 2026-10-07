@@ -147,16 +147,19 @@ public static class CardEffects
             case CardEffect.None:
                 return true;
 
-            // Both players must have drawn this turn - there has to be a card of mine to rewrite
-            // and a card of theirs to rewrite it with. A holding player does not draw
-            // (DrawCardFor returns early), so "neither of us is holding" falls out for free.
+            // I must have drawn this turn - there has to be a card of mine to rewrite. Theirs is
+            // the card they drew this turn or, when they are holding, the last card they drew
+            // before they locked in (playtest, 2026-10-07: Copy never touches the opponent, so a
+            // hold has no reason to block it). See CopySource.
             //
             // And the two cards have to actually DIFFER. Copying a 5 onto a 5 spends the card to
             // change nothing, which is the one outcome no player ever means to buy.
             case CardEffect.Copy:
-                return !self.IsHolding && !opponent.IsHolding
-                    && self.LastDrawnCard != null && opponent.LastDrawnCard != null
-                    && self.LastDrawnCard.Value != opponent.LastDrawnCard.Value;
+            {
+                Card source = CopySource(opponent);
+                return !self.IsHolding && self.LastDrawnCard != null && source != null
+                    && self.LastDrawnCard.Value != source.Value;
+            }
 
             // A held score is locked in. TradeTotals cannot take it.
             case CardEffect.TradeTotals:
@@ -212,10 +215,9 @@ public static class CardEffects
         {
             case CardEffect.Copy:
                 if (self.IsHolding) return "You are holding, so you did not draw a card to replace.";
-                if (opponent.IsHolding) return $"{them} is holding, so they have no card this turn to copy.";
-                if (self.LastDrawnCard == null || opponent.LastDrawnCard == null)
-                    return "Copy needs a freshly drawn card on both sides of the table.";
-                return $"You both drew a {self.LastDrawnCard.Value} - copying it would change nothing.";
+                if (self.LastDrawnCard == null) return "Copy needs a card you drew this turn.";
+                if (CopySource(opponent) == null) return $"{them} has no drawn card on the table to copy.";
+                return $"Their card is a {self.LastDrawnCard.Value} too - copying it would change nothing.";
 
             case CardEffect.TradeTotals:
                 return $"{them} is holding - a locked score cannot be traded away.";
@@ -268,6 +270,19 @@ public static class CardEffects
             : string.Empty;
     }
 
+    /// The card Copy takes its number from: what they drew this turn, or - when they are holding
+    /// and drew nothing - the last card they drew before they held (the latest deck card on their
+    /// board). Null when they have nothing on the table to copy.
+    public static Card CopySource(Player opponent)
+    {
+        if (opponent == null) return null;
+        if (opponent.LastDrawnCard != null) return opponent.LastDrawnCard;
+        if (!opponent.IsHolding) return null; // still drawing: wait for this turn's card
+        for (int i = opponent.ActiveCardsOnBoard.Count - 1; i >= 0; i--)
+            if (opponent.ActiveCardsOnBoard[i].Type == CardType.Main) return opponent.ActiveCardsOnBoard[i];
+        return null;
+    }
+
     /// One line for the market: what the card does, before the player has ever been hit with it.
     public static string Description(CardEffect effect)
     {
@@ -304,7 +319,7 @@ public static class CardEffects
             case CardEffect.Copy:
             {
                 Card mine = self.LastDrawnCard;
-                Card theirs = opponent.LastDrawnCard;
+                Card theirs = CopySource(opponent);
                 if (mine == null || theirs == null) return EffectResult.Nothing;
 
                 int wasCard = mine.Value;
@@ -318,7 +333,7 @@ public static class CardEffects
                 self.CurrentScore += nowCard - wasCard;
 
                 return new EffectResult(true, false,
-                    $"{self.PlayerName} plays Copy - their {nowCard} replaces the {wasCard}. {self.PlayerName}: {wasScore} to {self.CurrentScore}");
+                    $"{Speech.Does(self.PlayerName, "plays", "play")} Copy - their {nowCard} replaces the {wasCard}. {self.PlayerName}: {wasScore} to {self.CurrentScore}");
             }
 
             case CardEffect.TradeTotals:
@@ -329,7 +344,7 @@ public static class CardEffects
                 opponent.CurrentScore = mine;
 
                 return new EffectResult(true, true,
-                    $"{self.PlayerName} plays Trade Totals - {mine} and {theirs} change places");
+                    $"{Speech.Does(self.PlayerName, "plays", "play")} Trade Totals - {mine} and {theirs} change places");
             }
 
             case CardEffect.Shave:
@@ -340,7 +355,7 @@ public static class CardEffects
                 // Deliberately does NOT re-open the target: they are holding, and this is the one
                 // card in the game they cannot answer.
                 return new EffectResult(true, false,
-                    $"{self.PlayerName} plays Shave - {opponent.PlayerName} is locked at {before}, now {opponent.CurrentScore}");
+                    $"{Speech.Does(self.PlayerName, "plays", "play")} Shave - {Speech.Is(opponent.PlayerName)} locked at {before}, now {opponent.CurrentScore}");
             }
 
             case CardEffect.TradeHands:
@@ -355,7 +370,7 @@ public static class CardEffects
                 opponent.Modifiers.AddRange(mine);
 
                 return new EffectResult(true, true,
-                    $"{self.PlayerName} plays Trade Hands - takes {self.Modifiers.Count}, gives {opponent.Modifiers.Count}");
+                    $"{Speech.Does(self.PlayerName, "plays", "play")} Trade Hands - takes {self.Modifiers.Count}, gives {opponent.Modifiers.Count}");
             }
 
             case CardEffect.Recall:
@@ -373,7 +388,7 @@ public static class CardEffects
                 // and its points are still on the board; Recall returns the card, not the points.
                 // The caller locks it out of this turn - see GameManager's recalled-card lock.
                 return new EffectResult(true, false,
-                    $"{self.PlayerName} plays Recall - takes back a {(chosen.Value > 0 ? "+" : "")}{chosen.Value}");
+                    $"{Speech.Does(self.PlayerName, "plays", "play")} Recall - takes back a {(chosen.Value > 0 ? "+" : "")}{chosen.Value}");
             }
 
             case CardEffect.Veto:
@@ -396,9 +411,9 @@ public static class CardEffects
                 bool wasHolding = opponent.IsHolding;
 
                 return new EffectResult(true, true,
-                    $"{self.PlayerName} plays Veto - destroys {opponent.PlayerName}'s {(theirs.Value > 0 ? "+" : "")}{theirs.Value}. " +
+                    $"{Speech.Does(self.PlayerName, "plays", "play")} Veto - destroys {Speech.Possessive(opponent.PlayerName)} {(theirs.Value > 0 ? "+" : "")}{theirs.Value}. " +
                     $"{opponent.PlayerName}: {before} back to {opponent.CurrentScore}" +
-                    (wasHolding ? " - and they are no longer holding" : ""),
+                    (wasHolding ? (Speech.IsYou(opponent.PlayerName) ? " - and you are no longer holding" : " - and they are no longer holding") : ""),
                     releasesHold: true);
             }
         }

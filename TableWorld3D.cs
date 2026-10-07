@@ -206,6 +206,9 @@ public partial class TableWorld3D : Node3D
     /// Whether a match start should play the swing-in (the 3D table is on).
     public bool CanSwing => _active;
 
+    /// The camera is still sweeping in (coach marks wait for it to land).
+    public bool Swinging => _active && _swing < 1f;
+
     /// The camera sweeps in from high and to the side and settles on the table. The 2D layer
     /// (hands, buttons, scores) fades in once it lands; `done` runs then.
     public void SwingIn(Action done)
@@ -340,6 +343,30 @@ public partial class TableWorld3D : Node3D
         if (!_active || GameSettings.BatterySaver) return;
         _shake = ShakeSeconds;
         _shakeStrength = Mathf.Max(_shakeStrength * (_shake / ShakeSeconds), strength);
+    }
+
+    /// Where a flat 2D layout control (a board, which is not mirrored as one piece) lies on the 3D
+    /// table, as its four corners on screen - top-left, top-right, bottom-right, bottom-left. In
+    /// perspective that is a trapezoid, not a rectangle (playtest, 2026-10-07: the Hold glow was a
+    /// flat rectangle over a tilted board and "doesn't give the sense of depth").
+    public bool TryScreenQuad(Control control, out Vector2[] quad)
+    {
+        quad = null;
+        if (!_active || !Visible || control == null || _camera == null || !control.IsInsideTree()) return false;
+
+        Vector2 view = control.GetViewportRect().Size;
+        Transform2D xf = control.GetGlobalTransform();
+        Vector2 s = control.Size;
+        Vector2[] corners = { Vector2.Zero, new Vector2(s.X, 0f), s, new Vector2(0f, s.Y) };
+        quad = new Vector2[4];
+        for (int i = 0; i < 4; i++)
+        {
+            Vector2 p = xf * corners[i];
+            Vector3 world = new Vector3((p.X - view.X / 2f) / PixelsPerUnit, 0.006f, (p.Y - view.Y / 2f) / PixelsPerUnit);
+            if (_camera.IsPositionBehind(world)) { quad = null; return false; }
+            quad[i] = _camera.UnprojectPosition(world);
+        }
+        return true;
     }
 
     /// Where a 2D piece the table draws in 3D actually appears on screen - its 3D quad's corners

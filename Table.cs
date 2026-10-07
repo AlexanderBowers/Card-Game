@@ -27,6 +27,18 @@ public interface ITableHost
     IReadOnlyList<int> TutorialOpening { get; }
     IReadOnlyList<int> TutorialModifiers { get; }
 
+    /// The tutorial's second lesson (2026-10-06): going over is not a bust while you can still play
+    /// a minus card. While it is waiting to be shown, every set after the first stacks Player 1's
+    /// first draws (TutorialOverDraws, in draw order: 10 and 1 on the opening deal, then 10 = 21).
+    bool TutorialOverLesson { get; }
+    IReadOnlyList<int> TutorialOverDraws { get; }
+
+    /// The flip lesson's match (after the first Market visit put a +/-1 in the deck): the hand is
+    /// sure to hold a +/-1, and the first set is stacked so Player 1 reaches one over the target
+    /// (TutorialFlipDraws, in draw order; empty when the target leaves no clean way to stack it).
+    bool TutorialFlipLesson { get; }
+    IReadOnlyList<int> TutorialFlipDraws { get; }
+
     /// The specials a local 2-player hand may be dealt: only the ones met in single player.
     List<CardEffect> UnlockedLocalSpecials();
 
@@ -246,7 +258,7 @@ public sealed class Table
             case CardEffect.Copy:
             {
                 int mine = player.LastDrawnCard?.Value ?? 0;
-                int theirs = other.LastDrawnCard?.Value ?? 0;
+                int theirs = CardEffects.CopySource(other)?.Value ?? 0;
                 int after = player.CurrentScore - mine + theirs;
                 return $"Your {mine} becomes a {theirs}: {player.CurrentScore} to {after}";
             }
@@ -334,6 +346,26 @@ public sealed class Table
                 deck.Add(opening[i]);
             }
         }
+        else if (_host.TutorialOverLesson && !_host.State.IsFirstSet)
+        {
+            // The second lesson's set: Player 1 draws off the END of their own pile, so the first
+            // draw is appended last. Removed first, so the deck still holds four of every value.
+            IReadOnlyList<int> draws = _host.TutorialOverDraws;
+            for (int i = draws.Count - 1; i >= 0; i--)
+            {
+                _p1Deck.Remove(draws[i]);
+                _p1Deck.Add(draws[i]);
+            }
+        }
+        else if (_host.TutorialFlipLesson && _host.State.IsFirstSet)
+        {
+            IReadOnlyList<int> draws = _host.TutorialFlipDraws;
+            for (int i = draws.Count - 1; i >= 0; i--)
+            {
+                _p1Deck.Remove(draws[i]);
+                _p1Deck.Add(draws[i]);
+            }
+        }
     }
 
     private void ShuffleDeck(List<int> deck)
@@ -372,6 +404,9 @@ public sealed class Table
     private void SteerTopCard(Player owner, List<int> deck, bool opening)
     {
         if (_host.TutorialStaged && _host.State.IsFirstSet) return; // the staged opening is the lesson
+        if (owner == P1 && _host.TutorialOverLesson) return;        // ...and so is the second lesson's
+        if (owner == P1 && _host.TutorialFlipLesson && _host.State.IsFirstSet
+            && _host.TutorialFlipDraws.Count > 0) return;          // ...and the flip lesson's
 
         int target = _host.State.TargetScore;
         int? pick = null;
@@ -412,6 +447,7 @@ public sealed class Table
         {
             P1.Modifiers.Clear();
             P1.Modifiers.AddRange(runModifiers);
+            if (_host.TutorialFlipLesson) EnsureFlipCard(P1);
         }
         else
         {
@@ -426,6 +462,28 @@ public sealed class Table
 
         _host.DealBotHand();
         _host.HandsDealt(introduceCards: true);
+    }
+
+    /// Player 1's first draws in the flip lesson's first set: the opening pair, then one more,
+    /// landing exactly one over the target. Needs the two-card opening (target 20 or more).
+    public static IReadOnlyList<int> FlipLessonDraws(int target) =>
+        target >= OpeningDoubleDealTarget && target <= 29 ? new[] { 10, target - 19, 10 } : Array.Empty<int>();
+
+    /// The flip lesson needs a +/-1 in the hand. Four of twelve are dealt at random, so when the
+    /// draw missed it, the smallest plain plus card makes way for it.
+    private static void EnsureFlipCard(Player player)
+    {
+        if (player.Modifiers.Count == 0) return;
+        if (player.Modifiers.Exists(c => c.CanFlipValue && c.Effect == CardEffect.None)) return;
+        int at = 0;
+        for (int i = 0; i < player.Modifiers.Count; i++)
+        {
+            Card c = player.Modifiers[i];
+            if (c.Effect != CardEffect.None || c.Value <= 0) continue;
+            Card best = player.Modifiers[at];
+            if (best.Effect != CardEffect.None || best.Value <= 0 || c.Value < best.Value) at = i;
+        }
+        player.Modifiers[at] = new ModifierDef(1, canFlipValue: true).ToCard();
     }
 
     /// Local 2-player with specials on: one of the four cards becomes a random finished special

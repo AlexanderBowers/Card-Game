@@ -55,6 +55,29 @@ public partial class RunData
     /// has changed a great deal since they last read anything about it.
     public bool TutorialSeen { get; private set; }
 
+    /// The first Market visit has been walked through: what medals are, what a price is, buying
+    /// the guaranteed +/-1 and putting it in the deck (playtest, 2026-10-07: "the first time a
+    /// player encounters the Modifier Shop can be confusing"). Profile level, like TutorialSeen.
+    public bool MarketLessonSeen { get; private set; }
+
+    /// The Market lesson put a +/-1 in the deck, and the table has not yet shown how to flip it.
+    /// Saved, because the next match is a scene reload away.
+    public bool FlipLessonPending { get; private set; }
+
+    public void CompleteMarketLesson(bool flipCardInDeck)
+    {
+        MarketLessonSeen = true;
+        FlipLessonPending = flipCardInDeck;
+        Save();
+    }
+
+    public void CompleteFlipLesson()
+    {
+        if (!FlipLessonPending) return;
+        FlipLessonPending = false;
+        Save();
+    }
+
     /// Set by the deck screen just before the table scene is reloaded for the next rung, so the player
     /// walks straight into the match instead of landing back on a Start button. Deliberately not
     /// saved: it is about this reload, not about the run. (This object survives the reload.)
@@ -120,7 +143,20 @@ public partial class RunData
         return MarkCardMet(CollectionLog.Key(card));
     }
 
-    public int CollectionFound => CollectionLog.Found(CardsMet);
+    /// The collection log counts what you OWN - a card in your collection (Inventory), bought or
+    /// starter - not every card you have merely met (Alexander, 2026-10-05). CardsMet still drives
+    /// the coach-marks: being shown a card and owning one are different things.
+    public bool OwnsCard(string key) => key != null && Inventory.Exists(def => def.LogKey == key);
+
+    public int CollectionFound
+    {
+        get
+        {
+            HashSet<string> owned = new HashSet<string>();
+            foreach (ModifierDef def in Inventory) if (def.LogKey != null) owned.Add(def.LogKey);
+            return CollectionLog.Found(owned);
+        }
+    }
 
     public bool CollectionComplete => CollectionFound == CollectionLog.Keys.Length;
 
@@ -253,15 +289,19 @@ public partial class RunData
     public List<CardEffect> CurrentRolledEffects =>
         (CurrentStep.Randomised && RolledStep == StepIndex) ? RolledEffects : null;
 
-    /// "Rules: Copy + Shave" for the finale (and every endless match), after the prefix; empty on
-    /// any other rung.
+    /// "Opponent's specials: Copy + Shave" for the finale (and every endless match), after the
+    /// prefix; empty on any other rung.
+    ///
+    /// It said "Rules: Copy + Shave" until a tester asked what those rules were (2026-10-06). They
+    /// are not rules at all: they are the special Modifiers the opponent carries this match, so the
+    /// line says exactly that. Each card is still explained by its coach mark when it is played.
     public string FinaleRulesLine(string prefix)
     {
         List<CardEffect> rolled = CurrentRolledEffects;
         if (rolled == null || rolled.Count == 0) return string.Empty;
         List<string> names = new List<string>();
         foreach (CardEffect effect in rolled) names.Add(CardEffects.Label(effect));
-        return $"{prefix}Rules: {string.Join(" + ", names)}";
+        return $"{prefix}Opponent's specials: {string.Join(" + ", names)}";
     }
 
     /// Rolls the current rung's rules if it is randomised and has not been rolled. Safe to call
@@ -341,6 +381,10 @@ public partial class RunData
     public void ReplayTutorial()
     {
         TutorialSeen = false;
+        // Replaying the tutorial replays all of it (playtest, 2026-10-07): the next Modifier Shop
+        // visit teaches medals and the +/-1 again, and the match after it the flip.
+        MarketLessonSeen = false;
+        FlipLessonPending = false;
         Save();
     }
 
@@ -512,10 +556,11 @@ public partial class RunData
     /// because the collection is append-only (there is no selling).
     public int AddToInventory(ModifierDef def)
     {
+        // Owning is what fills the collection log now, so completion is decided here.
+        bool wasComplete = CollectionComplete;
         Inventory.Add(def);
         // Bought is met. For an effect card that is already true - the market only sells a card
         // you have been shown - so this never skips an explanation.
-        bool wasComplete = CollectionComplete;
         CardsMet.Add(def.LogKey);
         if (!wasComplete && CollectionComplete) CollectorBack = true;
         Save();
@@ -604,6 +649,8 @@ public partial class RunData
         MatchRescueUsed = false;
         ClearRuleset();
         TutorialSeen = false; // a wiped save IS a first launch, tutorial included
+        MarketLessonSeen = false;
+        FlipLessonPending = false;
         CardsMet.Clear();
         CollectorBack = false;
         Inventory.Clear();

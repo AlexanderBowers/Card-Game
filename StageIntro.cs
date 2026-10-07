@@ -11,12 +11,22 @@ public static class StageIntro
     private const float Hold = 1.0f;
     private const float SlideOut = 0.4f;
 
-    public static void Play(Node root, string title, string subtitle)
+    /// Banners on screen right now (GameManager holds coach marks back while one crosses).
+    public static int Playing { get; private set; }
+
+    /// `finished` runs once the banner has gone (or at once, if it could not be shown).
+    public static void Play(Node root, string title, string subtitle, System.Action finished = null)
     {
-        if (root == null || !root.IsInsideTree()) return;
+        if (root == null || !root.IsInsideTree())
+        {
+            finished?.Invoke();
+            return;
+        }
 
         Control layer = new Control { MouseFilter = Control.MouseFilterEnum.Ignore };
         root.AddChild(layer);
+        Playing++;
+        layer.TreeExiting += () => Playing = System.Math.Max(0, Playing - 1); // freed, or the scene left
         layer.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
 
         PanelContainer panel = new PanelContainer { MouseFilter = Control.MouseFilterEnum.Ignore };
@@ -27,7 +37,14 @@ public static class StageIntro
         box.AddThemeConstantOverride("separation", 4);
         panel.AddChild(box);
         box.AddChild(OverlayUi.MakeLabel(title, 64));
-        if (!string.IsNullOrEmpty(subtitle)) box.AddChild(OverlayUi.MakeLabel(subtitle, 36));
+        if (!string.IsNullOrEmpty(subtitle))
+        {
+            // The first line is the target; any line after it (the finale's and endless's
+            // "Opponent's specials: ...") is smaller, so three card names still fit a phone.
+            string[] lines = subtitle.Split('\n', 2);
+            box.AddChild(OverlayUi.MakeLabel(lines[0], 36));
+            if (lines.Length > 1) box.AddChild(OverlayUi.MakeLabel(lines[1], 24, OverlayUi.Muted));
+        }
 
         Vector2 view = layer.GetViewport().GetVisibleRect().Size;
         Vector2 size = panel.GetCombinedMinimumSize();
@@ -44,6 +61,10 @@ public static class StageIntro
         tween.TweenInterval(Hold);
         tween.TweenProperty(panel, "position:x", view.X + 40f, SlideOut)
              .SetTrans(Tween.TransitionType.Cubic).SetEase(Tween.EaseType.In);
-        tween.TweenCallback(Callable.From(layer.QueueFree));
+        tween.TweenCallback(Callable.From(() =>
+        {
+            layer.QueueFree();
+            finished?.Invoke();
+        }));
     }
 }

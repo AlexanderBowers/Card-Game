@@ -117,7 +117,7 @@ public sealed class Prompts
         if (_rescueOverlay == null)
         {
             _rescueOverlay = new Control { MouseFilter = Control.MouseFilterEnum.Stop };
-            _root.AddChild(_rescueOverlay);
+            OverlayUi.Host(_root).AddChild(_rescueOverlay);
             _rescueOverlay.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
             OverlayUi.AddDim(_rescueOverlay);
             _rescueBox = OverlayUi.AddPanel(_rescueOverlay);
@@ -154,7 +154,7 @@ public sealed class Prompts
                 adReady ? 40 : 48, GiveRandomRescue);
         }
 
-        _root.MoveChild(_rescueOverlay, _root.GetChildCount() - 1);
+        OverlayUi.BringToFront(_rescueOverlay);
         _rescueOverlay.Visible = true;
         _ui.Refresh();
         return true;
@@ -238,7 +238,7 @@ public sealed class Prompts
         if (_recallOverlay == null)
         {
             _recallOverlay = new Control { MouseFilter = Control.MouseFilterEnum.Stop };
-            _root.AddChild(_recallOverlay); // scene root, after GameUI, so it draws and takes input on top
+            OverlayUi.Host(_root).AddChild(_recallOverlay); // scene root, after GameUI, so it draws and takes input on top
             _recallOverlay.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
             OverlayUi.AddDim(_recallOverlay);
             _recallBox = OverlayUi.AddPanel(_recallOverlay);
@@ -358,7 +358,7 @@ public sealed class Prompts
     public void BuildSetEndOverlay()
     {
         _setEndOverlay = new Control { Visible = false, MouseFilter = Control.MouseFilterEnum.Stop };
-        _root.AddChild(_setEndOverlay); // on the scene root, after GameUI, so it draws (and gets input) on top
+        OverlayUi.Host(_root).AddChild(_setEndOverlay); // on the scene root, after GameUI, so it draws (and gets input) on top
         _setEndOverlay.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
 
         ColorRect dim = new ColorRect { Color = OverlayUi.DimColor, MouseFilter = Control.MouseFilterEnum.Ignore };
@@ -455,7 +455,7 @@ public sealed class Prompts
 
         // Make it visible first: minimum sizes are only reliable for nodes visible in the tree,
         // and everything below resolves in the same frame before it is drawn.
-        _root.MoveChild(_setEndOverlay, _root.GetChildCount() - 1); // above any stray animation card
+        OverlayUi.BringToFront(_setEndOverlay); // above any stray animation card
         _setEndOverlay.Visible = true;
 
         _setEndTitle.Text = title;
@@ -485,7 +485,7 @@ public sealed class Prompts
         // One column width for every line, so both copies are the same block and each line is
         // centred in it. The body is a sentence, and at this size a long one would otherwise push
         // the panel wider than the phone, so it wraps instead.
-        float wrap = Mathf.Clamp(_root.GetViewport().GetVisibleRect().Size.X * 0.78f, 340f, 620f);
+        float wrap = Mathf.Clamp(OverlayUi.HostSize(_root).X * 0.78f, 340f, 620f);
         foreach (Label heading in new[] { _setEndTitle, _setEndFlippedTitle })
         {
             heading.AddThemeFontSizeOverride("font_size", titleFont);

@@ -28,7 +28,7 @@ public static class SetRules
     public readonly struct Outcome
     {
         public readonly int Winner;        // 1, 2, or 0 for a tie
-        public readonly string Title;      // "<name> wins the set!" / "The set is a tie"
+        public readonly string Title;      // "<name> won the set!" / "The set is a tie"
         public readonly string Why;        // why it ended, and what that means
         public readonly string ButtonText; // "Next Set" / "Replay Set"
 
@@ -63,7 +63,8 @@ public static class SetRules
             return new Outcome(0, "The set is a tie", why + "\nSame score, so the set is replayed.", "Replay Set");
 
         string winnerName = winner == 1 ? p1Name : p2Name;
-        if (!p1Bust && !p2Bust) why += $"\n{winnerName} is closest to {target}.";
-        return new Outcome(winner, $"{winnerName} wins the set!", why, "Next Set");
+        if (!p1Bust && !p2Bust) why += $"\n{Speech.Is(winnerName)} closest to {target}.";
+        // Playtest, 2026-10-07: the panel says who took it and nothing more ("You won the set!").
+        return new Outcome(winner, $"{winnerName} won the set!", why, "Next Set");
     }
 }

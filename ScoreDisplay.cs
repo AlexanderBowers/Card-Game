@@ -30,6 +30,48 @@ public sealed class ScoreDisplay
     private bool IsMirrored => _ui.IsMirrored;
     private void Show(Control c, bool show) => _ui.Show(c, show);
 
+    // ------------------------------------------------------------------
+    // The number a score box SHOWS (2026-10-05). An effect is resolved in the model first and
+    // the animation catches the picture up, so for the length of a Shave or a Copy the box keeps
+    // showing the old number and ticks over at the moment of impact (TableMoments).
+    // ------------------------------------------------------------------
+    private readonly Dictionary<Player, int> _shownOverride = new Dictionary<Player, int>();
+
+    private int Shown(Player player) =>
+        player != null && _shownOverride.TryGetValue(player, out int value) ? value : player?.CurrentScore ?? 0;
+
+    /// Keep showing `value` for this player until ReleaseShown.
+    public void HoldShown(Player player, int value)
+    {
+        if (player != null) _shownOverride[player] = value;
+    }
+
+    /// Show the real score again, now.
+    public void ReleaseShown(Player player)
+    {
+        if (player == null || !_shownOverride.Remove(player)) return;
+        RefreshScoreLines();
+        RefreshBoxes();
+    }
+
+    public void ReleaseAllShown()
+    {
+        if (_shownOverride.Count == 0) return;
+        _shownOverride.Clear();
+        RefreshScoreLines();
+        RefreshBoxes();
+    }
+
+    /// The box holding this player's own score, and its padlock (for the animations to aim at).
+    public Control ScoreBoxOf(Player player) => player == P1 ? L?.P1ScoreBox : player == P2 ? L?.P2ScoreBox : null;
+
+    public Control PadlockOf(Player player)
+    {
+        Control box = ScoreBoxOf(player);
+        return box != null && _holdLocks.TryGetValue(box, out Control lockNode) && GodotObject.IsInstanceValid(lockNode)
+            ? lockNode : null;
+    }
+
     /// A freshly bound layout: forget the old one's boxes and locks, and set up its badges.
     public void Bind()
     {
@@ -93,8 +135,8 @@ public sealed class ScoreDisplay
     /// left empty there rather than repeating your score across the table.
     private void RefreshOpponentLines()
     {
-        string p1 = _host.GameStarted ? P1.CurrentScore.ToString() : "-";
-        string p2 = _host.GameStarted ? P2.CurrentScore.ToString() : "-";
+        string p1 = _host.GameStarted ? Shown(P1).ToString() : "-";
+        string p2 = _host.GameStarted ? Shown(P2).ToString() : "-";
 
         if (L.ScoreBadges)
         {
@@ -115,7 +157,10 @@ public sealed class ScoreDisplay
         }
         else if (_host.VsBot)
         {
-            SetText(L.P1OpponentScore, $"Them  {p2}");
+            // Side by side against the bot, the bot's own box already reads "Them 13", the right
+            // way up and level with yours: a second "Them" under "You" said it twice (playtest,
+            // 2026-10-06).
+            SetText(L.P1OpponentScore, string.Empty);
             SetText(L.P2OpponentScore, string.Empty);
         }
         else
@@ -192,7 +237,7 @@ public sealed class ScoreDisplay
         // a minus card that brings you back under the target clears the red along with the digits.
         // The opponent boxes show the real score, so they never use the preview.
         int? previewed = preview ? PreviewedScore(player) : null;
-        int shown = previewed ?? player.CurrentScore;
+        int shown = previewed ?? Shown(player);
         bool started = _host.GameStarted;
         bool over = started && shown > State.TargetScore;
         bool onTarget = started && previewed.HasValue && previewed.Value == State.TargetScore;
@@ -272,16 +317,18 @@ public sealed class ScoreDisplay
 
         if (holding == padlock.Visible) return;
         padlock.Visible = holding;
+        padlock.Modulate = Colors.White;
+        padlock.Scale = Vector2.One;
         if (!holding || !_scoreFeedbackPrimed) return;
 
-        _sfxLock?.Play();
-        padlock.PivotOffset = LockSize / 2f;
-        padlock.Scale = new Vector2(1.8f, 1.8f);
+        // 2026-10-05: the corner badge alone was easy to miss when the BOT held. A big padlock
+        // drops onto the score, locks with the click, and shrinks into this badge - the same for
+        // both sides, so seeing your own teaches you to recognise the bot's. The badge stays
+        // invisible until the big one arrives in it.
         padlock.Modulate = new Color(1, 1, 1, 0);
-        Tween snap = padlock.CreateTween().SetParallel();
-        snap.TweenProperty(padlock, "scale", Vector2.One, 0.22f)
-            .SetTrans(Tween.TransitionType.Back).SetEase(Tween.EaseType.Out);
-        snap.TweenProperty(padlock, "modulate:a", 1f, 0.10f);
+        Player holder = box == L.P1ScoreBox ? P1 : P2;
+        Control board = holder == P1 ? _ui.P1Board : _ui.P2Board;
+        _ui.Moments.PlayHold(box, padlock, board, BuildPadlock, LockSize, _sfxLock);
     }
 
     /// A padlock from three flat shapes - a shackle (an arch of border only), a body and a
@@ -388,7 +435,7 @@ public sealed class ScoreDisplay
         if (player == null) return;
         bool started = _host.GameStarted;
         string targetText = started && withTarget ? $"/{State.TargetScore}" : string.Empty;
-        string scoreText = started ? player.CurrentScore.ToString() : "-";
+        string scoreText = started ? Shown(player).ToString() : "-";
 
         if (value != null)
         {
@@ -475,7 +522,7 @@ public sealed class ScoreDisplay
         else
         {
             lines.YouValue.Text = withTarget ? ScoreOf(player)
-                                             : (_host.GameStarted ? player.CurrentScore.ToString() : "-");
+                                             : (_host.GameStarted ? Shown(player).ToString() : "-");
             lines.YouValue.RemoveThemeColorOverride("font_color");
         }
 
@@ -492,11 +539,11 @@ public sealed class ScoreDisplay
     {
         Card picked = _host.SelectedFor(player);
         if (picked == null || picked.Effect != CardEffect.None || _host.Table.IsRecallLocked(player, picked)) return null;
-        return player.CurrentScore + picked.Value;
+        return Shown(player) + picked.Value;
     }
 
     /// A player's score with the target behind it - "17/20" - so "how close am I" is one glance
     /// rather than arithmetic against a number somewhere else on the screen.
     private string ScoreOf(Player player) =>
-        _host.GameStarted ? $"{player.CurrentScore}/{State.TargetScore}" : "-";
+        _host.GameStarted ? $"{Shown(player)}/{State.TargetScore}" : "-";
 }

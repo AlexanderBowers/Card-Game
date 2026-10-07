@@ -49,8 +49,9 @@ public partial class CosmeticShopOverlay : Control
         SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
         OverlayUi.AddDim(this);
 
-        VBoxContainer box = OverlayUi.AddPanel(this, contentMargin: 22, separation: 10);
-        box.AddChild(OverlayUi.MakeLabel("Shop", 32));
+        // No outer scroll: the list below scrolls itself, and is sized to the screen in Open.
+        VBoxContainer box = OverlayUi.AddPanel(this, contentMargin: 22, separation: 10, scroll: false);
+        box.AddChild(OverlayUi.MakeLabel("Customizations", 32));
         _medals = OverlayUi.MakeLabel("", 20, OverlayUi.MedalGold);
         box.AddChild(_medals);
 
@@ -88,9 +89,22 @@ public partial class CosmeticShopOverlay : Control
         Build();
         _onClosed = onClosed;
         Node parent = GetParent();
-        if (parent != null) parent.MoveChild(this, parent.GetChildCount() - 1);
+        if (parent != null) OverlayUi.BringToFront(this);
+        FitListToScreen();
         Visible = true;
         Refresh();
+    }
+
+    /// The list's window is as tall as the screen leaves it - up to its full 460 on a phone held
+    /// upright, less on a wide phone held sideways (size check, 2026-10-06: the panel ran off a
+    /// 20:9 screen), more never: five rows is all there is.
+    private void FitListToScreen()
+    {
+        if (_scroll == null) return;
+        float viewH = OverlayUi.ViewSize(this).Y;
+        (float top, float bottom) = OverlayUi.SafeInsets(this);
+        const float Chrome = 300f; // title, medals, tabs, Close, the panel's margins
+        _scroll.CustomMinimumSize = new Vector2(430, Mathf.Clamp(viewH - top - bottom - Chrome, 220f, 460f));
     }
 
     private void Close()

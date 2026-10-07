@@ -115,7 +115,56 @@ public sealed class Teaching
     /// Player 1's staged hand. The +4 is the lesson; the rest are there so the hand looks normal.
     public static readonly int[] Modifiers = { 4, 3, -2, -1 };
 
-    private const int TutorialSteps = 5;
+    // The opening walkthrough: score, deck, play a Modifier, Draw Card / Hold. The fifth line it
+    // used to have - win three sets - waits for the moment it is true (playtest, 2026-10-07): it
+    // is shown the first time the player wins a set. See WinsStep.
+    private const int TutorialSteps = 4;
+
+    // ------------------------------------------------------------------
+    // The second lesson: over is not bust (playtest, 2026-10-06 - Alexander's mother did not
+    // know you can go over the target and then play a minus card).
+    //
+    // After a completed staged walkthrough, the next set is stacked: Player 1 draws 10 and 1 on
+    // the opening deal (11), then 10 on the next turn (21). The moment they are over with a minus
+    // card in hand that brings them back, one more DO step appears - the -1 pulses, exactly like
+    // the +4 did, and playing it is the lesson. If they hold at 11 instead, it waits for the next
+    // time they go over in this match.
+    // ------------------------------------------------------------------
+
+    /// Player 1's first draws in the second lesson's set, in draw order.
+    public static readonly int[] OverLessonDraws = { 10, 1, 10 };
+
+    /// The step index the second lesson runs as (after the four walkthrough steps).
+    private const int OverStep = 5;
+
+    /// The step index of the "you won the set" lesson: shown once, the first time the player
+    /// wins a set after finishing the walkthrough, on the wins row that has just filled in.
+    private const int WinsStep = 6;
+
+    // ------------------------------------------------------------------
+    // The flip lesson (playtest, 2026-10-07). The first Market visit put a +/-1 in the deck
+    // (RunData.FlipLessonPending). In the next match the hand is sure to hold it, the first set
+    // takes Player 1 to one over the target, and three DO steps show the way back: pick the +/-1
+    // up, Flip Value, play it as -1.
+    // ------------------------------------------------------------------
+    private const int FlipPick = 7;
+    private const int FlipFlip = 8;
+    private const int FlipPlay = 9;
+    private Card _flipCard;
+    private bool _flipRunning;
+
+    /// This match is the flip lesson's (staging the hand and the first set).
+    public bool FlipLessonMatch =>
+        _host.VsBot && _host.InRun && !Staged && RunData.Instance != null && RunData.Instance.FlipLessonPending;
+
+    private static bool IsFlipStep(int step) => step == FlipPick || step == FlipFlip || step == FlipPlay;
+
+    /// The walkthrough was finished (not skipped) and the player has not yet won a set since.
+    public bool WinsLessonPending { get; private set; }
+
+    /// The walkthrough was finished (not skipped) on a staged match, and the second lesson has
+    /// not been shown yet.
+    public bool OverLessonPending { get; private set; }
 
     private const float SpotlightPad = 10f;
 
@@ -155,13 +204,16 @@ public sealed class Teaching
     private ShaderMaterial _shadeMaterial;
 
     private const string ShadeShader = @"shader_type canvas_item;
+uniform vec4 hole1 = vec4(0.0);
 uniform vec4 hole2 = vec4(0.0);
 varying vec2 world;
 void vertex() { world = (MODEL_MATRIX * vec4(VERTEX, 0.0, 1.0)).xy; }
+bool inside(vec4 h, vec2 p) { return h.z > 0.0 && p.x >= h.x && p.x <= h.x + h.z && p.y >= h.y && p.y <= h.y + h.w; }
 void fragment() {
-    if (hole2.z > 0.0 && world.x >= hole2.x && world.x <= hole2.x + hole2.z
-        && world.y >= hole2.y && world.y <= hole2.y + hole2.w) COLOR.a = 0.0;
+    if (inside(hole1, world) || inside(hole2, world)) COLOR.a = 0.0;
 }";
+
+    private ColorRect _spotlightDim;
 
     /// A hole cut in a dim, made of FOUR rects around the highlighted control rather than a
     /// shader. Cheap, no material, correct at every scale and orientation - and it degrades
@@ -180,10 +232,21 @@ void fragment() {
         Color shade = new Color(0.02f, 0.05f, 0.1f, 0.72f);
         _shadeMaterial = new ShaderMaterial { Shader = new Shader { Code = ShadeShader } };
         _shadeMaterial.SetShaderParameter("hole2", Vector4.Zero);
+        _shadeMaterial.SetShaderParameter("hole1", Vector4.Zero);
+
+        // The DIM is one full-screen rect with the holes cut out by the shader (playtest,
+        // 2026-10-06: a hairline left un-dimmed above the card). Four dim rects meeting edge to
+        // edge leave a seam wherever their shared edge falls between two screen pixels - and the
+        // canvas is scaled to fit the phone, so that is most edges. The four rects stay, now
+        // invisible, because they are still the input gate (see above).
+        _spotlightDim = new ColorRect { Color = shade, MouseFilter = Control.MouseFilterEnum.Ignore, Material = _shadeMaterial };
+        _spotlightOverlay.AddChild(_spotlightDim);
+        _spotlightDim.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
+
         _spotlightShades = new ColorRect[4];
         for (int i = 0; i < _spotlightShades.Length; i++)
         {
-            ColorRect rect = new ColorRect { Color = shade, MouseFilter = Control.MouseFilterEnum.Stop, Material = _shadeMaterial };
+            ColorRect rect = new ColorRect { Color = new Color(0, 0, 0, 0), MouseFilter = Control.MouseFilterEnum.Stop };
             _spotlightOverlay.AddChild(rect);
             _spotlightShades[i] = rect;
         }
@@ -209,7 +272,7 @@ void fragment() {
             AutowrapMode = TextServer.AutowrapMode.WordSmart,
             HorizontalAlignment = HorizontalAlignment.Center,
         };
-        _spotlightLabel.AddThemeFontSizeOverride("font_size", 22);
+        _spotlightLabel.AddThemeFontSizeOverride("font_size", 28); // was 22: bigger for older eyes (2026-10-06)
         box.AddChild(_spotlightLabel);
 
         HBoxContainer buttons = new HBoxContainer { Alignment = BoxContainer.AlignmentMode.Center };
@@ -258,6 +321,18 @@ void fragment() {
         if (_spotlightOverlay == null) return;
 
         Vector2 vp = _root.GetViewport().GetVisibleRect().Size;
+
+        // The caption grows on a big screen like every other overlay does (UiScaler): on a tablet
+        // or an opened Fold the canvas is half again a phone's, and 28 units read as fine print.
+        float uiScale = Mathf.Clamp(Mathf.Min(vp.X, vp.Y) / UiScaler.PhoneShortSide, 1f, UiScaler.MaxScale);
+        int captionFont = Mathf.RoundToInt(28f * uiScale);
+        if (_spotlightLabel.GetThemeFontSize("font_size") != captionFont)
+        {
+            _spotlightLabel.AddThemeFontSizeOverride("font_size", captionFont);
+            _spotlightSkip.AddThemeFontSizeOverride("font_size", captionFont);
+            _spotlightNext.AddThemeFontSizeOverride("font_size", captionFont);
+        }
+
         Rect2 hole = (target != null && target.IsInsideTree() && target.Size.X > 1f)
             ? ScreenRectOf(target).Grow(SpotlightPad).GrowIndividual(0f, extraTop, 0f, 0f)
             : new Rect2(vp / 2f, Vector2.Zero); // no target: a plain dim, no hole
@@ -277,6 +352,7 @@ void fragment() {
         SetRect(_spotlightShades[2], 0f, top, left, bottom - top);             // left
         SetRect(_spotlightShades[3], right, top, vp.X - right, bottom - top);  // right
 
+        _shadeMaterial?.SetShaderParameter("hole1", new Vector4(left, top, right - left, bottom - top));
         SetRect(_spotlightHoleBlock, left, top, right - left, bottom - top);
         _spotlightHoleBlock.Visible = blockHole;
 
@@ -288,32 +364,115 @@ void fragment() {
         // once. Measure first and the panel comes out screen-wide and one line tall, with the text
         // clipped - the same trap the stats row hit with HFlowContainer. Give it the width, and
         // the height follows from it. The floor covers the frame before that height is right.
-        float width = Mathf.Min(vp.X * 0.72f, vp.X - 32f);
-        _spotlightLabel.CustomMinimumSize = new Vector2(Mathf.Max(80f, width - 40f), 0f);
+        //
+        // 2026-10-05: the caption sits DIRECTLY next to the thing it is about - CaptionGap from
+        // the hole, on whichever side has the most room - and is centred on the hole along that
+        // side, so the spotlight and the words read as one unit rather than a hole here and a
+        // caption parked somewhere in the middle of the screen.
+        Rect2 h1 = new Rect2(left, top, right - left, bottom - top);
+        Rect2 placed = PlaceCaption(h1, hole2, vp);
+        SetRect(_spotlightCaption, placed.Position.X, placed.Position.Y, placed.Size.X, placed.Size.Y);
 
-        // The floor was 14% of the screen, which left a one-line coach mark as a tall box of
-        // empty space in portrait. The real height takes over on the next (deferred) refresh.
-        float height = Mathf.Max(_spotlightCaption.GetCombinedMinimumSize().Y, vp.Y * 0.08f);
-        float x = Mathf.Max(16f, (vp.X - width) / 2f);
-        float y = (bottom + 16f + height <= vp.Y - 16f) ? bottom + 16f : Mathf.Max(16f, top - 16f - height);
+        // If the panel could not shrink to that height yet (its label has not wrapped at the new
+        // width - see ShowCoachMark), keep it invisible for the frame rather than flash a pillar.
+        // SettleSpotlight places it again on the next frame, when it can.
+        float alpha = _spotlightCaption.Size.Y > placed.Size.Y + 4f ? 0f : 1f;
+        _spotlightCaption.Modulate = new Color(1f, 1f, 1f, alpha);
+    }
 
-        // With a second hole the caption must clear that too (pass 46). Try beside each hole,
-        // under then over, and take the first spot that fits on screen and covers neither.
-        if (hole2.HasValue)
+    private const float CaptionGap = 16f;     // between the hole and the caption
+    private const float ScreenMargin = 16f;   // between the caption and the screen's edge
+    private const float SideCaptionMinWidth = 240f;
+
+    /// Where the caption goes for this hole: tries the four sides in order of how much room each
+    /// has, and takes the first where it fits on screen without covering either hole. Falls back
+    /// to the roomiest of above/below, clamped onto the screen.
+    private Rect2 PlaceCaption(Rect2 hole, Rect2? hole2, Vector2 vp)
+    {
+        float roomAbove = hole.Position.Y - CaptionGap - ScreenMargin;
+        float roomBelow = vp.Y - hole.End.Y - CaptionGap - ScreenMargin;
+        float roomLeft = hole.Position.X - CaptionGap - ScreenMargin;
+        float roomRight = vp.X - hole.End.X - CaptionGap - ScreenMargin;
+
+        // Sides ranked by room. Above/below get the usual width; left/right get whatever is
+        // beside the hole, and only qualify if that is wide enough to read.
+        var sides = new List<(char Side, float Room)>
         {
-            Rect2 h1 = new Rect2(left, top, right - left, bottom - top);
-            Rect2 h2 = hole2.Value;
-            float[] candidates = { h1.End.Y + 16f, h1.Position.Y - 16f - height, h2.End.Y + 16f, h2.Position.Y - 16f - height };
-            foreach (float cy in candidates)
+            ('a', roomAbove), ('b', roomBelow), ('l', roomLeft), ('r', roomRight),
+        };
+        sides.Sort((x, y) => y.Room.CompareTo(x.Room));
+
+        Rect2? fallback = null;
+        foreach ((char side, float room) in sides)
+        {
+            bool beside = side == 'l' || side == 'r';
+            float width = beside
+                ? Mathf.Min(room, vp.X * 0.6f)
+                : Mathf.Min(vp.X * 0.72f, vp.X - 2f * ScreenMargin);
+            if (beside && width < SideCaptionMinWidth) continue;
+
+            float height = CaptionHeightFor(width, vp);
+            float x, y;
+            switch (side)
             {
-                Rect2 cap = new Rect2(x, cy, width, height);
-                if (cy < 16f || cy + height > vp.Y - 16f) continue;
-                if (cap.Intersects(h1) || cap.Intersects(h2)) continue;
-                y = cy;
-                break;
+                case 'a': x = hole.GetCenter().X - width / 2f; y = hole.Position.Y - CaptionGap - height; break;
+                case 'b': x = hole.GetCenter().X - width / 2f; y = hole.End.Y + CaptionGap; break;
+                case 'l': x = hole.Position.X - CaptionGap - width; y = hole.GetCenter().Y - height / 2f; break;
+                default:  x = hole.End.X + CaptionGap; y = hole.GetCenter().Y - height / 2f; break;
             }
+
+            // Slide along the side to stay on screen; never away from the hole.
+            if (beside) y = Mathf.Clamp(y, ScreenMargin, Mathf.Max(ScreenMargin, vp.Y - ScreenMargin - height));
+            else x = Mathf.Clamp(x, ScreenMargin, Mathf.Max(ScreenMargin, vp.X - ScreenMargin - width));
+
+            Rect2 cap = new Rect2(x, y, width, height);
+            fallback ??= cap;
+            bool onScreen = cap.Position.X >= ScreenMargin - 0.5f && cap.Position.Y >= ScreenMargin - 0.5f
+                         && cap.End.X <= vp.X - ScreenMargin + 0.5f && cap.End.Y <= vp.Y - ScreenMargin + 0.5f;
+            if (!onScreen) continue;
+            if (cap.Intersects(hole) || (hole2.HasValue && cap.Intersects(hole2.Value))) continue;
+            return cap;
         }
-        SetRect(_spotlightCaption, x, y, width, height);
+
+        // Nothing fits cleanly (a hole as big as the screen): the roomiest side, kept on screen.
+        Rect2 f = fallback ?? new Rect2(ScreenMargin, ScreenMargin, vp.X - 2f * ScreenMargin, vp.Y * 0.08f);
+        f.Size = new Vector2(f.Size.X, CaptionHeightFor(f.Size.X, vp)); // the label's width is this one's again
+        float fy = Mathf.Clamp(f.Position.Y, ScreenMargin, Mathf.Max(ScreenMargin, vp.Y - ScreenMargin - f.Size.Y));
+        float fx = Mathf.Clamp(f.Position.X, ScreenMargin, Mathf.Max(ScreenMargin, vp.X - ScreenMargin - f.Size.X));
+        return new Rect2(fx, fy, f.Size.X, f.Size.Y);
+    }
+
+    /// The caption's height at this width. The label is given the width first (see above); the
+    /// floor covers the frame before the wrapped height is right - the real height takes over on
+    /// the next, deferred, refresh.
+    private float CaptionHeightFor(float width, Vector2 vp)
+    {
+        float labelWidth = Mathf.Max(80f, width - 40f);
+        // Once the label HAS wrapped at this width (the settle passes), its own minimum height is
+        // the truth. The font measurement below can come out a line short of the label's real
+        // word wrap, and then the caption was hidden for good as "not shrunk yet" (size check,
+        // 2026-10-07: the deck step showed its hole and no words on an 18:9 phone).
+        bool wrappedHere = Mathf.Abs(_spotlightLabel.Size.X - labelWidth) < 1f;
+        float wrappedHeight = wrappedHere ? _spotlightLabel.GetCombinedMinimumSize().Y : 0f;
+        _spotlightLabel.CustomMinimumSize = new Vector2(labelWidth, 0f);
+        // Give the label that width NOW, so it re-wraps before anything asks it for a minimum:
+        // a stale tall minimum would also stop the panel shrinking to the height set below.
+        _spotlightLabel.Size = new Vector2(labelWidth, _spotlightLabel.Size.Y);
+
+        // Playtest 2026-10-05: a coach mark's first frame came up as a white pillar the height of
+        // the screen. An autowrapping Label reports the height it wrapped to at its LAST width
+        // (a narrow one, before it is laid out at this width), and the panel took that. So the
+        // text is measured here at the width it is about to get, and only the rest of the
+        // panel - margins, the button row - is read off the controls (the stale label height is
+        // in both minimums, so it cancels out of the difference).
+        Font font = _spotlightLabel.GetThemeFont("font");
+        int fontSize = _spotlightLabel.GetThemeFontSize("font_size");
+        float textHeight = font != null
+            ? font.GetMultilineStringSize(_spotlightLabel.Text, HorizontalAlignment.Left, labelWidth, fontSize).Y
+            : _spotlightLabel.GetCombinedMinimumSize().Y;
+        textHeight = Mathf.Max(textHeight, wrappedHeight);
+        float chrome = _spotlightCaption.GetCombinedMinimumSize().Y - _spotlightLabel.GetCombinedMinimumSize().Y;
+        return Mathf.Max(chrome + textHeight + 4f, vp.Y * 0.06f);
     }
 
     private static void SetRect(Control control, float x, float y, float width, float height)
@@ -328,10 +487,18 @@ void fragment() {
         switch (step)
         {
             case 0: return _ui.P1ScoreBlock;
-            case 1: return _ui.DeckFootprint;
+            // On the 3D table the deck is drawn tilted and raised, away from its flat footprint:
+            // ring the deck the 3D table actually drew (playtest, 2026-10-06: the hole sat below
+            // and left of the deck in portrait, with the caption pushed off).
+            case 1: return TableWorld3D.Instance != null && TableWorld3D.Instance.TryScreenRect(_ui.DeckView, out _)
+                ? _ui.DeckView : _ui.DeckFootprint;
             case 2: return LessonCardControl() ?? _ui.P1Hand; // pass 49: the one right card
             case 3: return _ui.P1ActionRow;
-            case 4: return _ui.P1WinsRow;
+            case WinsStep: return _ui.P1WinsRow;
+            case OverStep: return LessonCardControl() ?? _ui.P1Hand; // the minus card that saves you
+            case FlipPick:
+            case FlipPlay: return (_flipCard != null ? _ui.P1HandCardFor(_flipCard) : null) ?? _ui.P1Hand;
+            case FlipFlip: return _ui.P1FlipValueButton;
             default: return null;
         }
     }
@@ -346,7 +513,7 @@ void fragment() {
     /// could not be pressed - and the lesson did not need two steps anyway. Tapping the same card
     /// again commits it (the quick path the touch model has always had), so one step teaches both
     /// halves and never has to find a control that only exists mid-gesture.
-    private static bool TutorialIsDoStep(int step) => step == 2 || step == 3;
+    private static bool TutorialIsDoStep(int step) => step == 2 || step == 3 || step == OverStep || IsFlipStep(step);
 
     private string TutorialTextFor(int step)
     {
@@ -364,13 +531,30 @@ void fragment() {
                      + "to Play it.";
             case 3:
                 return HoldOrDrawText();
-            case 4:
-                return $"Win {GameState.SetsToWinMatch} sets to take the match. These are yours "
-                     + "so far. That is everything - good luck.";
+            case FlipPick:
+                return $"You have {_host.Player1.CurrentScore}. Tap +/-1";
+            case FlipFlip:
+                return "Press Flip Value to turn it into -1";
+            case FlipPlay:
+                return $"Now play -1 to get back to {_host.State.TargetScore}";
+            case WinsStep:
+                return $"You won the Set.\nWin {CountWord(GameState.SetsToWinMatch)} Sets to win the Match.";
+            case OverStep:
+            {
+                Card fix = BestModifier();
+                string name = fix != null ? (fix.Value > 0 ? "+" : "") + fix.Value : "minus Modifier";
+                // Playtest, 2026-10-07: "too wordy".
+                return $"You have {_host.Player1.CurrentScore}.\nPlay a {name} Modifier to prevent going over.";
+            }
             default:
                 return string.Empty;
         }
     }
+
+    private static string CountWord(int n) => n switch
+    {
+        1 => "one", 2 => "two", 3 => "three", 4 => "four", 5 => "five", _ => n.ToString(),
+    };
 
     /// The Draw Card / Hold step reads the live score, so it is honest on the staged first match,
     /// on a replay's real deal, and after whatever Modifier was just played. "On target" is said
@@ -400,6 +584,13 @@ void fragment() {
         {
             case 2: return _host.Player1.Modifiers.Count < _tutorialModifierCount;
             case 3: return !_host.Player1.CanAct;
+            // Played a card (normally the pulsing minus), or the turn is over some other way.
+            case OverStep:
+                return _host.Player1.Modifiers.Count < _tutorialModifierCount || !_host.Player1.CanAct
+                    || _host.Player1.CurrentScore <= _host.State.TargetScore;
+            case FlipPick: return FlipGone() || _host.SelectedFor(_host.Player1) == _flipCard;
+            case FlipFlip: return FlipGone() || _flipCard.Value < 0;
+            case FlipPlay: return FlipGone();
             default: return false;
         }
     }
@@ -444,13 +635,111 @@ void fragment() {
     {
         if (!Running) return;
 
-        _tutorialIndex++;
-        if (_tutorialIndex >= TutorialSteps)
+        if (_tutorialIndex == FlipPick || _tutorialIndex == FlipFlip)
+        {
+            _tutorialIndex = FlipGone() ? FlipPlay + 1 : _tutorialIndex + 1;
+            if (_tutorialIndex <= FlipPlay) { RefreshSpotlight(); return; }
+        }
+        if (_tutorialIndex > FlipPlay - 1 && _tutorialIndex <= FlipPlay + 1)
         {
             FinishTutorial();
             return;
         }
 
+        // The later lessons are one step each.
+        if (_tutorialIndex == OverStep || _tutorialIndex == WinsStep)
+        {
+            FinishTutorial();
+            return;
+        }
+
+        _tutorialIndex++;
+        if (_tutorialIndex >= TutorialSteps)
+        {
+            FinishTutorial(walkthroughCompleted: true);
+            return;
+        }
+
+        RefreshSpotlight();
+    }
+
+    /// The second lesson, if it is waiting and the moment has come: Player 1 is over the target,
+    /// can still act, and holds a minus card that brings them back. Watches the screen like the
+    /// rest of the teaching, from CheckTutorialProgress.
+    private void TryStartOverLesson()
+    {
+        if (!OverLessonPending || Running) return;
+        if (!_host.GameStarted || _host.State.IsGameOver || _host.SetOverPending || _host.PromptShowing) return;
+        if (_menus.Covering) return;
+
+        Player you = _host.Player1;
+        if (!you.CanAct || you.CurrentScore <= _host.State.TargetScore) return;
+        Card fix = BestModifier();
+        if (fix == null || fix.Value >= 0) return;
+
+        OverLessonPending = false;
+        StartLesson(OverStep);
+    }
+
+    /// The first set the player wins after the walkthrough: once the set-end panel is gone and
+    /// the next set is on the table, the wins row (one chip lit) gets its line.
+    private void TryStartWinsLesson()
+    {
+        if (!WinsLessonPending || Running) return;
+        if (!_host.GameStarted || _host.State.IsGameOver || _host.SetOverPending || _host.PromptShowing) return;
+        if (_menus.Covering || _host.State.SetsWonPlayer1 < 1) return;
+
+        WinsLessonPending = false;
+        StartLesson(WinsStep);
+    }
+
+    /// The flip card was played (or the turn ended some other way): the lesson is over.
+    private bool FlipGone() =>
+        _flipCard == null || !_host.Player1.Modifiers.Contains(_flipCard) || !_host.Player1.CanAct;
+
+    /// Player 1 is over the target, can still act, and holds a +/-1 (or any +/- card) whose minus
+    /// side brings them back.
+    private void TryStartFlipLesson()
+    {
+        RunData run = RunData.Instance;
+        if (run == null || !run.FlipLessonPending || Running || !_host.VsBot || !_host.InRun) return;
+        if (!_host.GameStarted || _host.State.IsGameOver || _host.SetOverPending || _host.PromptShowing) return;
+        if (_menus.Covering) return;
+
+        Player you = _host.Player1;
+        int target = _host.State.TargetScore;
+        if (!you.CanAct || you.CurrentScore <= target) return;
+
+        Card flip = null;
+        foreach (Card c in you.Modifiers)
+        {
+            if (!c.CanFlipValue || c.Effect != CardEffect.None) continue;
+            if (you.CurrentScore - System.Math.Abs(c.Value) > target) continue;
+            if (flip == null || System.Math.Abs(c.Value) < System.Math.Abs(flip.Value)) flip = c;
+        }
+        if (flip == null) return;
+
+        _flipCard = flip;
+        _flipRunning = true;
+        StartLesson(FlipPick);
+    }
+
+    private async void StartLesson(int step)
+    {
+        // Running at once, so the bot stands still (Bot.ProcessTurn checks it) - then whatever
+        // just happened (a card landing, a new deal) settles before the lesson about it appears.
+        Running = true;
+        _tutorialIndex = step;
+        _tutorialModifierCount = _host.Player1.Modifiers.Count;
+
+        for (int i = 0; i < 40; i++)
+        {
+            await _root.ToSignal(_root.GetTree(), SceneTree.SignalName.ProcessFrame);
+            if (!_root.IsInsideTree() || !Running) return;
+        }
+
+        _root.MoveChild(_spotlightOverlay, _root.GetChildCount() - 1);
+        _spotlightOverlay.Visible = true;
         RefreshSpotlight();
     }
 
@@ -468,6 +757,8 @@ void fragment() {
         // A coach-mark borrows the same overlay, so it has to be re-placed on a rotation too.
         if (_coachShowing.HasValue)
         {
+            _spotlightSkip.Visible = false; // one line, once ever: nothing to skip
+            _spotlightNext.Visible = true;
             PlaceSpotlight(CoachTarget(_coachShowing.Value), blockHole: true);
             return;
         }
@@ -476,13 +767,21 @@ void fragment() {
 
         bool doStep = TutorialIsDoStep(_tutorialIndex);
         ApplyTutorialEmphasis(_tutorialIndex);
-        _spotlightLabel.Text = TutorialTextFor(_tutorialIndex);
+        _spotlightLabel.Text = Speech.Casual(TutorialTextFor(_tutorialIndex));
         _spotlightNext.Visible = !doStep;   // a DO step is finished by doing it, not by a button
+        // Skip on the FIRST step only (playtest, 2026-10-06: still showing on the deck step). It is
+        // the one chance to opt out before the lesson starts; once the player has carried on past
+        // it, every later step finishes with its own button or by doing the thing.
+        _spotlightSkip.Visible = _tutorialIndex == 0;
         Control target = TutorialTarget(_tutorialIndex);
-        // A picked-up card rises and grows out of its slot: open the hole upward to show all of it.
-        float extraTop = (_tutorialIndex == 2 && target != null && _host.SelectedFor(_host.Player1) != null)
-            ? target.Size.Y * 0.5f : 0f;
-        PlaceSpotlight(target, blockHole: !doStep, TutorialLookTarget(_tutorialIndex), extraTop);
+        // A picked-up card rises and grows out of its slot. Ring the art itself (scaled and lifted -
+        // GetGlobalTransform carries both), not the slot plus a guess: the guess overshot and cut a
+        // bright notch into the Play button above the card (playtest, 2026-10-06).
+        if ((_tutorialIndex == 2 || _tutorialIndex == OverStep || _tutorialIndex == FlipPick || _tutorialIndex == FlipPlay) && target is Button
+            && _host.SelectedFor(_host.Player1) != null && target.GetChildCount() > 0
+            && target.GetChild(0) is TextureRect art)
+            target = art;
+        PlaceSpotlight(target, blockHole: !doStep, TutorialLookTarget(_tutorialIndex));
     }
 
     // ------------------------------------------------------------------
@@ -528,7 +827,8 @@ void fragment() {
 
     private void ApplyTutorialEmphasis(int step)
     {
-        Card pulseCard = step == 2 && _host.SelectedFor(_host.Player1) == null ? BestModifier() : null;
+        Card pulseCard = (step == 2 || step == OverStep) && _host.SelectedFor(_host.Player1) == null ? BestModifier()
+                       : step == FlipPick ? _flipCard : null;
         bool forceHold = step == 3 && OnTargetExactly;
         SetEmphasis(pulseCard, forceHold);
     }
@@ -546,7 +846,7 @@ void fragment() {
     /// A second thing a step points at, to look at only (pass 46). The Modifier step shows the
     /// score as well as the hand: picking a card up previews the score it would make, and that
     /// change is the lesson.
-    private Control TutorialLookTarget(int step) => step == 2 ? _ui.P1ScoreBlock : null;
+    private Control TutorialLookTarget(int step) => (step == 2 || step == OverStep || IsFlipStep(step)) ? _ui.P1ScoreBlock : null;
 
     /// ...and then again once the layout has actually settled.
     ///
@@ -567,12 +867,18 @@ void fragment() {
 
         try
         {
+            // Re-placed on BOTH frames: after the first the caption's label has wrapped at its new
+            // width (so the panel can shrink to the right height), after the second the layout
+            // underneath has settled too.
             for (int i = 0; i < 2; i++)
             {
                 await _root.ToSignal(_root.GetTree(), SceneTree.SignalName.ProcessFrame);
                 if (!_root.IsInsideTree()) return;
+                PlaceCurrentSpotlight();
             }
-            PlaceCurrentSpotlight();
+            // Settled: whatever the measurements say, the words are shown. A caption a few pixels
+            // off is a nit; a hole with no words is a broken step.
+            if (_spotlightCaption != null) _spotlightCaption.Modulate = Colors.White;
         }
         finally
         {
@@ -584,7 +890,20 @@ void fragment() {
     /// step's completion never has to be wired into the five handlers that could cause it.
     public void CheckTutorialProgress()
     {
+        TryStartWinsLesson();
+        TryStartOverLesson();
+        TryStartFlipLesson();
         if (!Running || _spotlightOverlay == null || !_spotlightOverlay.Visible) return;
+
+        // The flip steps follow the card: put it down and the lesson goes back to "pick it up";
+        // flip it back to plus and it goes back to "Flip Value".
+        if (IsFlipStep(_tutorialIndex) && !FlipGone())
+        {
+            int was = _tutorialIndex;
+            if (_host.SelectedFor(_host.Player1) != _flipCard) _tutorialIndex = FlipPick;
+            else if (_tutorialIndex == FlipPlay && _flipCard.Value > 0) _tutorialIndex = FlipFlip;
+            if (_tutorialIndex != was) { Defer(RefreshSpotlight); return; }
+        }
 
         if (TutorialIsDoStep(_tutorialIndex) && TutorialStepDone(_tutorialIndex))
         {
@@ -595,12 +914,23 @@ void fragment() {
         Defer(RefreshSpotlight); // the highlighted control may have moved
     }
 
-    private void FinishTutorial()
+    private void FinishTutorial(bool walkthroughCompleted = false)
     {
         if (!Running) return;
 
         Running = false;
         PendingTutorial = false;
+        // Finished properly (not skipped) on the staged first match: the second lesson - over is
+        // not bust - waits for the next set.
+        if (walkthroughCompleted && Staged) OverLessonPending = true;
+        if (walkthroughCompleted) WinsLessonPending = true;
+        if (_flipRunning)
+        {
+            _flipRunning = false;
+            _flipCard = null;
+            RunData.Instance?.CompleteFlipLesson();
+            RunData.Instance?.MarkCardMet("flip"); // taught, so no card-intro later
+        }
         SetEmphasis(null, false); // no pulse or locked Draw Card outlives the lesson
         if (_spotlightOverlay != null) _spotlightOverlay.Visible = false;
         RunData.Instance?.MarkTutorialSeen();
@@ -630,6 +960,12 @@ void fragment() {
     private readonly Queue<CoachMark> _coachQueue = new Queue<CoachMark>();
 
     private CoachMark? _coachShowing;
+
+    /// The effect banner's text, put away while a coach mark is up.
+    private string _bannerHeldForCoach;
+
+    /// A coach mark is on screen (the bot waits while one is).
+    public bool CoachShowing => _coachShowing.HasValue;
 
     /// Where the highlight goes: the middle panel's banner when the card was played AT you (the
     /// banner is the thing that just narrated it), your own hand when it is a card you now hold.
@@ -662,7 +998,12 @@ void fragment() {
     public void QueueCoachMarksForModifiers()
     {
         if (!_host.VsBot) return;
-        foreach (Card card in _host.Player1.Modifiers) QueueCoachMark(card, fromOpponent: false);
+        foreach (Card card in _host.Player1.Modifiers)
+        {
+            // The flip lesson teaches the +/- card at the moment it matters; no card-intro over it.
+            if (FlipLessonMatch && card.CanFlipValue && card.Effect == CardEffect.None) continue;
+            QueueCoachMark(card, fromOpponent: false);
+        }
     }
 
     /// Runs from UpdateUI. Shows at most one at a time, and only when nothing else owns the
@@ -687,13 +1028,24 @@ void fragment() {
     {
         _coachShowing = mark;
 
-        _spotlightLabel.Text = CardEffects.Introduction(mark.Card);
+        _spotlightLabel.Text = Speech.Casual(CardEffects.Introduction(mark.Card));
         _spotlightNext.Visible = true;
+
+        // The coach mark comes first (playtest, 2026-10-06: the effect banner - "Silver Champion
+        // plays Copy..." - was drawn over the coach mark's caption). The banner steps aside while
+        // the card is explained and comes back when the player taps Got it.
+        _bannerHeldForCoach = _ui.Toasts.EffectBannerText;
+        if (_bannerHeldForCoach != null) _ui.Toasts.ClearEffectBanner();
         _spotlightSkip.Visible = false; // there is nothing to skip: it is one line, once ever
 
         _root.MoveChild(_spotlightOverlay, _root.GetChildCount() - 1);
         _spotlightOverlay.Visible = true;
-        PlaceSpotlight(CoachTarget(mark), blockHole: true);
+        // Placed now AND again once the caption has been laid out (SettleSpotlight). THE BUG
+        // (S25, 2026-10-05: a white pillar the height of the screen): the caption had never been
+        // laid out at this width, so the panel's minimum was the wrapped-per-word height of its
+        // label, and setting its size could not go below that. This used to be placed once and
+        // never again, so the pillar stayed until something else happened to refresh it.
+        RefreshSpotlight();
     }
 
     private void DismissCoachMark()
@@ -706,6 +1058,10 @@ void fragment() {
 
         if (_spotlightOverlay != null) _spotlightOverlay.Visible = false;
         if (_spotlightSkip != null) _spotlightSkip.Visible = true;
+
+        // The banner that stepped aside for the coach mark comes back.
+        if (_bannerHeldForCoach != null) _ui.Toasts.ShowEffectBanner(_bannerHeldForCoach);
+        _bannerHeldForCoach = null;
 
         _ui.DeferRefresh(); // which drains the next one, if there is one
     }
