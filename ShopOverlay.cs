@@ -31,7 +31,7 @@ public partial class ShopOverlay : Control
     // it in the deck (DeckOverlay.LessonCardIndex).
     // ------------------------------------------------------------------
     private bool _lesson;
-    private int _lessonTell;            // 0: medals, 1: prices, 2: past the two TELL steps
+    private int _lessonTell;            // 0: what medals buy, 1: how they are won, 2: past the TELL steps
     private Offer _lessonOffer;         // the guaranteed +/-1
     private int _lessonInventoryIndex = -1;
     private Guide.Step _stepMedals, _stepPrices, _stepBuy, _stepContinue;
@@ -62,25 +62,25 @@ public partial class ShopOverlay : Control
 
         _stepMedals = new Guide.Step
         {
-            Target = () => _medalLabel.Visible ? _medalLabel : _subtitle,
-            Text = "These are your Medals. You win them by winning a Match: one for each Set you take, plus a prize for the win.",
+            Target = () => _medalLabel,
+            Text = "Medals are used to buy new Modifiers.\nModifiers you've purchased persist between runs.",
             GotIt = () => _lessonTell = 1,
         };
         _stepPrices = new Guide.Step
         {
-            Target = () => _lessonOffer.PriceLabel,
-            Text = "Spend Medals on new Modifiers to make your deck stronger. They are yours to keep, even if you lose a run.",
+            Target = () => _medalLabel,
+            Text = "Medals are awarded for each Set won.\nBonus Medals are awarded upon winning the Match.",
             GotIt = () => _lessonTell = 2,
         };
         _stepBuy = new Guide.Step
         {
             Target = () => _lessonOffer.BuyButton,
-            Text = "This +/-1 can be played as +1 or -1, whichever you need. Buy it.",
+            Text = "You can flip +/- Modifiers to increase or decrease your current Score.",
         };
         _stepContinue = new Guide.Step
         {
             Target = () => _continueButton,
-            Text = "Now put it in your deck.",
+            Text = "Let's add it to your deck",
         };
     }
 
@@ -314,10 +314,11 @@ public partial class ShopOverlay : Control
         box.AddChild(top);
         _top = top;
         top.AddChild(OverlayUi.MakeLabel("The Market", 34));
-        _subtitle = OverlayUi.MakeLabel("", 20, OverlayUi.Muted);
-        top.AddChild(_subtitle);
+        // Playtest, 2026-10-07: "Current Medals: 12" over "Next Target: 20".
         _medalLabel = OverlayUi.MakeLabel("", 26, OverlayUi.MedalGold);
         top.AddChild(_medalLabel);
+        _subtitle = OverlayUi.MakeLabel("", 22, OverlayUi.Muted);
+        top.AddChild(_subtitle);
 
         // The offers fill everything between the header and the button, centred in it.
         CenterContainer middle = new CenterContainer { SizeFlagsVertical = Control.SizeFlags.ExpandFill };
@@ -382,7 +383,7 @@ public partial class ShopOverlay : Control
         _lesson = !run.MarketLessonSeen;
         if (_lesson) StartLesson(run);
 
-        _subtitleBase = $"Next: {run.CurrentOpponent} - target {run.CurrentTarget}";
+        _subtitleBase = $"Next Target: {run.CurrentTarget}";
         _subtitle.Text = _subtitleBase;
 
         // Above the set-end overlay and any stray animation card.
@@ -419,7 +420,6 @@ public partial class ShopOverlay : Control
         // cards get the height.
         bool sideways = view.X > view.Y * 1.25f;
         _wide = sideways;
-        _medalLabel.Visible = !sideways;
         float chrome = _top.GetCombinedMinimumSize().Y + _bottom.GetCombinedMinimumSize().Y + 2 * BoxGap;
         Vector2 room = new Vector2(panelW - 2 * PanelPad, panelH - 2 * PanelPad - chrome);
         if (room.X < 10 || room.Y < 10) return;
@@ -454,11 +454,7 @@ public partial class ShopOverlay : Control
         RunData run = RunData.Instance;
         if (run == null) return;
 
-        _medalLabel.Text = $"Medals: {run.Medals}";
-        if (_wide && _subtitleBase != null && _subtitle.Text.StartsWith("Next:"))
-            _subtitle.Text = $"{_subtitleBase}   -   Medals: {run.Medals}";
-        else if (!_wide && _subtitleBase != null && _subtitle.Text.StartsWith("Next:"))
-            _subtitle.Text = _subtitleBase;
+        _medalLabel.Text = $"Current Medals: {run.Medals}";
         OverlayUi.ClearChildren(_offerGrid);
 
         float textWidth = Mathf.Max(_cardSize.X * 1.2f, _cellWidth - 12f);

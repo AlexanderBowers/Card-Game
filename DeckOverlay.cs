@@ -77,7 +77,8 @@ public partial class DeckOverlay : Control
     private int _lessonRemove = -1;
     private readonly Dictionary<int, Control> _slotButtons = new Dictionary<int, Control>();
     private readonly Dictionary<int, Control> _collectionButtons = new Dictionary<int, Control>();
-    private Guide.Step _stepRemove, _stepAdd, _stepRefill, _stepStart;
+    private Guide.Step _stepIntro, _stepRemove, _stepAdd, _stepRefill, _stepStart;
+    private bool _lessonIntroDone;
 
     private Guide.Step LessonStep()
     {
@@ -88,13 +89,16 @@ public partial class DeckOverlay : Control
         bool inDeck = _deck.Contains(_lessonCard);
         bool full = _deck.Count >= required;
 
+        // First: what the twelve are (a TELL step over the whole deck).
+        if (!_lessonIntroDone) return _stepIntro;
+
         if (!inDeck && full)
         {
             int pick = RemoveCandidate(run);
             if (pick != _lessonRemove)
             {
                 _lessonRemove = pick;
-                _stepRemove.Text = $"Your deck holds twelve Modifiers. To make room, tap the {run.Inventory[pick].Label} to take it out.";
+                _stepRemove.Text = $"To make room, tap the {run.Inventory[pick].Label} to take it out";
             }
             return _stepRemove;
         }
@@ -132,11 +136,18 @@ public partial class DeckOverlay : Control
 
         string name = run.Inventory[_lessonCard].Label.Replace("\u00B1", "+/-");
         _lessonRemove = -1;
+        _lessonIntroDone = false;
+        _stepIntro = new Guide.Step
+        {
+            Target = () => _slotGrid,
+            Text = "You may choose twelve Modifiers from your collection.",
+            GotIt = () => _lessonIntroDone = true,
+        };
         _stepRemove = new Guide.Step { Target = () => ButtonFor(_slotButtons, _lessonRemove) };
         _stepAdd = new Guide.Step
         {
             Target = () => ButtonFor(_collectionButtons, _lessonCard),
-            Text = $"Now tap the {name} to put it in your deck.",
+            Text = $"Now tap the {name} to add it to your Deck",
         };
         _stepRefill = new Guide.Step
         {
@@ -146,7 +157,7 @@ public partial class DeckOverlay : Control
         _stepStart = new Guide.Step
         {
             Target = () => _continueButton,
-            Text = "Your deck is ready. Four of its twelve are dealt to you each match. Start the Match.",
+            Text = "Four random Modifiers from your Deck are drawn at the start of every Match",
         };
     }
 

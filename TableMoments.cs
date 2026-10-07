@@ -182,6 +182,15 @@ public sealed class TableMoments
     public void PulseBorder(Control board, Color colour)
     {
         if (!Usable(board)) return;
+
+        // On the 3D table the board lies tilted: trace its real outline, a trapezoid, so the glow
+        // sits ON the table with the same depth as the cards (playtest, 2026-10-07).
+        if (TableWorld3D.Instance != null && TableWorld3D.Instance.TryScreenQuad(board, out Vector2[] quad))
+        {
+            PulseOutline(quad, colour);
+            return;
+        }
+
         Rect2 rect = ScreenRectOf(board).Grow(6f);
         StyleBoxFlat style = new StyleBoxFlat
         {
@@ -202,6 +211,38 @@ public sealed class TableMoments
         t.TweenProperty(frame, "modulate:a", 1f, 0.10f);
         t.TweenProperty(frame, "modulate:a", 0f, 0.35f).SetTrans(Tween.TransitionType.Sine).SetEase(Tween.EaseType.In);
         t.TweenCallback(Callable.From(frame.QueueFree));
+    }
+
+    /// PulseBorder's 3D-table version: a soft wide glow and a crisp line round the board's
+    /// on-screen outline, a touch outside it, fading in and out the same way.
+    private void PulseOutline(Vector2[] quad, Color colour)
+    {
+        Vector2 middle = (quad[0] + quad[1] + quad[2] + quad[3]) / 4f;
+        Vector2[] points = new Vector2[5];
+        for (int i = 0; i < 4; i++) points[i] = middle + (quad[i] - middle) * 1.04f;
+        points[4] = points[0];
+
+        Node2D holder = new Node2D { TopLevel = true, Modulate = new Color(1, 1, 1, 0) };
+        _root.AddChild(holder);
+        foreach ((float width, float alpha) in new[] { (18f, 0.35f), (5f, 1f) })
+        {
+            holder.AddChild(new Line2D
+            {
+                Points = points,
+                Width = width,
+                DefaultColor = new Color(colour, alpha),
+                JointMode = Line2D.LineJointMode.Round,
+                BeginCapMode = Line2D.LineCapMode.Round,
+                EndCapMode = Line2D.LineCapMode.Round,
+                Antialiased = true,
+            });
+        }
+
+        Tween t = NewTween();
+        t.TweenProperty(holder, "modulate:a", 1f, 0.10f);
+        t.TweenProperty(holder, "modulate:a", 0f, 0.35f).SetTrans(Tween.TransitionType.Sine).SetEase(Tween.EaseType.In);
+        t.TweenCallback(Callable.From(holder.QueueFree));
+        _cleanup.Add(() => { if (GodotObject.IsInstanceValid(holder)) holder.QueueFree(); });
     }
 
     /// A few quick, shrinking nudges, then exactly back where it was.

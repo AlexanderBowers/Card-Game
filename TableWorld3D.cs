@@ -345,6 +345,30 @@ public partial class TableWorld3D : Node3D
         _shakeStrength = Mathf.Max(_shakeStrength * (_shake / ShakeSeconds), strength);
     }
 
+    /// Where a flat 2D layout control (a board, which is not mirrored as one piece) lies on the 3D
+    /// table, as its four corners on screen - top-left, top-right, bottom-right, bottom-left. In
+    /// perspective that is a trapezoid, not a rectangle (playtest, 2026-10-07: the Hold glow was a
+    /// flat rectangle over a tilted board and "doesn't give the sense of depth").
+    public bool TryScreenQuad(Control control, out Vector2[] quad)
+    {
+        quad = null;
+        if (!_active || !Visible || control == null || _camera == null || !control.IsInsideTree()) return false;
+
+        Vector2 view = control.GetViewportRect().Size;
+        Transform2D xf = control.GetGlobalTransform();
+        Vector2 s = control.Size;
+        Vector2[] corners = { Vector2.Zero, new Vector2(s.X, 0f), s, new Vector2(0f, s.Y) };
+        quad = new Vector2[4];
+        for (int i = 0; i < 4; i++)
+        {
+            Vector2 p = xf * corners[i];
+            Vector3 world = new Vector3((p.X - view.X / 2f) / PixelsPerUnit, 0.006f, (p.Y - view.Y / 2f) / PixelsPerUnit);
+            if (_camera.IsPositionBehind(world)) { quad = null; return false; }
+            quad[i] = _camera.UnprojectPosition(world);
+        }
+        return true;
+    }
+
     /// Where a 2D piece the table draws in 3D actually appears on screen - its 3D quad's corners
     /// through the camera - so the tutorial's spotlight rings the card the player sees, not the
     /// flat rect the layout keeps underneath. False when the piece is not drawn in 3D.

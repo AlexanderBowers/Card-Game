@@ -812,7 +812,8 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
             setInfo.AddThemeFontSizeOverride("font_size", TableUi.SetInfoFont); // back from the big target
             setInfo.Visible = true; // hidden while it had nothing to say (TableUi.Refresh)
         }
-        _prompts.ShowSetEnd(title, matchOver ? string.Empty : why, buttonText, next, secondText, second);
+        // Title only (playtest, 2026-10-07: "remove the reasoning") - the scores are on the table.
+        _prompts.ShowSetEnd(title, string.Empty, buttonText, next, secondText, second);
     }
 
     private string RunHeader()

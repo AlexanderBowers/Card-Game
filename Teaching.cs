@@ -532,11 +532,11 @@ void fragment() {
             case 3:
                 return HoldOrDrawText();
             case FlipPick:
-                return $"You have {_host.Player1.CurrentScore}. Your +/-1 can be played as +1 or -1. Tap it to pick it up.";
+                return $"You have {_host.Player1.CurrentScore}. Tap +/-1";
             case FlipFlip:
-                return "Press Flip Value to turn it into -1.";
+                return "Press Flip Value to turn it into -1";
             case FlipPlay:
-                return $"Now tap the -1 again to play it and get back to {_host.State.TargetScore}.";
+                return $"Now play -1 to get back to {_host.State.TargetScore}";
             case WinsStep:
                 return $"You won the Set.\nWin {CountWord(GameState.SetsToWinMatch)} Sets to win the Match.";
             case OverStep:

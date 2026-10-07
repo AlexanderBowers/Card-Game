@@ -301,7 +301,7 @@ public class TableWordingTests
     {
         SetRules.Outcome o = SetRules.Describe("You", 22, "Them", 17, 20);
         Assert.Equal(2, o.Winner);
-        Assert.Equal("Them wins the set!", o.Title);
+        Assert.Equal("Them won the set!", o.Title);
         Assert.StartsWith("You busted: 22 is over the target of 20.", o.Why);
         Assert.Equal("Next Set", o.ButtonText);
     }
@@ -313,7 +313,7 @@ public class TableWordingTests
         Assert.Equal(1, o.Winner);
         Assert.Contains("Both players held.", o.Why);
         Assert.EndsWith("You are closest to 20.", o.Why);
-        Assert.Equal("You win the set!", o.Title);
+        Assert.Equal("You won the set!", o.Title);
     }
 
     [Fact]
@@ -321,7 +321,7 @@ public class TableWordingTests
     {
         SetRules.Outcome o = SetRules.Describe("You", 15, "Gold Champion", 18, 20);
         Assert.EndsWith("Gold Champion is closest to 20.", o.Why);
-        Assert.Equal("Gold Champion wins the set!", o.Title);
+        Assert.Equal("Gold Champion won the set!", o.Title);
     }
 
     [Fact]
