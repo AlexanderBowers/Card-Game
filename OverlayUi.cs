@@ -153,10 +153,20 @@ public static class OverlayUi
         return box;
     }
 
+    /// Body text on every overlay is drawn this much bigger than the size asked for (playtest,
+    /// 2026-10-06: Alexander's mother could not read the Market, the deck screen or the tutorial).
+    /// Headings - 28 and up - are already big and keep their size, so the gap between a title and
+    /// its text closes rather than everything simply growing.
+    public const float BodyTextScale = 1.3f;
+    public const int HeadingSize = 28;
+
+    public static int Readable(int fontSize) =>
+        fontSize >= HeadingSize ? fontSize : Mathf.RoundToInt(fontSize * BodyTextScale);
+
     public static Label MakeLabel(string text, int fontSize, Color? color = null)
     {
         Label label = new Label { Text = text, HorizontalAlignment = HorizontalAlignment.Center };
-        label.AddThemeFontSizeOverride("font_size", fontSize);
+        label.AddThemeFontSizeOverride("font_size", Readable(fontSize));
         if (color.HasValue) label.AddThemeColorOverride("font_color", color.Value);
         return label;
     }

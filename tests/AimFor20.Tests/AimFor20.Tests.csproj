@@ -17,6 +17,7 @@
 
   <ItemGroup>
     <Compile Include="../../Card.cs" Link="Game/Card.cs" />
+    <Compile Include="../../Speech.cs" Link="Game/Speech.cs" />
     <Compile Include="../../Player.cs" Link="Game/Player.cs" />
     <Compile Include="../../GameState.cs" Link="Game/GameState.cs" />
     <Compile Include="../../CardEffects.cs" Link="Game/CardEffects.cs" />

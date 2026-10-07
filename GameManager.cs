@@ -236,6 +236,9 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
         _isGameStarted = true;
         _isVsBot = !local2Player;
         _player2.PlayerName = _isVsBot ? "AI Bot" : "Player 2";
+        // In single player you are "You", never "Player 1" (playtest, 2026-10-06: "am I Player
+        // 1?"). Every sentence built from the name reads right for it - see Speech.
+        _player1.PlayerName = _isVsBot ? Speech.You : "Player 1";
 
         // The mode decides what the layout shows (P2's buttons, the mirror), so re-apply it.
         _ui.ApplyResponsiveLayout();

@@ -63,7 +63,7 @@ public static class SetRules
             return new Outcome(0, "The set is a tie", why + "\nSame score, so the set is replayed.", "Replay Set");
 
         string winnerName = winner == 1 ? p1Name : p2Name;
-        if (!p1Bust && !p2Bust) why += $"\n{winnerName} is closest to {target}.";
-        return new Outcome(winner, $"{winnerName} wins the set!", why, "Next Set");
+        if (!p1Bust && !p2Bust) why += $"\n{Speech.Is(winnerName)} closest to {target}.";
+        return new Outcome(winner, $"{Speech.Does(winnerName, "wins", "win")} the set!", why, "Next Set");
     }
 }

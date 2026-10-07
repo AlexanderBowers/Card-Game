@@ -817,7 +817,7 @@ public sealed class Menus
             AutowrapMode = TextServer.AutowrapMode.Word,
             SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
         };
-        _howToPlayRules.AddThemeFontSizeOverride("font_size", 20);
+        _howToPlayRules.AddThemeFontSizeOverride("font_size", 26); // was 20 (2026-10-06)
         scroll.AddChild(_howToPlayRules);
 
         HBoxContainer buttons = new HBoxContainer { Alignment = BoxContainer.AlignmentMode.Center };

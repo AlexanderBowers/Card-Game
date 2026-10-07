@@ -318,7 +318,7 @@ public static class CardEffects
                 self.CurrentScore += nowCard - wasCard;
 
                 return new EffectResult(true, false,
-                    $"{self.PlayerName} plays Copy - their {nowCard} replaces the {wasCard}. {self.PlayerName}: {wasScore} to {self.CurrentScore}");
+                    $"{Speech.Does(self.PlayerName, "plays", "play")} Copy - their {nowCard} replaces the {wasCard}. {self.PlayerName}: {wasScore} to {self.CurrentScore}");
             }
 
             case CardEffect.TradeTotals:
@@ -329,7 +329,7 @@ public static class CardEffects
                 opponent.CurrentScore = mine;
 
                 return new EffectResult(true, true,
-                    $"{self.PlayerName} plays Trade Totals - {mine} and {theirs} change places");
+                    $"{Speech.Does(self.PlayerName, "plays", "play")} Trade Totals - {mine} and {theirs} change places");
             }
 
             case CardEffect.Shave:
@@ -340,7 +340,7 @@ public static class CardEffects
                 // Deliberately does NOT re-open the target: they are holding, and this is the one
                 // card in the game they cannot answer.
                 return new EffectResult(true, false,
-                    $"{self.PlayerName} plays Shave - {opponent.PlayerName} is locked at {before}, now {opponent.CurrentScore}");
+                    $"{Speech.Does(self.PlayerName, "plays", "play")} Shave - {Speech.Is(opponent.PlayerName)} locked at {before}, now {opponent.CurrentScore}");
             }
 
             case CardEffect.TradeHands:
@@ -355,7 +355,7 @@ public static class CardEffects
                 opponent.Modifiers.AddRange(mine);
 
                 return new EffectResult(true, true,
-                    $"{self.PlayerName} plays Trade Hands - takes {self.Modifiers.Count}, gives {opponent.Modifiers.Count}");
+                    $"{Speech.Does(self.PlayerName, "plays", "play")} Trade Hands - takes {self.Modifiers.Count}, gives {opponent.Modifiers.Count}");
             }
 
             case CardEffect.Recall:
@@ -373,7 +373,7 @@ public static class CardEffects
                 // and its points are still on the board; Recall returns the card, not the points.
                 // The caller locks it out of this turn - see GameManager's recalled-card lock.
                 return new EffectResult(true, false,
-                    $"{self.PlayerName} plays Recall - takes back a {(chosen.Value > 0 ? "+" : "")}{chosen.Value}");
+                    $"{Speech.Does(self.PlayerName, "plays", "play")} Recall - takes back a {(chosen.Value > 0 ? "+" : "")}{chosen.Value}");
             }
 
             case CardEffect.Veto:
@@ -396,9 +396,9 @@ public static class CardEffects
                 bool wasHolding = opponent.IsHolding;
 
                 return new EffectResult(true, true,
-                    $"{self.PlayerName} plays Veto - destroys {opponent.PlayerName}'s {(theirs.Value > 0 ? "+" : "")}{theirs.Value}. " +
+                    $"{Speech.Does(self.PlayerName, "plays", "play")} Veto - destroys {Speech.Possessive(opponent.PlayerName)} {(theirs.Value > 0 ? "+" : "")}{theirs.Value}. " +
                     $"{opponent.PlayerName}: {before} back to {opponent.CurrentScore}" +
-                    (wasHolding ? " - and they are no longer holding" : ""),
+                    (wasHolding ? (Speech.IsYou(opponent.PlayerName) ? " - and you are no longer holding" : " - and they are no longer holding") : ""),
                     releasesHold: true);
             }
         }

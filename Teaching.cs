@@ -223,7 +223,7 @@ void fragment() {
             AutowrapMode = TextServer.AutowrapMode.WordSmart,
             HorizontalAlignment = HorizontalAlignment.Center,
         };
-        _spotlightLabel.AddThemeFontSizeOverride("font_size", 22);
+        _spotlightLabel.AddThemeFontSizeOverride("font_size", 28); // was 22: bigger for older eyes (2026-10-06)
         box.AddChild(_spotlightLabel);
 
         HBoxContainer buttons = new HBoxContainer { Alignment = BoxContainer.AlignmentMode.Center };
