@@ -26,6 +26,29 @@ public class CardEffectsTests
     }
 
     [Fact]
+    public void Copy_works_on_a_holding_opponent_using_their_last_drawn_card()
+    {
+        Player me = Player("You"), them = Player("Them");
+        Draw(them, 6);
+        Card theirLast = Draw(them, 9);
+        them.LastDrawnCard = null;   // a new turn: they are holding and draw nothing
+        them.IsHolding = true;
+        Card mine = Draw(me, 4);
+        int theirScore = them.CurrentScore;
+
+        Card copy = Effect(CardEffect.Copy);
+        Assert.True(CardEffects.CanPlay(copy, me, them, Target));
+        Assert.Same(theirLast, CardEffects.CopySource(them));
+
+        var result = CardEffects.Resolve(copy, me, them, Target);
+        Assert.True(result.Applied);
+        Assert.Equal(9, mine.Value);
+        Assert.Equal(9, theirLast.Value);
+        Assert.Equal(theirScore, them.CurrentScore); // untouched
+        Assert.True(them.IsHolding);
+    }
+
+    [Fact]
     public void Copy_rewrites_my_card_and_score_and_leaves_theirs_alone()
     {
         Player me = Player("You"), them = Player("Them");

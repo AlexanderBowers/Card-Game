@@ -1282,7 +1282,7 @@ public sealed class TableUi
         Scores.HoldShown(owner, ownerBefore);
         Moments.PlayCopy(
             FindCardView(mine, ownerBoard),
-            FindCardView(target.LastDrawnCard, targetBoard),
+            FindCardView(CardEffects.CopySource(target), targetBoard),
             () =>
             {
                 RefreshCardFace(mine, ownerBoard);

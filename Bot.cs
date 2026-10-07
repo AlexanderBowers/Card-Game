@@ -368,7 +368,7 @@ public sealed class Bot
 
             // CanPlayEffect has already guaranteed both drawn cards exist and differ.
             int mine = Me.LastDrawnCard.Value;
-            int theirs = You.LastDrawnCard.Value;
+            int theirs = CardEffects.CopySource(You).Value;
             int newScore = Me.CurrentScore - mine + theirs;
 
             if (newScore > target) continue; // never copy myself into a bust

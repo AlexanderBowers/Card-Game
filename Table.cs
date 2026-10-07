@@ -252,7 +252,7 @@ public sealed class Table
             case CardEffect.Copy:
             {
                 int mine = player.LastDrawnCard?.Value ?? 0;
-                int theirs = other.LastDrawnCard?.Value ?? 0;
+                int theirs = CardEffects.CopySource(other)?.Value ?? 0;
                 int after = player.CurrentScore - mine + theirs;
                 return $"Your {mine} becomes a {theirs}: {player.CurrentScore} to {after}";
             }

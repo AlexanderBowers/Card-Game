@@ -636,7 +636,7 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
         if (CardEffects.RewritesDrawnCards(card.Effect))
         {
             _ui.PlayCopy(owner, ownerBefore, target, BoardOf(owner), BoardOf(target));
-            _ui.RefreshCardFace(target.LastDrawnCard, BoardOf(target));
+            _ui.RefreshCardFace(CardEffects.CopySource(target), BoardOf(target));
         }
 
         _ui.Toasts.ShowEffectBanner(play.Result.Narration); // the player has to SEE it
