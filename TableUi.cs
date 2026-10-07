@@ -778,7 +778,11 @@ public sealed class TableUi
         // While the set-end explanation is up, EndSet owns this label.
         if (_host.GameStarted && _setInfoLabel != null && !State.IsGameOver && !_host.SetOverPending)
         {
-            _setInfoLabel.Text = _host.SetInfoLine();
+            // When the target line has news (the target moved, or the finale's rules), it already
+            // names the target: a big "Target 23" over "Target 23 (up from 20)" said it twice
+            // (playtest, 2026-10-06). The one line is enough.
+            bool targetLineSpeaks = _targetLabel != null && !string.IsNullOrEmpty(_targetLabel.Text);
+            _setInfoLabel.Text = targetLineSpeaks ? string.Empty : _host.SetInfoLine();
             // The target is the one number in the middle of the table: big while it is the target,
             // the scene's own size again while EndSet uses the label for a sentence.
             _setInfoLabel.AddThemeFontSizeOverride("font_size", SetInfoTargetFont);
@@ -1097,7 +1101,7 @@ public sealed class TableUi
         if (run != null && run.CurrentRolledEffects != null)
         {
             string heading = run.Endless ? "ENDLESS" : "FINAL";
-            _targetLabel.Text = $"{heading}  -  TARGET {State.TargetScore}{run.FinaleRulesLine("\n")}";
+            _targetLabel.Text = $"{heading}  -  Target {State.TargetScore}{run.FinaleRulesLine("\n")}";
             _targetLabel.AddThemeColorOverride("font_color", BoardInk);
             return;
         }
@@ -1111,7 +1115,7 @@ public sealed class TableUi
 
         // A target that changes quietly is the game changing its own rules behind the player's back.
         string direction = run.CurrentTarget > run.PreviousTarget ? "up" : "down";
-        _targetLabel.Text = $"TARGET  {State.TargetScore}   ({direction} from {run.PreviousTarget})";
+        _targetLabel.Text = $"Target {State.TargetScore}  ({direction} from {run.PreviousTarget})";
         _targetLabel.AddThemeColorOverride("font_color", BoardInk);
     }
 

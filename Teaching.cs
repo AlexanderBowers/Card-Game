@@ -654,10 +654,14 @@ void fragment() {
         // it, every later step finishes with its own button or by doing the thing.
         _spotlightSkip.Visible = _tutorialIndex == 0;
         Control target = TutorialTarget(_tutorialIndex);
-        // A picked-up card rises and grows out of its slot: open the hole upward to show all of it.
-        float extraTop = ((_tutorialIndex == 2 || _tutorialIndex == OverStep) && target != null && _host.SelectedFor(_host.Player1) != null)
-            ? target.Size.Y * 0.5f : 0f;
-        PlaceSpotlight(target, blockHole: !doStep, TutorialLookTarget(_tutorialIndex), extraTop);
+        // A picked-up card rises and grows out of its slot. Ring the art itself (scaled and lifted -
+        // GetGlobalTransform carries both), not the slot plus a guess: the guess overshot and cut a
+        // bright notch into the Play button above the card (playtest, 2026-10-06).
+        if ((_tutorialIndex == 2 || _tutorialIndex == OverStep) && target is Button
+            && _host.SelectedFor(_host.Player1) != null && target.GetChildCount() > 0
+            && target.GetChild(0) is TextureRect art)
+            target = art;
+        PlaceSpotlight(target, blockHole: !doStep, TutorialLookTarget(_tutorialIndex));
     }
 
     // ------------------------------------------------------------------
