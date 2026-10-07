@@ -313,7 +313,7 @@ public partial class ShopOverlay : Control
         top.AddThemeConstantOverride("separation", 6);
         box.AddChild(top);
         _top = top;
-        top.AddChild(OverlayUi.MakeLabel("The Market", 34));
+        top.AddChild(OverlayUi.MakeLabel("Modifier Shop", 34));
         // Playtest, 2026-10-07: "Current Medals: 12" over "Next Target: 20".
         _medalLabel = OverlayUi.MakeLabel("", 26, OverlayUi.MedalGold);
         top.AddChild(_medalLabel);

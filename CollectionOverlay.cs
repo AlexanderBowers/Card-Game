@@ -45,7 +45,7 @@ public partial class CollectionOverlay : Control
         box.AddChild(OverlayUi.MakeLabel(
             // Two lines, not one: as one line it set the panel's width and ran off both sides of
             // a phone held upright (size check, 2026-10-06).
-            "A Modifier joins your collection once you own it.\nBuy it in the Market and it is yours to keep.", 15, OverlayUi.Muted));
+            "A Modifier joins your collection once you own it.\nBuy it in the Modifier Shop and it is yours to keep.", 15, OverlayUi.Muted));
 
         _grid = new GridContainer { Columns = Columns };
         _grid.AddThemeConstantOverride("h_separation", Gap);
