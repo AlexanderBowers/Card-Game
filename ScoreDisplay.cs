@@ -157,7 +157,10 @@ public sealed class ScoreDisplay
         }
         else if (_host.VsBot)
         {
-            SetText(L.P1OpponentScore, $"Them  {p2}");
+            // Side by side against the bot, the bot's own box already reads "Them 13", the right
+            // way up and level with yours: a second "Them" under "You" said it twice (playtest,
+            // 2026-10-06).
+            SetText(L.P1OpponentScore, string.Empty);
             SetText(L.P2OpponentScore, string.Empty);
         }
         else

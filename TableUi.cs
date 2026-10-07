@@ -161,6 +161,8 @@ public sealed class TableUi
     // ------------------------------------------------------------------
     public Control P1ScoreBlock => L?.P1ScoreBox;
     public Control DeckFootprint => L?.DeckFootprint ?? L?.Deck;
+    /// The deck itself - the control the 3D table mirrors, so the one to ask where the deck is drawn.
+    public Control DeckView => L?.Deck;
     public Control P1ActionRow => L?.P1ButtonSlot;
     public Control P1Hand => L?.P1Hand;
     public Control P1WinsRow => L?.P1WinsRow;
@@ -1115,7 +1117,9 @@ public sealed class TableUi
 
         // A target that changes quietly is the game changing its own rules behind the player's back.
         string direction = run.CurrentTarget > run.PreviousTarget ? "up" : "down";
-        _targetLabel.Text = $"Target {State.TargetScore}  ({direction} from {run.PreviousTarget})";
+        // Non-breaking spaces inside each half: if it has to wrap, it wraps as "Target 23" over
+        // "(up from 20)", never "Targe" over "t 23" or "(up" over "from 20)".
+        _targetLabel.Text = $"Target\u00A0{State.TargetScore}  ({direction}\u00A0from\u00A0{run.PreviousTarget})";
         _targetLabel.AddThemeColorOverride("font_color", BoardInk);
     }
 

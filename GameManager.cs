@@ -820,7 +820,7 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
         // Alexander, 2026-09-30: the middle of the table shows the TARGET, not the stage - "if it's
         // 20, just say 20". The stage is announced once, by the slide-in at the start of the match.
         int target = _gameState.TargetScore;
-        return target == 20 ? "20" : $"Target {target}";
+        return target == 20 ? "20" : $"Target\u00A0{target}"; // never wrapped as "Targe" / "t 23"
     }
 
     /// Drops the run one rung either way and walks straight into that match (the debug row).

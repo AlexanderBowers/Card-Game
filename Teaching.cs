@@ -440,7 +440,11 @@ void fragment() {
         switch (step)
         {
             case 0: return _ui.P1ScoreBlock;
-            case 1: return _ui.DeckFootprint;
+            // On the 3D table the deck is drawn tilted and raised, away from its flat footprint:
+            // ring the deck the 3D table actually drew (playtest, 2026-10-06: the hole sat below
+            // and left of the deck in portrait, with the caption pushed off).
+            case 1: return TableWorld3D.Instance != null && TableWorld3D.Instance.TryScreenRect(_ui.DeckView, out _)
+                ? _ui.DeckView : _ui.DeckFootprint;
             case 2: return LessonCardControl() ?? _ui.P1Hand; // pass 49: the one right card
             case 3: return _ui.P1ActionRow;
             case 4: return _ui.P1WinsRow;
