@@ -56,6 +56,12 @@ public class SaveFormatTests
 
         back.CompleteFlipLesson();
         Assert.False(Load(back.ToSaveJson()).FlipLessonPending);
+
+        // Replay the tutorial: the Modifier Shop lesson comes round again.
+        back.CompleteMarketLesson(flipCardInDeck: true);
+        back.ReplayTutorial();
+        Assert.False(back.MarketLessonSeen);
+        Assert.False(back.FlipLessonPending);
     }
 
     /// A profile with something in every field the save holds.

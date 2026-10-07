@@ -381,6 +381,10 @@ public partial class RunData
     public void ReplayTutorial()
     {
         TutorialSeen = false;
+        // Replaying the tutorial replays all of it (playtest, 2026-10-07): the next Modifier Shop
+        // visit teaches medals and the +/-1 again, and the match after it the flip.
+        MarketLessonSeen = false;
+        FlipLessonPending = false;
         Save();
     }
 
