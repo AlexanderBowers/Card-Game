@@ -115,7 +115,10 @@ public sealed class Teaching
     /// Player 1's staged hand. The +4 is the lesson; the rest are there so the hand looks normal.
     public static readonly int[] Modifiers = { 4, 3, -2, -1 };
 
-    private const int TutorialSteps = 5;
+    // The opening walkthrough: score, deck, play a Modifier, Draw Card / Hold. The fifth line it
+    // used to have - win three sets - waits for the moment it is true (playtest, 2026-10-07): it
+    // is shown the first time the player wins a set. See WinsStep.
+    private const int TutorialSteps = 4;
 
     // ------------------------------------------------------------------
     // The second lesson: over is not bust (playtest, 2026-10-06 - Alexander's mother did not
@@ -131,8 +134,15 @@ public sealed class Teaching
     /// Player 1's first draws in the second lesson's set, in draw order.
     public static readonly int[] OverLessonDraws = { 10, 1, 10 };
 
-    /// The step index the second lesson runs as (after the five walkthrough steps).
-    private const int OverStep = TutorialSteps;
+    /// The step index the second lesson runs as (after the four walkthrough steps).
+    private const int OverStep = 5;
+
+    /// The step index of the "you won the set" lesson: shown once, the first time the player
+    /// wins a set after finishing the walkthrough, on the wins row that has just filled in.
+    private const int WinsStep = 6;
+
+    /// The walkthrough was finished (not skipped) and the player has not yet won a set since.
+    public bool WinsLessonPending { get; private set; }
 
     /// The walkthrough was finished (not skipped) on a staged match, and the second lesson has
     /// not been shown yet.
@@ -466,7 +476,7 @@ void fragment() {
                 ? _ui.DeckView : _ui.DeckFootprint;
             case 2: return LessonCardControl() ?? _ui.P1Hand; // pass 49: the one right card
             case 3: return _ui.P1ActionRow;
-            case 4: return _ui.P1WinsRow;
+            case WinsStep: return _ui.P1WinsRow;
             case OverStep: return LessonCardControl() ?? _ui.P1Hand; // the minus card that saves you
             default: return null;
         }
@@ -500,21 +510,24 @@ void fragment() {
                      + "to Play it.";
             case 3:
                 return HoldOrDrawText();
-            case 4:
-                return $"Win {GameState.SetsToWinMatch} sets to take the match. These are yours "
-                     + "so far. That is everything - good luck.";
+            case WinsStep:
+                return $"You won the Set.\nWin {CountWord(GameState.SetsToWinMatch)} Sets to win the Match.";
             case OverStep:
             {
                 Card fix = BestModifier();
                 string name = fix != null ? (fix.Value > 0 ? "+" : "") + fix.Value : "minus Modifier";
-                return $"You are at {_host.Player1.CurrentScore}, over {_host.State.TargetScore} - but it is "
-                     + "not a bust until your turn ends. Play a minus Modifier to come back: "
-                     + $"tap the {name}, then tap it again.";
+                // Playtest, 2026-10-07: "too wordy".
+                return $"You have {_host.Player1.CurrentScore}.\nPlay a {name} Modifier to prevent going over.";
             }
             default:
                 return string.Empty;
         }
     }
+
+    private static string CountWord(int n) => n switch
+    {
+        1 => "one", 2 => "two", 3 => "three", 4 => "four", 5 => "five", _ => n.ToString(),
+    };
 
     /// The Draw Card / Hold step reads the live score, so it is honest on the staged first match,
     /// on a replay's real deal, and after whatever Modifier was just played. "On target" is said
@@ -592,8 +605,8 @@ void fragment() {
     {
         if (!Running) return;
 
-        // The second lesson is one step on its own.
-        if (_tutorialIndex == OverStep)
+        // The later lessons are one step each.
+        if (_tutorialIndex == OverStep || _tutorialIndex == WinsStep)
         {
             FinishTutorial();
             return;
@@ -624,15 +637,27 @@ void fragment() {
         if (fix == null || fix.Value >= 0) return;
 
         OverLessonPending = false;
-        StartOverLesson();
+        StartLesson(OverStep);
     }
 
-    private async void StartOverLesson()
+    /// The first set the player wins after the walkthrough: once the set-end panel is gone and
+    /// the next set is on the table, the wins row (one chip lit) gets its line.
+    private void TryStartWinsLesson()
     {
-        // Running at once, so the bot stands still (Bot.ProcessTurn checks it) - then the card
-        // that took the player over is allowed to land before the lesson about it appears.
+        if (!WinsLessonPending || Running) return;
+        if (!_host.GameStarted || _host.State.IsGameOver || _host.SetOverPending || _host.PromptShowing) return;
+        if (_menus.Covering || _host.State.SetsWonPlayer1 < 1) return;
+
+        WinsLessonPending = false;
+        StartLesson(WinsStep);
+    }
+
+    private async void StartLesson(int step)
+    {
+        // Running at once, so the bot stands still (Bot.ProcessTurn checks it) - then whatever
+        // just happened (a card landing, a new deal) settles before the lesson about it appears.
         Running = true;
-        _tutorialIndex = OverStep;
+        _tutorialIndex = step;
         _tutorialModifierCount = _host.Player1.Modifiers.Count;
 
         for (int i = 0; i < 40; i++)
@@ -792,6 +817,7 @@ void fragment() {
     /// step's completion never has to be wired into the five handlers that could cause it.
     public void CheckTutorialProgress()
     {
+        TryStartWinsLesson();
         TryStartOverLesson();
         if (!Running || _spotlightOverlay == null || !_spotlightOverlay.Visible) return;
 
@@ -813,6 +839,7 @@ void fragment() {
         // Finished properly (not skipped) on the staged first match: the second lesson - over is
         // not bust - waits for the next set.
         if (walkthroughCompleted && Staged) OverLessonPending = true;
+        if (walkthroughCompleted) WinsLessonPending = true;
         SetEmphasis(null, false); // no pulse or locked Draw Card outlives the lesson
         if (_spotlightOverlay != null) _spotlightOverlay.Visible = false;
         RunData.Instance?.MarkTutorialSeen();
