@@ -165,6 +165,7 @@ public sealed class TableUi
     public Control DeckView => L?.Deck;
     public Control P1ActionRow => L?.P1ButtonSlot;
     public Control P1Hand => L?.P1Hand;
+    public Control P1FlipValueButton => L?.P1FlipValue;
     public Control P1WinsRow => L?.P1WinsRow;
     public Control EffectBanner => (Control)L?.EffectToast ?? L?.EffectLabel;
     public Control P1Board => L?.P1Board;

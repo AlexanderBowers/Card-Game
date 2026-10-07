@@ -65,6 +65,95 @@ public partial class DeckOverlay : Control
     private float _dragDistance;
 
     // ------------------------------------------------------------------
+    // The first Market visit's lesson, continued (playtest, 2026-10-07): the +/-1 just bought goes
+    // into the deck, and a +1 comes out to make room. Driven by the deck's own state, so a player
+    // who puts the +1 back gets the "take one out" step again.
+    // ------------------------------------------------------------------
+
+    /// Set by the Market when its lesson bought a card: that card's inventory index.
+    public static int LessonCardIndex = -1;
+
+    private int _lessonCard = -1;
+    private int _lessonRemove = -1;
+    private readonly Dictionary<int, Control> _slotButtons = new Dictionary<int, Control>();
+    private readonly Dictionary<int, Control> _collectionButtons = new Dictionary<int, Control>();
+    private Guide.Step _stepRemove, _stepAdd, _stepRefill, _stepStart;
+
+    private Guide.Step LessonStep()
+    {
+        RunData run = RunData.Instance;
+        if (_lessonCard < 0 || !Visible || run == null) return null;
+
+        int required = Math.Min(RunData.SideDeckSize, run.Inventory.Count);
+        bool inDeck = _deck.Contains(_lessonCard);
+        bool full = _deck.Count >= required;
+
+        if (!inDeck && full)
+        {
+            int pick = RemoveCandidate(run);
+            if (pick != _lessonRemove)
+            {
+                _lessonRemove = pick;
+                _stepRemove.Text = $"Your deck holds twelve Modifiers. To make room, tap the {run.Inventory[pick].Label} to take it out.";
+            }
+            return _stepRemove;
+        }
+        if (!inDeck)
+        {
+            if (_collectionButtons.TryGetValue(_lessonCard, out Control button) && GodotObject.IsInstanceValid(button))
+                _collectionScroll.EnsureControlVisible(button);
+            return _stepAdd;
+        }
+        return full ? _stepStart : _stepRefill;
+    }
+
+    /// The card the lesson asks the player to take out: a plain +1 if the deck has one, otherwise
+    /// its smallest plain plus card, otherwise whatever is first.
+    private int RemoveCandidate(RunData run)
+    {
+        int best = -1;
+        foreach (int index in _deck)
+        {
+            if (index < 0 || index >= run.Inventory.Count || index == _lessonCard) continue;
+            ModifierDef def = run.Inventory[index];
+            if (def.Effect != CardEffect.None || def.CanFlipValue || def.Value <= 0) continue;
+            if (best < 0 || def.Value < run.Inventory[best].Value) best = index;
+        }
+        if (best >= 0) return best;
+        foreach (int index in _deck) if (index != _lessonCard) return index;
+        return _deck.Count > 0 ? _deck[0] : -1;
+    }
+
+    private void StartLesson(RunData run)
+    {
+        _lessonCard = LessonCardIndex;
+        LessonCardIndex = -1;
+        if (_lessonCard < 0 || _lessonCard >= run.Inventory.Count) { _lessonCard = -1; return; }
+
+        string name = run.Inventory[_lessonCard].Label.Replace("\u00B1", "+/-");
+        _lessonRemove = -1;
+        _stepRemove = new Guide.Step { Target = () => ButtonFor(_slotButtons, _lessonRemove) };
+        _stepAdd = new Guide.Step
+        {
+            Target = () => ButtonFor(_collectionButtons, _lessonCard),
+            Text = $"Now tap the {name} to put it in your deck.",
+        };
+        _stepRefill = new Guide.Step
+        {
+            Target = () => _collectionScroll,
+            Text = "Your deck needs twelve. Tap a Modifier to add one back.",
+        };
+        _stepStart = new Guide.Step
+        {
+            Target = () => _continueButton,
+            Text = "Your deck is ready. Four of its twelve are dealt to you each match. Start the Match.",
+        };
+    }
+
+    private static Control ButtonFor(Dictionary<int, Control> buttons, int index) =>
+        buttons.TryGetValue(index, out Control c) && GodotObject.IsInstanceValid(c) ? c : null;
+
+    // ------------------------------------------------------------------
     // Building and opening
     // ------------------------------------------------------------------
     public void Setup(Func<Card, Vector2, Control> cardFactory)
@@ -165,6 +254,8 @@ public partial class DeckOverlay : Control
         _startRow = startRow;
         startRow.AddChild(_continueButton);
         box.AddChild(startRow);
+
+        AddChild(new Guide(LessonStep));
     }
 
     public override void _Ready()
@@ -199,6 +290,7 @@ public partial class DeckOverlay : Control
 
         _deck.Clear();
         _deck.AddRange(run.SideDeck);
+        StartLesson(run);
 
         Node parent = GetParent();
         if (parent != null) OverlayUi.BringToFront(this);
@@ -212,6 +304,12 @@ public partial class DeckOverlay : Control
     private void Close()
     {
         RunData.Instance?.SetSideDeck(_deck);
+        if (_lessonCard >= 0)
+        {
+            // Next match, the table shows how to flip it - if it went in the deck.
+            RunData.Instance?.CompleteMarketLesson(_deck.Contains(_lessonCard));
+            _lessonCard = -1;
+        }
         Finish();
     }
 
@@ -309,6 +407,8 @@ public partial class DeckOverlay : Control
 
         OverlayUi.ClearChildren(_collectionGrid);
         OverlayUi.ClearChildren(_slotGrid);
+        _collectionButtons.Clear();
+        _slotButtons.Clear();
 
         bool deckFull = _deck.Count >= RunData.SideDeckSize;
         int spare = 0;
@@ -324,6 +424,7 @@ public partial class DeckOverlay : Control
             Button button = OverlayUi.CardButton(view, _cardSize, () => { if (!_dragMoved) AddToDeck(captured); });
             button.Disabled = deckFull;
             _collectionGrid.AddChild(button);
+            _collectionButtons[index] = button;
         }
 
         // Tell the player to scroll only when there is something below the fold.
@@ -344,7 +445,9 @@ public partial class DeckOverlay : Control
 
                 int captured = inventoryIndex;
                 Control view = _cardFactory(run.Inventory[inventoryIndex].ToCard(), _cardSize);
-                _slotGrid.AddChild(OverlayUi.CardButton(view, _cardSize, () => { if (!_dragMoved) RemoveFromDeck(captured); }));
+                Button slotButton = OverlayUi.CardButton(view, _cardSize, () => { if (!_dragMoved) RemoveFromDeck(captured); });
+                _slotGrid.AddChild(slotButton);
+                _slotButtons[inventoryIndex] = slotButton;
             }
             else
             {

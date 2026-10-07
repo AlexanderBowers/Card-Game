@@ -19,7 +19,71 @@ public partial class ShopOverlay : Control
         public ModifierDef Def;
         public int Price;
         public bool Sold;
+        public Control PriceLabel;   // this visit's controls, for the first-visit lesson
+        public Control BuyButton;
     }
+
+    // ------------------------------------------------------------------
+    // The first visit's lesson (playtest, 2026-10-07: a first-time player "has no knowledge of
+    // medals and prices", and nobody read the note at the bottom - which is gone). Four steps on
+    // the Guide: what Medals are and how they are won; that Modifiers cost Medals and are kept for
+    // good; buy the +/-1 this visit guarantees; then on to the deck screen, whose own lesson puts
+    // it in the deck (DeckOverlay.LessonCardIndex).
+    // ------------------------------------------------------------------
+    private bool _lesson;
+    private int _lessonTell;            // 0: medals, 1: prices, 2: past the two TELL steps
+    private Offer _lessonOffer;         // the guaranteed +/-1
+    private int _lessonInventoryIndex = -1;
+    private Guide.Step _stepMedals, _stepPrices, _stepBuy, _stepContinue;
+
+    private Guide.Step LessonStep()
+    {
+        if (!_lesson || !Visible || _lessonOffer == null) return null;
+        if (_lessonTell == 0) return _stepMedals;
+        if (_lessonTell == 1) return _stepPrices;
+        return _lessonOffer.Sold ? _stepContinue : _stepBuy;
+    }
+
+    private void StartLesson(RunData run)
+    {
+        // Guarantee the card: a +/-1, priced so the player can always afford it.
+        int at = _offers.FindIndex(o => o.Def.Effect == CardEffect.None && o.Def.CanFlipValue && Math.Abs(o.Def.Value) == 1);
+        if (at < 0)
+        {
+            ModifierDef flip = new ModifierDef(1, canFlipValue: true);
+            Offer offer = new Offer { Def = flip, Price = PriceOf(flip) };
+            if (_offers.Count > 1) { at = 1; _offers[1] = offer; } // slot 0 is the signature card
+            else { _offers.Add(offer); at = _offers.Count - 1; }
+        }
+        _lessonOffer = _offers[at];
+        _lessonOffer.Price = Math.Min(_lessonOffer.Price, run.Medals);
+        _lessonTell = 0;
+        _lessonInventoryIndex = -1;
+
+        _stepMedals = new Guide.Step
+        {
+            Target = () => _medalLabel.Visible ? _medalLabel : _subtitle,
+            Text = "These are your Medals. You win them by winning a Match: one for each Set you take, plus a prize for the win.",
+            GotIt = () => _lessonTell = 1,
+        };
+        _stepPrices = new Guide.Step
+        {
+            Target = () => _lessonOffer.PriceLabel,
+            Text = "Spend Medals on new Modifiers to make your deck stronger. They are yours to keep, even if you lose a run.",
+            GotIt = () => _lessonTell = 2,
+        };
+        _stepBuy = new Guide.Step
+        {
+            Target = () => _lessonOffer.BuyButton,
+            Text = "This +/-1 can be played as +1 or -1, whichever you need. Buy it.",
+        };
+        _stepContinue = new Guide.Step
+        {
+            Target = () => _continueButton,
+            Text = "Now put it in your deck.",
+        };
+    }
+
 
     private Func<Card, Vector2, Control> _cardFactory;
     private Action _onDone;
@@ -212,9 +276,6 @@ public partial class ShopOverlay : Control
     private PanelContainer _panel;
     private Control _top;
     private Control _bottom;
-    private Label _note;
-    private const string NoteTwoLines = "Modifiers you buy are yours to keep - a lost run never takes them away.\nYou choose which twelve go in your deck next.";
-    private const string NoteThreeLines = "Modifiers you buy are yours to keep -\na lost run never takes them away.\nYou choose which twelve go in your deck next.";
     private GridContainer _offerGrid;
     private int _columns = 2;
     private float _cellWidth = 200f;
@@ -270,10 +331,8 @@ public partial class ShopOverlay : Control
         bottom.AddThemeConstantOverride("separation", 10);
         box.AddChild(bottom);
         _bottom = bottom;
-        Label note = _note = OverlayUi.MakeLabel(
-            "Modifiers you buy are yours to keep - a lost run never takes them away.\nYou choose which twelve go in your deck next.",
-            17, OverlayUi.Muted);
-        bottom.AddChild(note); // broken into lines by hand in LayoutForSize, never autowrapped
+        // (The note that sat here - "Modifiers you buy are yours to keep..." - is gone: players did
+        // not read it. The first visit's lesson says it at the moment it matters.)
 
         _continueButton = new Button { Text = "Continue to your Deck", CustomMinimumSize = new Vector2(300, 52) };
         OverlayUi.StyleButton(_continueButton, primary: true);
@@ -281,6 +340,8 @@ public partial class ShopOverlay : Control
         CenterContainer buttonRow = new CenterContainer();
         buttonRow.AddChild(_continueButton);
         bottom.AddChild(buttonRow);
+
+        AddChild(new Guide(LessonStep));
     }
 
     public override void _Ready()
@@ -318,6 +379,9 @@ public partial class ShopOverlay : Control
         foreach (ModifierDef def in RollOffers(_random, run, OfferCount))
             _offers.Add(new Offer { Def = def, Price = PriceOf(def) });
 
+        _lesson = !run.MarketLessonSeen;
+        if (_lesson) StartLesson(run);
+
         _subtitleBase = $"Next: {run.CurrentOpponent} - target {run.CurrentTarget}";
         _subtitle.Text = _subtitleBase;
 
@@ -333,6 +397,9 @@ public partial class ShopOverlay : Control
 
     private void Close()
     {
+        // The lesson carries on on the deck screen, with the card it just bought.
+        if (_lesson && _lessonInventoryIndex >= 0) DeckOverlay.LessonCardIndex = _lessonInventoryIndex;
+        _lesson = false;
         Visible = false;
         Action done = _onDone;
         _onDone = null;
@@ -348,20 +415,10 @@ public partial class ShopOverlay : Control
         Vector2 view = OverlayUi.ViewSize(this);
         float panelW = view.X - _panel.OffsetLeft + _panel.OffsetRight;
         float panelH = view.Y - _panel.OffsetTop + _panel.OffsetBottom;
-        // Size check, 2026-10-07: the header and footer took 410 of a wide phone's 720 units of
-        // height held sideways, and the cards came out a third of the size. The note was an
-        // autowrapping label, which reports the height it wrapped to at some narrower width; it is
-        // now broken into lines by hand for the shape of the screen. Held sideways the medals move
-        // up beside the subtitle, and on a wide phone the note (said again on the deck screen and
-        // in How to Play) is dropped.
+        // Size check, 2026-10-07: held sideways the medals move up beside the subtitle, so the
+        // cards get the height.
         bool sideways = view.X > view.Y * 1.25f;
         _wide = sideways;
-        bool dropNote = view.X / Mathf.Max(1f, view.Y) > 1.9f;
-        if (_note != null)
-        {
-            _note.Visible = !dropNote;
-            _note.Text = sideways ? NoteTwoLines : NoteThreeLines;
-        }
         _medalLabel.Visible = !sideways;
         float chrome = _top.GetCombinedMinimumSize().Y + _bottom.GetCombinedMinimumSize().Y + 2 * BoxGap;
         Vector2 room = new Vector2(panelW - 2 * PanelPad, panelH - 2 * PanelPad - chrome);
@@ -421,9 +478,11 @@ public partial class ShopOverlay : Control
             card.SizeFlagsHorizontal = Control.SizeFlags.ShrinkCenter;
             column.AddChild(card);
 
-            column.AddChild(OverlayUi.MakeLabel(
+            Label price = OverlayUi.MakeLabel(
                 offer.Sold ? "bought" : $"{offer.Price} medals",
-                20, offer.Sold ? OverlayUi.Muted : OverlayUi.MedalGold));
+                20, offer.Sold ? OverlayUi.Muted : OverlayUi.MedalGold);
+            column.AddChild(price);
+            offer.PriceLabel = price;
 
             // An effect card is a rule, not a number, and the face only has room for a glyph. The
             // market is where the player decides whether to spend a match's winnings on one, so
@@ -448,6 +507,7 @@ public partial class ShopOverlay : Control
             OverlayUi.StyleButton(buy, primary: !offer.Sold && run.Medals >= offer.Price);
             buy.Pressed += () => Buy(captured);
             column.AddChild(buy);
+            offer.BuyButton = buy;
         }
     }
 
@@ -458,7 +518,8 @@ public partial class ShopOverlay : Control
 
         run.SpendMedals(offer.Price);
         bool wasComplete = run.CollectionComplete;
-        run.AddToInventory(offer.Def);
+        int index = run.AddToInventory(offer.Def);
+        if (_lesson && offer == _lessonOffer) _lessonInventoryIndex = index;
         // The collection log fills by owning now, so the Market is where it completes.
         if (!wasComplete && run.CollectionComplete) _subtitle.Text = "Collection complete! Your deck now has a gilded back.";
         offer.Sold = true;

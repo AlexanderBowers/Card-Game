@@ -16,6 +16,8 @@ internal sealed class FakeTableHost : ITableHost
     public bool TutorialStaged { get; set; }
     public IReadOnlyList<int> TutorialOpening { get; set; } = Array.Empty<int>();
     public bool TutorialOverLesson { get; set; }
+    public bool TutorialFlipLesson { get; set; }
+    public IReadOnlyList<int> TutorialFlipDraws { get; set; } = Array.Empty<int>();
     public IReadOnlyList<int> TutorialOverDraws { get; set; } = Array.Empty<int>();
     public IReadOnlyList<int> TutorialModifiers { get; set; } = Array.Empty<int>();
     public List<CardEffect> LocalSpecialsUnlocked { get; set; } = new List<CardEffect>();
@@ -167,6 +169,22 @@ public class TableTests
 
         Assert.Equal(new[] { 10, 1, 10 }, host.Player1.ActiveCardsOnBoard.Select(c => c.Value).Take(3));
         Assert.Equal(40 - host.Player1.ActiveCardsOnBoard.Count, table.Remaining(host.Player1));
+    }
+
+    [Fact]
+    public void The_flip_lesson_takes_you_one_over_the_target_in_the_first_set()
+    {
+        Assert.Equal(new[] { 10, 1, 10 }, Table.FlipLessonDraws(20));
+        Assert.Equal(24, Table.FlipLessonDraws(23).Sum());
+        Assert.Empty(Table.FlipLessonDraws(18)); // one-card opening: nothing clean to stack
+
+        var host = new FakeTableHost { TutorialFlipLesson = true, TutorialFlipDraws = Table.FlipLessonDraws(20) };
+        var table = new Table(host);
+        table.StartSet();
+        table.DealTurn();
+        table.DealTurn();
+        Assert.Equal(new[] { 10, 1, 10 }, host.Player1.ActiveCardsOnBoard.Select(c => c.Value));
+        Assert.Equal(21, host.Player1.CurrentScore);
     }
 
     [Fact]

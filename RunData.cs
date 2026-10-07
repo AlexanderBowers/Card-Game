@@ -55,6 +55,29 @@ public partial class RunData
     /// has changed a great deal since they last read anything about it.
     public bool TutorialSeen { get; private set; }
 
+    /// The first Market visit has been walked through: what medals are, what a price is, buying
+    /// the guaranteed +/-1 and putting it in the deck (playtest, 2026-10-07: "the first time a
+    /// player encounters the Modifier Shop can be confusing"). Profile level, like TutorialSeen.
+    public bool MarketLessonSeen { get; private set; }
+
+    /// The Market lesson put a +/-1 in the deck, and the table has not yet shown how to flip it.
+    /// Saved, because the next match is a scene reload away.
+    public bool FlipLessonPending { get; private set; }
+
+    public void CompleteMarketLesson(bool flipCardInDeck)
+    {
+        MarketLessonSeen = true;
+        FlipLessonPending = flipCardInDeck;
+        Save();
+    }
+
+    public void CompleteFlipLesson()
+    {
+        if (!FlipLessonPending) return;
+        FlipLessonPending = false;
+        Save();
+    }
+
     /// Set by the deck screen just before the table scene is reloaded for the next rung, so the player
     /// walks straight into the match instead of landing back on a Start button. Deliberately not
     /// saved: it is about this reload, not about the run. (This object survives the reload.)
@@ -622,6 +645,8 @@ public partial class RunData
         MatchRescueUsed = false;
         ClearRuleset();
         TutorialSeen = false; // a wiped save IS a first launch, tutorial included
+        MarketLessonSeen = false;
+        FlipLessonPending = false;
         CardsMet.Clear();
         CollectorBack = false;
         Inventory.Clear();

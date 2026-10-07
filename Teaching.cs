@@ -141,6 +141,24 @@ public sealed class Teaching
     /// wins a set after finishing the walkthrough, on the wins row that has just filled in.
     private const int WinsStep = 6;
 
+    // ------------------------------------------------------------------
+    // The flip lesson (playtest, 2026-10-07). The first Market visit put a +/-1 in the deck
+    // (RunData.FlipLessonPending). In the next match the hand is sure to hold it, the first set
+    // takes Player 1 to one over the target, and three DO steps show the way back: pick the +/-1
+    // up, Flip Value, play it as -1.
+    // ------------------------------------------------------------------
+    private const int FlipPick = 7;
+    private const int FlipFlip = 8;
+    private const int FlipPlay = 9;
+    private Card _flipCard;
+    private bool _flipRunning;
+
+    /// This match is the flip lesson's (staging the hand and the first set).
+    public bool FlipLessonMatch =>
+        _host.VsBot && _host.InRun && !Staged && RunData.Instance != null && RunData.Instance.FlipLessonPending;
+
+    private static bool IsFlipStep(int step) => step == FlipPick || step == FlipFlip || step == FlipPlay;
+
     /// The walkthrough was finished (not skipped) and the player has not yet won a set since.
     public bool WinsLessonPending { get; private set; }
 
@@ -478,6 +496,9 @@ void fragment() {
             case 3: return _ui.P1ActionRow;
             case WinsStep: return _ui.P1WinsRow;
             case OverStep: return LessonCardControl() ?? _ui.P1Hand; // the minus card that saves you
+            case FlipPick:
+            case FlipPlay: return (_flipCard != null ? _ui.P1HandCardFor(_flipCard) : null) ?? _ui.P1Hand;
+            case FlipFlip: return _ui.P1FlipValueButton;
             default: return null;
         }
     }
@@ -492,7 +513,7 @@ void fragment() {
     /// could not be pressed - and the lesson did not need two steps anyway. Tapping the same card
     /// again commits it (the quick path the touch model has always had), so one step teaches both
     /// halves and never has to find a control that only exists mid-gesture.
-    private static bool TutorialIsDoStep(int step) => step == 2 || step == 3 || step == OverStep;
+    private static bool TutorialIsDoStep(int step) => step == 2 || step == 3 || step == OverStep || IsFlipStep(step);
 
     private string TutorialTextFor(int step)
     {
@@ -510,6 +531,12 @@ void fragment() {
                      + "to Play it.";
             case 3:
                 return HoldOrDrawText();
+            case FlipPick:
+                return $"You have {_host.Player1.CurrentScore}. Your +/-1 can be played as +1 or -1. Tap it to pick it up.";
+            case FlipFlip:
+                return "Press Flip Value to turn it into -1.";
+            case FlipPlay:
+                return $"Now tap the -1 again to play it and get back to {_host.State.TargetScore}.";
             case WinsStep:
                 return $"You won the Set.\nWin {CountWord(GameState.SetsToWinMatch)} Sets to win the Match.";
             case OverStep:
@@ -561,6 +588,9 @@ void fragment() {
             case OverStep:
                 return _host.Player1.Modifiers.Count < _tutorialModifierCount || !_host.Player1.CanAct
                     || _host.Player1.CurrentScore <= _host.State.TargetScore;
+            case FlipPick: return FlipGone() || _host.SelectedFor(_host.Player1) == _flipCard;
+            case FlipFlip: return FlipGone() || _flipCard.Value < 0;
+            case FlipPlay: return FlipGone();
             default: return false;
         }
     }
@@ -604,6 +634,17 @@ void fragment() {
     private void AdvanceTutorial()
     {
         if (!Running) return;
+
+        if (_tutorialIndex == FlipPick || _tutorialIndex == FlipFlip)
+        {
+            _tutorialIndex = FlipGone() ? FlipPlay + 1 : _tutorialIndex + 1;
+            if (_tutorialIndex <= FlipPlay) { RefreshSpotlight(); return; }
+        }
+        if (_tutorialIndex > FlipPlay - 1 && _tutorialIndex <= FlipPlay + 1)
+        {
+            FinishTutorial();
+            return;
+        }
 
         // The later lessons are one step each.
         if (_tutorialIndex == OverStep || _tutorialIndex == WinsStep)
@@ -650,6 +691,37 @@ void fragment() {
 
         WinsLessonPending = false;
         StartLesson(WinsStep);
+    }
+
+    /// The flip card was played (or the turn ended some other way): the lesson is over.
+    private bool FlipGone() =>
+        _flipCard == null || !_host.Player1.Modifiers.Contains(_flipCard) || !_host.Player1.CanAct;
+
+    /// Player 1 is over the target, can still act, and holds a +/-1 (or any +/- card) whose minus
+    /// side brings them back.
+    private void TryStartFlipLesson()
+    {
+        RunData run = RunData.Instance;
+        if (run == null || !run.FlipLessonPending || Running || !_host.VsBot || !_host.InRun) return;
+        if (!_host.GameStarted || _host.State.IsGameOver || _host.SetOverPending || _host.PromptShowing) return;
+        if (_menus.Covering) return;
+
+        Player you = _host.Player1;
+        int target = _host.State.TargetScore;
+        if (!you.CanAct || you.CurrentScore <= target) return;
+
+        Card flip = null;
+        foreach (Card c in you.Modifiers)
+        {
+            if (!c.CanFlipValue || c.Effect != CardEffect.None) continue;
+            if (you.CurrentScore - System.Math.Abs(c.Value) > target) continue;
+            if (flip == null || System.Math.Abs(c.Value) < System.Math.Abs(flip.Value)) flip = c;
+        }
+        if (flip == null) return;
+
+        _flipCard = flip;
+        _flipRunning = true;
+        StartLesson(FlipPick);
     }
 
     private async void StartLesson(int step)
@@ -705,7 +777,7 @@ void fragment() {
         // A picked-up card rises and grows out of its slot. Ring the art itself (scaled and lifted -
         // GetGlobalTransform carries both), not the slot plus a guess: the guess overshot and cut a
         // bright notch into the Play button above the card (playtest, 2026-10-06).
-        if ((_tutorialIndex == 2 || _tutorialIndex == OverStep) && target is Button
+        if ((_tutorialIndex == 2 || _tutorialIndex == OverStep || _tutorialIndex == FlipPick || _tutorialIndex == FlipPlay) && target is Button
             && _host.SelectedFor(_host.Player1) != null && target.GetChildCount() > 0
             && target.GetChild(0) is TextureRect art)
             target = art;
@@ -755,7 +827,8 @@ void fragment() {
 
     private void ApplyTutorialEmphasis(int step)
     {
-        Card pulseCard = (step == 2 || step == OverStep) && _host.SelectedFor(_host.Player1) == null ? BestModifier() : null;
+        Card pulseCard = (step == 2 || step == OverStep) && _host.SelectedFor(_host.Player1) == null ? BestModifier()
+                       : step == FlipPick ? _flipCard : null;
         bool forceHold = step == 3 && OnTargetExactly;
         SetEmphasis(pulseCard, forceHold);
     }
@@ -773,7 +846,7 @@ void fragment() {
     /// A second thing a step points at, to look at only (pass 46). The Modifier step shows the
     /// score as well as the hand: picking a card up previews the score it would make, and that
     /// change is the lesson.
-    private Control TutorialLookTarget(int step) => (step == 2 || step == OverStep) ? _ui.P1ScoreBlock : null;
+    private Control TutorialLookTarget(int step) => (step == 2 || step == OverStep || IsFlipStep(step)) ? _ui.P1ScoreBlock : null;
 
     /// ...and then again once the layout has actually settled.
     ///
@@ -819,7 +892,18 @@ void fragment() {
     {
         TryStartWinsLesson();
         TryStartOverLesson();
+        TryStartFlipLesson();
         if (!Running || _spotlightOverlay == null || !_spotlightOverlay.Visible) return;
+
+        // The flip steps follow the card: put it down and the lesson goes back to "pick it up";
+        // flip it back to plus and it goes back to "Flip Value".
+        if (IsFlipStep(_tutorialIndex) && !FlipGone())
+        {
+            int was = _tutorialIndex;
+            if (_host.SelectedFor(_host.Player1) != _flipCard) _tutorialIndex = FlipPick;
+            else if (_tutorialIndex == FlipPlay && _flipCard.Value > 0) _tutorialIndex = FlipFlip;
+            if (_tutorialIndex != was) { Defer(RefreshSpotlight); return; }
+        }
 
         if (TutorialIsDoStep(_tutorialIndex) && TutorialStepDone(_tutorialIndex))
         {
@@ -840,6 +924,13 @@ void fragment() {
         // not bust - waits for the next set.
         if (walkthroughCompleted && Staged) OverLessonPending = true;
         if (walkthroughCompleted) WinsLessonPending = true;
+        if (_flipRunning)
+        {
+            _flipRunning = false;
+            _flipCard = null;
+            RunData.Instance?.CompleteFlipLesson();
+            RunData.Instance?.MarkCardMet("flip"); // taught, so no card-intro later
+        }
         SetEmphasis(null, false); // no pulse or locked Draw Card outlives the lesson
         if (_spotlightOverlay != null) _spotlightOverlay.Visible = false;
         RunData.Instance?.MarkTutorialSeen();
@@ -907,7 +998,12 @@ void fragment() {
     public void QueueCoachMarksForModifiers()
     {
         if (!_host.VsBot) return;
-        foreach (Card card in _host.Player1.Modifiers) QueueCoachMark(card, fromOpponent: false);
+        foreach (Card card in _host.Player1.Modifiers)
+        {
+            // The flip lesson teaches the +/- card at the moment it matters; no card-intro over it.
+            if (FlipLessonMatch && card.CanFlipValue && card.Effect == CardEffect.None) continue;
+            QueueCoachMark(card, fromOpponent: false);
+        }
     }
 
     /// Runs from UpdateUI. Shows at most one at a time, and only when nothing else owns the

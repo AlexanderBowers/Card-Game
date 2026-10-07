@@ -42,6 +42,22 @@ public class SaveFormatTests
         return run;
     }
 
+    [Fact]
+    public void The_market_and_flip_lessons_survive_a_save_and_old_saves_have_neither()
+    {
+        RunData old = Load(GodotWrittenV10);
+        Assert.False(old.MarketLessonSeen);
+        Assert.False(old.FlipLessonPending);
+
+        old.CompleteMarketLesson(flipCardInDeck: true);
+        RunData back = Load(old.ToSaveJson());
+        Assert.True(back.MarketLessonSeen);
+        Assert.True(back.FlipLessonPending);
+
+        back.CompleteFlipLesson();
+        Assert.False(Load(back.ToSaveJson()).FlipLessonPending);
+    }
+
     /// A profile with something in every field the save holds.
     private static RunData BusyProfile()
     {

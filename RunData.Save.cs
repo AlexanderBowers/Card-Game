@@ -34,6 +34,8 @@ public partial class RunData
             w.WriteNumber("step", StepIndex);
             w.WriteNumber("furthest", FurthestStep);
             w.WriteBoolean("tutorialSeen", TutorialSeen);
+            w.WriteBoolean("marketLessonSeen", MarketLessonSeen);
+            w.WriteBoolean("flipLessonPending", FlipLessonPending);
             WriteStrings(w, "cardsMet", CardsMet);
             w.WriteBoolean("collectorBack", CollectorBack);
             w.WriteBoolean("endless", Endless);
@@ -160,6 +162,8 @@ public partial class RunData
         StepIndex = Int(data, "step");
         FurthestStep = Int(data, "furthest", StepIndex);
         TutorialSeen = Bool(data, "tutorialSeen");
+        MarketLessonSeen = Bool(data, "marketLessonSeen");
+        FlipLessonPending = Bool(data, "flipLessonPending");
 
         // Version 9: decks and boards. Version 10: Classic is the default, not Bronze. A version 9
         // save was GIVEN Bronze, so it keeps owning it - but moves onto Classic, the new default.
