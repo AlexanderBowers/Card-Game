@@ -767,7 +767,7 @@ void fragment() {
 
         bool doStep = TutorialIsDoStep(_tutorialIndex);
         ApplyTutorialEmphasis(_tutorialIndex);
-        _spotlightLabel.Text = TutorialTextFor(_tutorialIndex);
+        _spotlightLabel.Text = Speech.Casual(TutorialTextFor(_tutorialIndex));
         _spotlightNext.Visible = !doStep;   // a DO step is finished by doing it, not by a button
         // Skip on the FIRST step only (playtest, 2026-10-06: still showing on the deck step). It is
         // the one chance to opt out before the lesson starts; once the player has carried on past
@@ -1028,7 +1028,7 @@ void fragment() {
     {
         _coachShowing = mark;
 
-        _spotlightLabel.Text = CardEffects.Introduction(mark.Card);
+        _spotlightLabel.Text = Speech.Casual(CardEffects.Introduction(mark.Card));
         _spotlightNext.Visible = true;
 
         // The coach mark comes first (playtest, 2026-10-06: the effect banner - "Silver Champion

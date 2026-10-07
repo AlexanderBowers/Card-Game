@@ -126,7 +126,7 @@ public partial class Guide : Control
         _ring.Modulate = new Color(1f, 1f, 1f, tell ? 0.8f : 0.55f + 0.45f * Mathf.Sin(_time * 5f) * Mathf.Sin(_time * 5f));
 
         // The caption: under the hole or over it, whichever side has more room, centred on it.
-        _label.Text = step.Text;
+        _label.Text = Speech.Casual(step.Text);
         float width = Mathf.Min(view.X - 2f * Margin, 600f);
         _label.CustomMinimumSize = new Vector2(width - 40f, 0f);
         _label.Size = new Vector2(width - 40f, _label.Size.Y);

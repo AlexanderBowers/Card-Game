@@ -20,4 +20,20 @@ public static class Speech
 
     /// "you" mid-sentence / the name.
     public static string Object(string name) => IsYou(name) ? "you" : name;
+
+    /// How every tutorial line is shown (playtest, 2026-10-07: a full stop "sounds too dry/formal").
+    /// Each sentence gets a line of its own, and no line ends in a full stop - "!" and "?" stay.
+    /// Line breaks already in the text are folded first, so a sentence wrapped by hand for a
+    /// narrow card is not split into two lines here.
+    ///   "It may have two sentences. In that case, rewrite them like this."
+    ///   -> "It may have two sentences\nIn that case, rewrite them like this"
+    public static string Casual(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return text ?? string.Empty;
+        string flat = System.Text.RegularExpressions.Regex.Replace(text.Trim(), @"\s+", " ");
+        string[] sentences = System.Text.RegularExpressions.Regex.Split(flat, @"(?<=[.!?])\s+");
+        for (int i = 0; i < sentences.Length; i++)
+            sentences[i] = sentences[i].TrimEnd('.');
+        return string.Join("\n", sentences);
+    }
 }
