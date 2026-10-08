@@ -568,12 +568,20 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
 
     async Task<bool> IBotTable.Pause(double seconds)
     {
+        // Nothing happens until the table has arrived: the camera's swing-in and the stage banner
+        // (playtest, 2026-10-07: the bot played a Modifier and held while the camera was still
+        // panning). Waited out BEFORE the thinking time, so the bot still takes its usual beat
+        // after the banner leaves instead of acting the frame it goes.
+        while (IsInsideTree() && TableArriving)
+            await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+        if (!IsInsideTree()) return false;
+
         await ToSignal(GetTree().CreateTimer(seconds), SceneTreeTimer.SignalName.Timeout);
         // The bot does not act half way through a big moment (yours or its own): it waits for
         // the picture to catch up, as you have to.
         // Nor while a coach mark is explaining a card: the player is reading, not playing
         // (2026-10-06: the bot held under a Copy coach mark).
-        while (IsInsideTree() && (_ui.Moments.Busy || _teaching.CoachShowing))
+        while (IsInsideTree() && (_ui.Moments.Busy || _teaching.CoachShowing || TableArriving))
             await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
         return IsInsideTree(); // false: the scene was restarted or exited while it waited
     }
