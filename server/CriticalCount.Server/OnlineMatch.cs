@@ -387,7 +387,8 @@ public sealed class OnlineMatch : ITableHost
             _disconnectedAt[seat] == null,
             _table.Remaining(p),
             p.LastDrawnCard?.Id,
-            p.LastPlayedModifier?.Id);
+            p.LastPlayedModifier?.Id,
+            mine ? _table.DeckCounts(p) : null);
     }
 
     private static CardView ToView(Card c) =>

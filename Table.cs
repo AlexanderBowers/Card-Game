@@ -110,6 +110,17 @@ public sealed class Table
     /// reads it; so would a counting aid.
     public int Remaining(Player owner) => DeckOf(owner).Count;
 
+    /// How many of each value are still in this player's deck: [0] is the ones, [9] the tens. The
+    /// deck odds read it (tap your deck). Nothing here is secret - every card drawn lands face up
+    /// on the board, so a player counting carefully knows exactly this.
+    public int[] DeckCounts(Player owner)
+    {
+        int[] counts = new int[10];
+        foreach (int value in DeckOf(owner))
+            if (value >= 1 && value <= 10) counts[value - 1]++;
+        return counts;
+    }
+
     // ------------------------------------------------------------------
     // Per-turn bookkeeping
     //

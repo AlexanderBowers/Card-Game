@@ -81,7 +81,8 @@ public sealed record SideView(
     bool Connected,
     int DeckLeft,
     int? LastDrawnId,         // this turn's main card (Copy names it), or null
-    int? LastPlayedId);       // this turn's last plain Modifier (Veto names it), or null
+    int? LastPlayedId,        // this turn's last plain Modifier (Veto names it), or null
+    int[] DeckCounts);        // yours only: copies of 1..10 left in your deck (the deck odds)
 
 public sealed record EventView(string Effect, bool ByYou, string Narration, int? DestroyedId);
 

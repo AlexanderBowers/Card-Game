@@ -24,6 +24,7 @@ public partial class GameManager
     private bool _onlineAwaiting;          // a press was sent; nothing more until the next state
     private bool _onlineYouPlayedEffect;
     private Card _onlineRecallLocked;
+    private int[] _onlineDeckCounts;       // what is left in your own deck, for the deck odds
     private long _onlineTurnEndsAtMs;      // local clock (Time.GetTicksMsec) when the turn runs out
     private int _onlineShownSeconds = -1;
     private bool _onlineThemConnected = true;
@@ -199,6 +200,14 @@ public partial class GameManager
 
         _onlineYouCanAct = OnlineService.Bool(you, "canAct");
         _onlineYouPlayedEffect = OnlineService.Bool(you, "playedEffect");
+        _onlineDeckCounts = null; // a server older than the deck odds sends none: the odds just don't open
+        if (you.TryGetProperty("deckCounts", out JsonElement dc) && dc.ValueKind == JsonValueKind.Array
+            && dc.GetArrayLength() == 10)
+        {
+            _onlineDeckCounts = new int[10];
+            int i = 0;
+            foreach (JsonElement n in dc.EnumerateArray()) _onlineDeckCounts[i++] = n.GetInt32();
+        }
         _onlineRecallLocked = you.TryGetProperty("recallLocked", out JsonElement rl) && rl.ValueKind == JsonValueKind.Number
             && _onlineCards.TryGetValue(rl.GetInt32(), out Card locked) ? locked : null;
 

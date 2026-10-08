@@ -34,6 +34,7 @@
     <Compile Include="../../DrawAssist.cs" Link="Game/DrawAssist.cs" />
     <Compile Include="../../SetRules.cs" Link="Game/SetRules.cs" />
     <Compile Include="../../Bot.cs" Link="Game/Bot.cs" />
+    <Compile Include="../../DeckOdds.cs" Link="Game/DeckOdds.cs" />
   </ItemGroup>
 
   <ItemGroup>

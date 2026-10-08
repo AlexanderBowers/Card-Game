@@ -77,9 +77,12 @@ public sealed class Prompts
     //   No Ads owner  One "Rescue" button -> the exact card. Same 15%, no ad.
     //   (Steam / desktop release builds have no ads, so they get the No Ads owner's version.)
     //
-    // Whatever card is given goes into the hand and the turn re-opens: the player still has to
-    // play it, and the bust is judged again when the turn ends. At most one rescue per match -
-    // the flag is spent the moment the offer appears, whichever way the player answers.
+    // The exact card (ad watched, or No Ads) is PLAYED for you, straight onto the board - there is
+    // only one right thing to do with it (2026-10-08: "guaranteed rescue cards should be
+    // automatically played"). The random card goes into the hand, because whether it helps, and
+    // which sign a flip card should take, is the player's call. Either way the turn re-opens and
+    // the bust is judged again when it ends. At most one rescue per match - the flag is spent the
+    // moment the offer appears, whichever way the player answers.
     // ------------------------------------------------------------------
     private Control _rescueOverlay;
 
@@ -131,7 +134,7 @@ public sealed class Prompts
         {
             _rescueBox.AddChild(OverlayUi.MakeLabel("Bust!  Rescue!", 30, OverlayUi.MedalGold));
             _rescueBox.AddChild(OverlayUi.MakeLabel(
-                $"Take a card that puts you on {landing}.\nPlay it before you end your turn.",
+                $"A rescue card puts you back on {landing}.",
                 16, OverlayUi.Muted));
             AddRescueButton("Rescue", 48, GiveExactRescue);
         }
@@ -185,7 +188,15 @@ public sealed class Prompts
     {
         int value = (State.TargetScore - 1) - P1.CurrentScore;
         Card rescue = new Card(value, CardType.Modifier) { IsRescue = true };
-        GiveRescueCard(rescue, $"Rescue: play your {rescue.DisplayText} to land on {State.TargetScore - 1}.");
+        CloseRescueOffer();
+
+        // Through the hand and out again, so it is played by the same rule every Modifier is
+        // (onto the board, onto the score, never into SpentCards for Recall), and flies from the
+        // hand to the board like any other.
+        P1.Modifiers.Add(rescue);
+        if (P1.PlayModifierCard(rescue, State)) _ui.InstantiateCardView(rescue, _ui.P1Board);
+
+        ReopenTurn($"Rescued! {rescue.DisplayText} puts you on {P1.CurrentScore}.");
     }
 
     private void GiveRandomRescue()
@@ -193,18 +204,22 @@ public sealed class Prompts
         Card copy = RunData.Instance?.DrawRescueCopy()
                     ?? new Card(-_host.Rng.Next(1, 7), CardType.Modifier); // an empty deck; a live run never has one
         copy.IsRescue = true;
-        GiveRescueCard(copy, $"Rescue: you take a {copy.DisplayText}. It might be enough.");
-    }
-
-    private void GiveRescueCard(Card card, string banner)
-    {
-        if (_rescueOverlay != null) _rescueOverlay.Visible = false;
-        _rescuePending = false;
+        CloseRescueOffer();
 
         // Into the hand - as a 5th card if the hand is full; it never replaces one the player chose.
         // Deliberately NOT NoteModifierMet: a rescue card is not part of the collection.
-        P1.Modifiers.Add(card);
+        P1.Modifiers.Add(copy);
+        ReopenTurn($"Rescue: you take a {copy.DisplayText}. It might be enough.");
+    }
 
+    private void CloseRescueOffer()
+    {
+        if (_rescueOverlay != null) _rescueOverlay.Visible = false;
+        _rescuePending = false;
+    }
+
+    private void ReopenTurn(string banner)
+    {
         // Re-open the turn exactly as an effect card does: no new draw, just a chance to play.
         P1.IsHolding = false;
         P1.HasEndedTurn = false;

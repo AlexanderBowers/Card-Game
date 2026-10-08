@@ -480,6 +480,23 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
     Card ITableUiHost.SelectedFor(Player player) => SelectedFor(player);
     bool ITableUiHost.CanAct(Player player) => HumanCanActFor(player);
     bool ITableUiHost.CanPlayEffect(Player owner, Card card) => CanPlayEffect(owner, card);
+    bool ITableUiHost.HitsTarget(Player player, Card card) => HitsTarget(player, card);
+
+    /// Would playing this hand card put the player exactly on the target, right now? The table
+    /// pulses it the way the tutorial pulses its one right answer (2026-10-08).
+    ///
+    /// Only for a person playing alone - vs the bot or online. In local 2-player both hands are on
+    /// one screen, and a pulsing card would tell the player opposite what you are holding. Not
+    /// during a lesson, which points at its own cards.
+    private bool HitsTarget(Player player, Card card)
+    {
+        if (player != _player1 || !(_isVsBot || _online) || _teaching.Running) return false;
+        if (!CanPlayModifierNow(player, card) || !HumanCanActFor(player)) return false;
+
+        int needed = _gameState.TargetScore - player.CurrentScore;
+        if (needed == 0) return false; // already there: Hold is the move, not another card
+        return card.Value == needed || (card.CanFlipValue && -card.Value == needed);
+    }
     string ITableUiHost.StatusFor(Player player) => StatusFor(player);
     // Pass 33: the stage line only. Whose move it is was said three times over ("Both players: play
     // or draw" here, "Your move" on each side) - the buttons say it now, by reading "Waiting...".

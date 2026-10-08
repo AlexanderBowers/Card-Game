@@ -152,9 +152,13 @@ echo '15 3 * * * criticalcount sqlite3 /var/lib/criticalcount/criticalcount.db "
 
 ```powershell
 dotnet publish server/CriticalCount.Server -c Release -r linux-arm64 --self-contained -o build/server
-scp -r build/server/* ubuntu@<vm-ip>:/tmp/criticalcount/
-ssh ubuntu@<vm-ip> "sudo cp -r /tmp/criticalcount/* /opt/criticalcount/ && sudo systemctl restart criticalcount"
+ssh -i ~/.ssh/criticalcount_oracle ubuntu@<vm-ip> "rm -rf /tmp/criticalcount && mkdir -p /tmp/criticalcount"
+scp -i ~/.ssh/criticalcount_oracle -r build/server/* ubuntu@<vm-ip>:/tmp/criticalcount/
+ssh -i ~/.ssh/criticalcount_oracle ubuntu@<vm-ip> "sudo systemctl stop criticalcount && sudo cp -r /tmp/criticalcount/* /opt/criticalcount/ && sudo chmod +x /opt/criticalcount/CriticalCount.Server && sudo systemctl start criticalcount"
 ```
+
+Stop the service before copying: Linux refuses to overwrite a program that is running
+("Text file busy"). Then check it with `powershell -File server/smoke.ps1 -Base https://play.cloudydaygames.com`.
 
 ### What a restart does
 

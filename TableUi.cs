@@ -30,6 +30,9 @@ public interface ITableUiHost
     bool CanAct(Player player);
     bool CanPlayEffect(Player owner, Card card);
 
+    /// This hand card would land the player exactly on the target now - the table pulses it.
+    bool HitsTarget(Player player, Card card);
+
     /// The words for the status line and the middle panel. Both are readings of the rules, so the
     /// rules write them; the table only decides how big they are and what colour.
     string StatusFor(Player player);
@@ -892,7 +895,8 @@ public sealed class TableUi
         {
             L.P1Hand.AddChild(CreateModifierButton(
                 card, !p1Can, card == p1Picked, p1Picked != null,
-                () => _host.ModifierPressed(P1, card), p1Size, p1Lift));
+                () => _host.ModifierPressed(P1, card), p1Size, p1Lift,
+                pulse: card == TutorialPulseCard || _host.HitsTarget(P1, card)));
         }
 
         foreach (Card card in P2.Modifiers)
@@ -1132,7 +1136,7 @@ public sealed class TableUi
     /// and focus handling still apply) with the card art drawn on top. A picked-up card is lifted
     /// and the rest of the hand dims, so which card is in play is obvious without reading anything.
     private Button CreateModifierButton(Card card, bool disabled, bool selected, bool anySelected, Action onPressed,
-                                        Vector2 size, float lift)
+                                        Vector2 size, float lift, bool pulse = false)
     {
         Button button = new Button
         {
@@ -1156,10 +1160,11 @@ public sealed class TableUi
         button.AddChild(view);
         view.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
 
-        // Pass 49: the tutorial's card pulses until it is picked up. The art is scaled, not the
+        // Pass 49: the tutorial's card pulses until it is picked up - and since 2026-10-08, so
+        // does any card that would land you exactly on the target. The art is scaled, not the
         // Button, for the same reason as the pick-up below.
         // A tween needs the tree, and this button is not in it yet: start once it arrives.
-        if (!selected && !disabled && card == TutorialPulseCard)
+        if (!selected && !disabled && pulse)
         {
             view.PivotOffset = size / 2f;
             view.TreeEntered += () => StartPulse(view);
