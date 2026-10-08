@@ -163,6 +163,7 @@ public sealed partial class Menus
                     "already_in_match" => "You're already in a match.",
                     "signed_in_elsewhere" => "You signed in on another device.",
                     "update_required" => "Update Critical Count to play online.",
+                    "bad_deck" => "Your deck couldn't be checked. Update Critical Count and try again.",
                     _ => "Something went wrong. Try again.",
                 }, warning: true);
                 break;
@@ -276,7 +277,7 @@ public sealed partial class Menus
         void Join()
         {
             if (!StillOn(page)) return;
-            if (Svc.SendMessage(new { type = "queue" })) SetOnlineStatus("Looking for an opponent...");
+            if (Svc.SendMessage(new { type = "queue", deck = MyOnlineDeck() })) SetOnlineStatus("Looking for an opponent...");
         }
         if (Svc.SocketReady) Join();
         else _onlineQueueOnReady = Join;
@@ -562,10 +563,27 @@ public sealed partial class Menus
         void Send()
         {
             if (!StillOn(page)) return;
-            if (Svc.SendMessage(new { type = "invite", to = id })) SetOnlineStatus($"Waiting for {name} to answer...");
+            if (Svc.SendMessage(new { type = "invite", to = id, deck = MyOnlineDeck() })) SetOnlineStatus($"Waiting for {name} to answer...");
         }
         if (Svc.SocketReady) Send();
         else _onlineQueueOnReady = Send;
+    }
+
+    /// The 12-card deck from the deck screen, as card names for the server to check and build
+    /// (server: OnlineDeck). Null - a random hand - until a full deck has been confirmed.
+    private static string[] MyOnlineDeck()
+    {
+        RunData run = RunData.Instance;
+        if (run == null || run.SideDeck.Count != RunData.SideDeckSize) return null;
+        string[] keys = new string[RunData.SideDeckSize];
+        for (int i = 0; i < keys.Length; i++)
+        {
+            int index = run.SideDeck[i];
+            if (index < 0 || index >= run.Inventory.Count) return null;
+            keys[i] = run.Inventory[index].LogKey;
+            if (keys[i] == null) return null;
+        }
+        return keys;
     }
 
     private void FillInvited(string inviteId, string from)
@@ -576,7 +594,7 @@ public sealed partial class Menus
         AddOnlineStatus(string.Empty);
         Button accept = AddMenuButton("Play", null, () =>
         {
-            Svc?.SendMessage(new { type = "inviteReply", inviteId, accept = true });
+            Svc?.SendMessage(new { type = "inviteReply", inviteId, accept = true, deck = MyOnlineDeck() });
             SetOnlineStatus("Starting...");
         });
         OverlayUi.StyleButton(accept, primary: true);

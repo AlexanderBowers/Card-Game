@@ -31,6 +31,7 @@ public sealed class Lobby : IMatchSink
 
     private readonly Dictionary<string, IClient> _clients = new();
     private readonly List<string> _queue = new();
+    private readonly Dictionary<string, string[]> _decks = new(); // checked decks waiting for a match
     private readonly Dictionary<string, Invite> _invites = new();       // by invite id
     private readonly Dictionary<string, OnlineMatch> _matchOf = new();  // by account id
     private readonly ConcurrentDictionary<string, OnlineMatch> _matches = new();
@@ -89,6 +90,7 @@ public sealed class Lobby : IMatchSink
             if (!_clients.TryGetValue(client.AccountId, out IClient current) || !ReferenceEquals(current, client)) return;
             _clients.Remove(client.AccountId);
             _queue.Remove(client.AccountId);
+            _decks.Remove(client.AccountId);
             foreach (Invite inv in _invites.Values.Where(i => i.From == client.AccountId || i.To == client.AccountId).ToList())
             {
                 _invites.Remove(inv.Id);
@@ -113,6 +115,7 @@ public sealed class Lobby : IMatchSink
                 client.Send(new { type = "pong" });
                 return;
             case "queue":
+                if (!TakeDeck(client, msg.Deck)) return;
                 JoinQueue(client);
                 return;
             case "leaveQueue":
@@ -120,12 +123,14 @@ public sealed class Lobby : IMatchSink
                 client.Send(new { type = "queueLeft" });
                 return;
             case "invite":
+                if (!TakeDeck(client, msg.Deck)) return;
                 SendInvite(client, msg.To);
                 return;
             case "cancelInvite":
                 CancelInvitesFrom(me);
                 return;
             case "inviteReply":
+                if (msg.Accept && !TakeDeck(client, msg.Deck)) return;
                 ReplyToInvite(client, msg.InviteId, msg.Accept);
                 return;
             case "play":
@@ -151,6 +156,25 @@ public sealed class Lobby : IMatchSink
     }
 
     private static object Error(string code, string message = null) => new { type = "error", code, message };
+
+    /// The deck this player brings to their next match - checked here, before they can be
+    /// matched with anyone (see OnlineDeck). No deck means a random hand. False, with the error
+    /// sent, when the deck names a card that does not exist.
+    private bool TakeDeck(IClient client, string[] deck)
+    {
+        string error = OnlineDeck.Validate(deck);
+        if (error != null)
+        {
+            client.Send(Error(error, "That deck has a card the game doesn't know."));
+            return false;
+        }
+        lock (_gate)
+        {
+            if (deck == null) _decks.Remove(client.AccountId);
+            else _decks[client.AccountId] = (string[])deck.Clone();
+        }
+        return true;
+    }
 
     // ------------------------------------------------------------------
     // Quick match
@@ -284,7 +308,14 @@ public sealed class Lobby : IMatchSink
     {
         string name0 = _store.GetProfile(seat0)?.Display ?? "Player";
         string name1 = _store.GetProfile(seat1)?.Display ?? "Player";
-        var match = new OnlineMatch(seat0, name0, seat1, name1, this, _specials, _rngFactory(), _clock);
+        string[] deck0, deck1;
+        lock (_gate)
+        {
+            _decks.Remove(seat0, out deck0);
+            _decks.Remove(seat1, out deck1);
+        }
+        var match = new OnlineMatch(seat0, name0, seat1, name1, this, _specials, _rngFactory(), _clock,
+                                    deck0, deck1);
         lock (_gate)
         {
             _matchOf[seat0] = match;

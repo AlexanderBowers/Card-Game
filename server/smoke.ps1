@@ -67,7 +67,12 @@ function Receive($ws, $ms = 3000) {
 $wa = Connect $a.Token
 $wb = Connect $b.Token
 (Receive $wa).type; (Receive $wb).type
-Send $wa @{ type = "queue" }
+# A brings a deck of its own; a deck naming a card that does not exist must be refused.
+Send $wa @{ type = "queue"; deck = @("+5","+5","+5","+5","-5","-5","-5","-5","flip2","flip2","flip2","SetToTarget") }
+$refused = Receive $wa
+if ($refused.type -ne "error" -or $refused.code -ne "bad_deck") { throw "a made-up card was accepted" }
+"Made-up card refused: OK"
+Send $wa @{ type = "queue"; deck = @("+5","+5","+5","+5","-5","-5","-5","-5","flip2","flip2","flip2","flip2") }
 Send $wb @{ type = "queue" }
 
 $states = @{ a = $null; b = $null }
@@ -79,7 +84,14 @@ while (-not $over -and $steps -lt 2000) {
         $m = Receive $ws 200
         if ($null -eq $m) { continue }
         switch ($m.type) {
-            "state"    { $states[$who] = $m }
+            "state"    {
+                if ($who -eq "a" -and -not $states["a"]) {
+                    $vals = $m.you.hand | ForEach-Object { [Math]::Abs($_.value) }
+                    if ($vals | Where-Object { $_ -ne 5 -and $_ -ne 2 }) { throw "A was dealt a card not in its deck: $vals" }
+                    "A's hand came from its deck: $($m.you.hand.text -join ' ')"
+                }
+                $states[$who] = $m
+            }
             "setEnd"   { if ($who -eq "a") { $sets++; "set $sets -> $($m.winner) ($($m.yourScore) v $($m.theirScore))" } }
             "matchEnd" { "match over for ${who}: $($m.winner) ($($m.reason))"; $over = $true }
             "error"    { "error for ${who}: $($m.code)" }

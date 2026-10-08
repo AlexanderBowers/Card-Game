@@ -48,6 +48,9 @@ public sealed class OnlineMatch : ITableHost
     private readonly Table _table;
     private readonly bool _specials;
 
+    /// Each seat's side deck as checked collection keys (OnlineDeck), or null for a random hand.
+    private readonly string[][] _decks;
+
     private DateTime _turnDeadline;
     private DateTime _setResumeAt;
     private readonly int[] _timeouts = new int[2];
@@ -58,9 +61,11 @@ public sealed class OnlineMatch : ITableHost
     public Random Rng { get; }
 
     public OnlineMatch(string seat0, string name0, string seat1, string name1, IMatchSink sink,
-                       bool specials = false, Random rng = null, Func<DateTime> clock = null)
+                       bool specials = false, Random rng = null, Func<DateTime> clock = null,
+                       string[] deck0 = null, string[] deck1 = null)
     {
         Seats = new[] { seat0, seat1 };
+        _decks = new[] { deck0, deck1 };
         _sink = sink;
         _specials = specials;
         Rng = rng ?? new Random();
@@ -87,6 +92,15 @@ public sealed class OnlineMatch : ITableHost
                 });
             }
             _table.DealMatchHands();
+            // A player who brought a deck gets four cards drawn from it instead of the random hand -
+            // built here from the card names, never from anything the phone said a card does.
+            for (int s = 0; s < 2; s++)
+            {
+                if (_decks[s] == null) continue;
+                Player p = PlayerOf(s);
+                p.Modifiers.Clear();
+                p.Modifiers.AddRange(OnlineDeck.DrawHand(_decks[s], Rng));
+            }
             StartNewSet();
         }
     }

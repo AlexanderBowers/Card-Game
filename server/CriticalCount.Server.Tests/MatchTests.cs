@@ -363,6 +363,79 @@ public class LobbyTests : IDisposable
         Assert.Contains("state", back.Types);
     }
 
+    private static readonly string[] AllVetoesAndFives =
+        { "Veto", "Veto", "Veto", "Veto", "+5", "+5", "+5", "+5", "-5", "-5", "-5", "-5" };
+
+    private static JsonElement LastHand(FakeClient c)
+    {
+        object state = c.Got.Last(m => FakeSink.TypeOf(m) == "state");
+        return JsonDocument.Parse(JsonSerializer.Serialize(state, state.GetType(), Protocol.Json))
+            .RootElement.GetProperty("you").GetProperty("hand").Clone();
+    }
+
+    [Fact]
+    public void YourOwnDeckIsWhatYouAreDealtFrom()
+    {
+        FakeClient a = Join("Ann"), b = Join("Ben");
+        _lobby.Handle(a, new Inbound { Type = "queue", Deck = AllVetoesAndFives });
+        _lobby.Handle(b, new Inbound { Type = "queue" });
+
+        JsonElement hand = LastHand(a);
+        Assert.Equal(RunData.MatchModifierCount, hand.GetArrayLength());
+        foreach (JsonElement card in hand.EnumerateArray())
+        {
+            bool veto = card.TryGetProperty("effect", out JsonElement e) && e.GetString() == "Veto";
+            bool five = Math.Abs(card.GetProperty("value").GetInt32()) == 5;
+            Assert.True(veto || five, card.ToString());
+        }
+    }
+
+    [Theory]
+    [InlineData("SetToTarget")]   // an effect that does not exist
+    [InlineData("+20")]           // a number bigger than any card the game sells
+    [InlineData("+0")]
+    [InlineData("flip9")]
+    [InlineData("")]
+    public void ACardThatDoesNotExistIsRefused(string bad)
+    {
+        FakeClient a = Join("Ann"), b = Join("Ben");
+        string[] deck = (string[])AllVetoesAndFives.Clone();
+        deck[0] = bad;
+        _lobby.Handle(a, new Inbound { Type = "queue", Deck = deck });
+        _lobby.Handle(b, new Inbound { Type = "queue" });
+
+        Assert.Contains("error", a.Types);
+        Assert.DoesNotContain("queued", a.Types);
+        Assert.DoesNotContain("matchStart", b.Types);
+    }
+
+    [Fact]
+    public void ADeckMustBeTwelveCards()
+    {
+        FakeClient a = Join("Ann");
+        _lobby.Handle(a, new Inbound { Type = "queue", Deck = new[] { "+1", "+2", "+3", "+4" } });
+        Assert.Contains("error", a.Types);
+        Assert.DoesNotContain("queued", a.Types);
+    }
+
+    [Fact]
+    public void AnAcceptedChallengeUsesBothDecks()
+    {
+        FakeClient a = Join("Ann"), b = Join("Ben");
+        _store.RequestFriend(a.AccountId, b.AccountId);
+        _store.AcceptFriend(b.AccountId, a.AccountId);
+        string[] ones = Enumerable.Repeat("flip1", 12).ToArray();
+        _lobby.Handle(a, new Inbound { Type = "invite", To = b.AccountId, Deck = AllVetoesAndFives });
+        _lobby.Handle(b, new Inbound { Type = "inviteReply", InviteId = InviteIdFrom(b), Accept = true, Deck = ones });
+
+        Assert.Contains("matchStart", a.Types);
+        foreach (JsonElement card in LastHand(b).EnumerateArray())
+        {
+            Assert.True(card.GetProperty("flip").GetBoolean());
+            Assert.Equal(1, Math.Abs(card.GetProperty("value").GetInt32()));
+        }
+    }
+
     private static string InviteIdFrom(FakeClient c)
     {
         object invited = c.Got.Last(m => FakeSink.TypeOf(m) == "invited");

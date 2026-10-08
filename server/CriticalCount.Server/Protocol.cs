@@ -7,10 +7,13 @@ namespace CriticalCount.Server;
 ///
 /// PHONE -> SERVER
 ///   {type:"auth", token, version}                first message, always; nothing else is read before it
-///   {type:"queue"} / {type:"leaveQueue"}         quick match
-///   {type:"invite", to}                          challenge an online friend (account id)
+///   {type:"queue", deck?} / {type:"leaveQueue"}  quick match
+///   {type:"invite", to, deck?}                   challenge an online friend (account id)
 ///   {type:"cancelInvite"}
-///   {type:"inviteReply", inviteId, accept}
+///   {type:"inviteReply", inviteId, accept, deck?}
+///     deck: your 12-card side deck as collection keys ("+3", "-2", "flip1", "Copy"...). Every
+///     key is checked against the cards that exist (OnlineDeck); a bad deck is refused with
+///     error "bad_deck". No deck at all: you are dealt a random plain hand.
 ///   {type:"play", cardId, value?, chosenId?}     value: a +/- card's chosen sign; chosenId: Recall's pick
 ///   {type:"draw"} / {type:"hold"}                Draw Card / Hold
 ///   {type:"forfeit"}
@@ -58,6 +61,7 @@ public sealed class Inbound
     public int CardId { get; set; }
     public int? Value { get; set; }
     public int? ChosenId { get; set; }
+    public string[] Deck { get; set; }
 }
 
 public sealed record PlayerRef(string Id, string Name);
