@@ -139,14 +139,24 @@ Then, from your PC:
 powershell -ExecutionPolicy Bypass -File server/smoke.ps1 -Base https://play.<your-domain>
 ```
 
-## 5. Backups (optional, recommended)
+## 5. Backups (installed 2026-10-08)
 
-The database is small. A nightly copy on the VM:
+The database is small. `server/backup.sh` copies it every night at 03:15 UTC into
+`/var/lib/criticalcount/backups/criticalcount-<Mon..Sun>.db`, so a week of history is kept and
+the oldest is overwritten. To install it (copy `server/backup.sh` to `/tmp/backup.sh` first):
 
 ```bash
 sudo apt-get install -y sqlite3
-echo '15 3 * * * criticalcount sqlite3 /var/lib/criticalcount/criticalcount.db ".backup /var/lib/criticalcount/backup.db"' | sudo tee /etc/cron.d/criticalcount-backup
+sudo install -m 755 /tmp/backup.sh /usr/local/bin/criticalcount-backup
+sudo sed -i 's/\r$//' /usr/local/bin/criticalcount-backup   # in case it came from Windows
+echo '15 3 * * * criticalcount /usr/local/bin/criticalcount-backup' | sudo tee /etc/cron.d/criticalcount-backup
 ```
+
+To restore: `sudo systemctl stop criticalcount`, copy the chosen backup over
+`/var/lib/criticalcount/criticalcount.db` (as user criticalcount), then start the service.
+
+The backups sit on the same VM as the database, so they protect against a bad update or a
+corrupted file, not against losing the VM itself.
 
 ## 6. Updating
 
