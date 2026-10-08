@@ -119,8 +119,15 @@ public sealed class NameFilter
         foreach (string word in ReservedAnywhere)
             if (squashed.Contains(word) || stretched.Contains(Dedup(word))) return true;
 
+        // The stretched-letter reading only for words that are still long once their own doubled
+        // letters collapse: a four-letter entry with a double letter shrinks to three, and three
+        // letters match inside ordinary names ("Opponent" was refused, 2026-10-08).
         foreach (string word in _long)
-            if (squashed.Contains(word) || stretched.Contains(Dedup(word))) return true;
+        {
+            if (squashed.Contains(word)) return true;
+            string collapsed = Dedup(word);
+            if (collapsed.Length >= 4 && stretched.Contains(collapsed)) return true;
+        }
 
         // Whole words: split on the separators BEFORE squashing them away.
         foreach (string token in lower.Split(new[] { ' ', '_', '-', '.' }, StringSplitOptions.RemoveEmptyEntries))

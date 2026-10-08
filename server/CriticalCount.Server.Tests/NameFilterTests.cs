@@ -13,6 +13,8 @@ public class NameFilterTests
     [InlineData("B.J. Lane")]
     [InlineData("Pazaak Fan 99")]
     [InlineData("Glass Bass")]
+    [InlineData("Opponent")]       // a doubled-letter entry collapsed to three letters used to match inside it
+    [InlineData("Test Opponent")]
     public void OrdinaryNamesPass(string name) => Assert.Equal(NameFilter.Verdict.Ok, F.Check(name));
 
     [Theory]

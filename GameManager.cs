@@ -132,6 +132,7 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
                 if (arg == "--autostart=solo") autoRun = true;
                 if (arg == "--autostart=local") autoLocal2P = true;
                 if (arg == "--mirror") _mirrorToggle.SetPressedNoSignal(true);
+                if (arg == "--online-autoqueue") Menus.PendingOnlineQueue = true; // straight onto Quick Match
             }
         }
 
@@ -144,6 +145,7 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
         if (GetTree() != null) GetTree().Root.SizeChanged -= _ui.ApplyResponsiveLayout;
         // A static event outlives the scene; a Restart would otherwise leave it calling a freed table.
         GameSettings.Changed -= OnSettingsChanged;
+        DetachOnline(); // the Online autoload outlives this scene
     }
 
     // ------------------------------------------------------------------
@@ -189,6 +191,14 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
 
     private void RestartScene(bool sameMatch)
     {
+        // An online match cannot be restarted from here: leaving it is a forfeit, and the way back
+        // in is the Online menu (which Play Again opens straight onto the queue).
+        if (_online)
+        {
+            OnlineLeave();
+            sameMatch = false;
+        }
+
         // Reloading the scene rebuilds GameManager, GameState and both Players from scratch,
         // so this fully resets the match (set wins, scores, hands).
         if (sameMatch && _isGameStarted)
@@ -357,6 +367,13 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
     /// Does nothing until BOTH players are done; then either ends the set or deals again.
     private void ResolveTurn()
     {
+        // Online, the server decides every turn and every set; this phone only draws what it says.
+        // (TableMoments.Idle still calls here after an animation - online that is just a repaint.)
+        if (_online)
+        {
+            _ui.Refresh();
+            return;
+        }
         if (!_isGameStarted || _gameState.IsGameOver || _setOverPending) return;
 
         // Paint first: a Hold that has just happened starts its padlock from this refresh. Then,
@@ -412,7 +429,7 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
     bool ITeachingHost.InRun => _inRun;
     bool ITeachingHost.SetOverPending => _setOverPending;
     bool ITeachingHost.PromptShowing => _prompts.Showing;
-    void ITeachingHost.ReleaseBot() => _bot.ProcessTurn();
+    void ITeachingHost.ReleaseBot() { if (!_online) _bot.ProcessTurn(); } // online there is no bot
     Card ITeachingHost.SelectedFor(Player player) => SelectedFor(player);
     void ITeachingHost.CollectionComplete() => AnnounceCollectionComplete();
 
@@ -455,7 +472,8 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
     GameState ITableUiHost.State => _gameState;
     Table ITableUiHost.Table => _table;
     bool ITableUiHost.GameStarted => _isGameStarted;
-    bool ITableUiHost.VsBot => _isVsBot;
+    // Online looks like a match against the bot: one set of buttons, the opponent across the table.
+    bool ITableUiHost.VsBot => _isVsBot || _online;
     bool ITableUiHost.InRun => _inRun;
     bool ITableUiHost.SetOverPending => _setOverPending;
 
@@ -596,15 +614,27 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
     /// Can this player play this ORDINARY modifier right now? The only rule is the Recall lock -
     /// everything else about a plain card is decided by the player's own arithmetic.
     private bool CanPlayModifierNow(Player owner, Card card) =>
-        card != null && card.Effect == CardEffect.None && !_table.IsRecallLocked(owner, card);
+        card != null && card.Effect == CardEffect.None && !IsRecallLocked(owner, card);
 
-    private bool CanPlayEffect(Player owner, Card card) => _table.CanPlayEffect(owner, card);
+    private bool IsRecallLocked(Player owner, Card card) =>
+        _online ? OnlineRecallLocked(card) : _table.IsRecallLocked(owner, card);
+
+    private bool CanPlayEffect(Player owner, Card card) =>
+        _online ? OnlineCanPlayEffect(owner, card) : _table.CanPlayEffect(owner, card);
     private string EffectRefusal(Player owner, Card card) => _table.EffectRefusal(owner, card);
 
     /// Plays an effect card (Table.TryPlayEffect decides what it does) and shows it: the vetoed
     /// card burning, the effect card landing, any redrawn faces, the banner and the coach mark.
     private bool PlayEffectCard(Player owner, Card card, Card chosen = null)
     {
+        // Online, the server plays it; the next state shows what it did.
+        if (_online)
+        {
+            if (!OnlineCanPlayEffect(owner, card)) return false;
+            OnlinePlay(card, chosen);
+            return true;
+        }
+
         // The numbers as they were, for the moments that tick a score over on impact.
         Player opponent = _table.OpponentOf(owner);
         int ownerBefore = owner.CurrentScore;
@@ -680,6 +710,7 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
     /// True when this particular player can be driven by a person right now.
     private bool HumanCanActFor(Player player)
     {
+        if (_online) return OnlineCanAct(player); // the server says whose move it is
         if (!HumanCanAct() || !player.CanAct) return false;
         if (_isVsBot && player == _player2) return false; // the bot drives itself
         return true;
@@ -694,6 +725,11 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
     /// out for the rest of the set. Nothing is decided until the other player is done too.
     private void FinishTurn(Player player, bool hold)
     {
+        if (_online)
+        {
+            OnlineFinishTurn(hold);
+            return;
+        }
         if (!HumanCanActFor(player)) return;
 
         SetSelection(player, null); // a card that was only picked up is put back, not spent
@@ -826,6 +862,7 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
 
     private string RunHeader()
     {
+        if (_online) return OnlineHeader(); // the turn clock
         RunData run = _inRun ? RunData.Instance : null;
         if (run == null) return string.Empty;
         // Alexander, 2026-09-30: the middle of the table shows the TARGET, not the stage - "if it's
@@ -905,7 +942,7 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
         if (picked != null)
         {
             if (picked.Effect != CardEffect.None) return _table.EffectPreview(player, picked);
-            if (_table.IsRecallLocked(player, picked)) return "Just recalled - playable from your next turn";
+            if (IsRecallLocked(player, picked)) return "Just recalled - playable from your next turn";
             // A plain Modifier says nothing here: its result is shown on the score itself.
         }
 
@@ -966,10 +1003,16 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
         }
 
         // A card that came back this turn through a Recall is not playable until the next one.
-        if (_table.IsRecallLocked(player, card))
+        if (IsRecallLocked(player, card))
         {
             SetSelection(player, card); // keep it under their finger so the status line explains
             _ui.Refresh();
+            return;
+        }
+
+        if (_online)
+        {
+            OnlinePlay(card); // the server plays it; the next state puts it on the board
             return;
         }
 

@@ -34,6 +34,10 @@ public class Card
 	/// logged in the collection. Its value can be beyond the normal -6, so it has its own tint.
 	public bool IsRescue { get; set; }
 
+	/// A card whose face this player may not see: the opponent's hand in an online match. The
+	/// server never sends those cards' values, so the phone holds a stand-in drawn face down.
+	public bool IsHidden { get; set; }
+
 	public Card(int value, CardType type, string cardName = "", bool canFlipValue = false, CardEffect effect = CardEffect.None)
 	{
 		Value = value;

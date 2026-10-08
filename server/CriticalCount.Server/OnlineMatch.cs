@@ -385,11 +385,14 @@ public sealed class OnlineMatch : ITableHost
             locked?.Id,
             _table.HasPlayedEffect(p),
             _disconnectedAt[seat] == null,
-            _table.Remaining(p));
+            _table.Remaining(p),
+            p.LastDrawnCard?.Id,
+            p.LastPlayedModifier?.Id);
     }
 
     private static CardView ToView(Card c) =>
-        new(c.Id, c.Value, c.CanFlipValue, c.Effect == CardEffect.None ? null : c.Effect.ToString(), c.DisplayText);
+        new(c.Id, c.Value, c.CanFlipValue, c.Effect == CardEffect.None ? null : c.Effect.ToString(), c.DisplayText,
+            c.Type == CardType.Main);
 
     // ------------------------------------------------------------------
     // ITableHost: an online match is local 2-player's table with a server for a room

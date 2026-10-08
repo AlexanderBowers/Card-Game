@@ -20,6 +20,9 @@ public interface IMenusHost
     void ReplayTutorial();
 
     void OpenOptions(Action onClosed = null);
+
+    /// The server has paired this phone with an opponent ("matchStart"): put the table up for it.
+    void StartOnlineMatch(System.Text.Json.JsonElement start);
 }
 
 /// Every screen that covers the table: the start menu and its sub-pages (local 2-player setup, the
@@ -32,7 +35,7 @@ public interface IMenusHost
 /// Three pieces of state are static on purpose: they have to survive the scene reload that
 /// starting a match performs, and none of them belongs in a save file, because each describes THIS
 /// reload rather than the run.
-public sealed class Menus
+public sealed partial class Menus
 {
     /// The nodes the menus borrow from the table beneath them - hidden while a menu is up, and in
     /// the table menu's case moved into it outright.
@@ -298,7 +301,13 @@ public sealed class Menus
     {
         if (_startMenuOverlay == null) return;
 
-        FillStartMenu();
+        // "Play Again" after an online match lands back here, straight onto the queue.
+        if (PendingOnlineQueue)
+        {
+            PendingOnlineQueue = false;
+            FillOnlineQuickMatch();
+        }
+        else FillStartMenu();
         _startMenuOverlay.Visible = true;
 
     }
@@ -421,6 +430,7 @@ public sealed class Menus
         }
 
         AddMenuButton("Local 2-Player", null, FillLocal2PlayerSetup);
+        AddMenuButton("Online", null, FillOnline);
 
         _startMenuBox.AddChild(MenuSpacer());
 

@@ -187,6 +187,17 @@ public sealed class CardViews
         view.SetMeta("cardId", card.Id); // so a redraw can find this view again
         if (card.Effect != CardEffect.None) view.SetMeta("effectCard", true);
 
+        // Online, the opponent's hand is face down: the phone does not know what is in it.
+        if (card.IsHidden)
+        {
+            view.Texture = Art($"backs/card_back_{PlayerDeckKey}.png") ?? _cardBack;
+            // The template's number belongs to a face; a back has none. Marked like a pre-rendered
+            // face so ApplyCardSize (which runs again on every resize) keeps the label hidden.
+            view.SetMeta(PrerenderedMeta, true);
+            ApplyCardSize(view, size);
+            return view;
+        }
+
         Texture2D rendered = PrerenderedFace(card, opponentSide);
         if (rendered != null)
         {

@@ -62,7 +62,8 @@ public sealed class Inbound
 
 public sealed record PlayerRef(string Id, string Name);
 
-public sealed record CardView(int Id, int Value, bool Flip, string Effect, string Text);
+/// Main: a main-deck card (1-10) rather than a Modifier.
+public sealed record CardView(int Id, int Value, bool Flip, string Effect, string Text, bool Main);
 
 public sealed record SideView(
     string Name,
@@ -78,7 +79,9 @@ public sealed record SideView(
     int? RecallLocked,        // yours only
     bool PlayedEffect,
     bool Connected,
-    int DeckLeft);
+    int DeckLeft,
+    int? LastDrawnId,         // this turn's main card (Copy names it), or null
+    int? LastPlayedId);       // this turn's last plain Modifier (Veto names it), or null
 
 public sealed record EventView(string Effect, bool ByYou, string Narration, int? DestroyedId);
 

@@ -19,6 +19,35 @@ public partial class OptionsOverlay : Control
     private CheckButton _animations;
     private CheckButton _batterySaver;
     private CheckButton _highFrameRate;
+    private VBoxContainer _onlineSection;
+    private Button _deleteAccount;
+    private Label _onlineNote;
+    private bool _deleteArmed;
+
+    /// Two taps, like New Run: the second one deletes, immediately and for good.
+    private async void OnDeleteAccountPressed()
+    {
+        if (!_deleteArmed)
+        {
+            _deleteArmed = true;
+            _deleteAccount.Text = "Tap again to delete for good";
+            return;
+        }
+        _deleteAccount.Disabled = true;
+        _deleteAccount.Text = "Deleting...";
+        string problem = OnlineService.Instance == null ? "Not available" : await OnlineService.Instance.DeleteAccount();
+        if (!IsInstanceValid(this)) return;
+        if (problem != null)
+        {
+            _deleteArmed = false;
+            _deleteAccount.Disabled = false;
+            _deleteAccount.Text = "Delete Online Account";
+            _onlineNote.Text = problem;
+            return;
+        }
+        _deleteAccount.Text = "Deleted";
+        _onlineNote.Text = "Your online account is gone. Opening Online again starts a new one.";
+    }
     private CheckButton _table3D;
     private CheckButton _showFps;
     private CheckButton _debugButtons;
@@ -125,6 +154,19 @@ public partial class OptionsOverlay : Control
         _highFrameRate = Toggle("High frame rate (up to 120 fps)", GameSettings.SetHighFrameRate);
         colB.AddChild(_highFrameRate);
 
+        // --- Online. Only once an online account exists (Google Play requires in-app deletion).
+        _onlineSection = new VBoxContainer();
+        _onlineSection.AddChild(SectionLabel("Online"));
+        _deleteAccount = new Button { Text = "Delete Online Account" };
+        _deleteAccount.AddThemeFontSizeOverride("font_size", ButtonFont);
+        _deleteAccount.Pressed += OnDeleteAccountPressed;
+        _onlineSection.AddChild(_deleteAccount);
+        _onlineNote = new Label { AutowrapMode = TextServer.AutowrapMode.WordSmart, CustomMinimumSize = new Vector2(260, 0) };
+        _onlineNote.AddThemeFontSizeOverride("font_size", OverlayUi.Readable(14));
+        _onlineNote.AddThemeColorOverride("font_color", OverlayUi.Muted);
+        _onlineSection.AddChild(_onlineNote);
+        colB.AddChild(_onlineSection);
+
         // --- Debug. An exported build has no debug rows to show, so it gets no switch either.
         if (OS.IsDebugBuild())
         {
@@ -149,6 +191,11 @@ public partial class OptionsOverlay : Control
         _animations.SetPressedNoSignal(GameSettings.CardAnimations);
         _batterySaver.SetPressedNoSignal(GameSettings.BatterySaver);
         _highFrameRate.SetPressedNoSignal(GameSettings.HighFrameRate);
+        _deleteArmed = false;
+        _deleteAccount.Text = "Delete Online Account";
+        _deleteAccount.Disabled = false;
+        _onlineNote.Text = "Deletes your name, friends and leaderboard entry from the server. Your progress on this device stays.";
+        _onlineSection.Visible = OnlineService.Instance?.HasAccount ?? false;
         _table3D.SetPressedNoSignal(GameSettings.Table3D);
         _showFps.SetPressedNoSignal(GameSettings.ShowFps);
         _debugButtons?.SetPressedNoSignal(GameSettings.ShowDebugButtons);
