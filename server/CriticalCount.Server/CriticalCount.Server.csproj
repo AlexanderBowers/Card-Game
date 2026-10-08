@@ -1,0 +1,55 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <!--
+    The online server for Critical Count: accounts, names, friends, the endless leaderboard,
+    matchmaking and the matches themselves.
+
+    The server RUNS the matches. It compiles the game's own rules files straight in from the repo
+    root (the same list tests/AimFor20.Tests uses), so a match online is played by exactly the code
+    a match offline is - there is no second copy of the rules to drift, and a modified phone has
+    nothing to cheat with: the deck order and the opponent's hand never leave this process.
+
+    Run locally from the repo root:   dotnet run (project option) server/CriticalCount.Server
+    (XML comments cannot hold two hyphens in a row, so the option is spelled out in DEPLOY.md.)
+    The game's AimFor20.csproj leaves server/ out of its build (Compile Remove), and
+    server/.gdignore keeps the Godot editor from importing anything in here.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <RootNamespace>CriticalCount.Server</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="../../Card.cs" Link="Game/Card.cs" />
+    <Compile Include="../../Speech.cs" Link="Game/Speech.cs" />
+    <Compile Include="../../Player.cs" Link="Game/Player.cs" />
+    <Compile Include="../../GameState.cs" Link="Game/GameState.cs" />
+    <Compile Include="../../CardEffects.cs" Link="Game/CardEffects.cs" />
+    <Compile Include="../../ModifierDef.cs" Link="Game/ModifierDef.cs" />
+    <Compile Include="../../Ladder.cs" Link="Game/Ladder.cs" />
+    <Compile Include="../../CollectionLog.cs" Link="Game/CollectionLog.cs" />
+    <Compile Include="../../Cosmetics.cs" Link="Game/Cosmetics.cs" />
+    <Compile Include="../../Ruleset.cs" Link="Game/Ruleset.cs" />
+    <Compile Include="../../RunData.cs" Link="Game/RunData.cs" />
+    <Compile Include="../../RunData.Save.cs" Link="Game/RunData.Save.cs" />
+    <Compile Include="../../RunData.Migration.cs" Link="Game/RunData.Migration.cs" />
+    <Compile Include="../../Table.cs" Link="Game/Table.cs" />
+    <Compile Include="../../DrawAssist.cs" Link="Game/DrawAssist.cs" />
+    <Compile Include="../../SetRules.cs" Link="Game/SetRules.cs" />
+    <Compile Include="../../Bot.cs" Link="Game/Bot.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="Data/blocked_words_en.txt" LogicalName="blocked_words_en.txt" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="8.0.10" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="CriticalCount.Server.Tests" />
+  </ItemGroup>
+</Project>

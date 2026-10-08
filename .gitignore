@@ -16,6 +16,14 @@
 tests/**/bin/
 tests/**/obj/
 
+# Online server build output and any local database (the real one lives only on the server).
+# Not "server/**/data/": Windows matches that case-blind and would hide server/.../Data/.
+server/**/bin/
+server/**/obj/
+*.db
+*.db-shm
+*.db-wal
+
 # Claude preview renders and scratch output (not game assets)
 /Claude outputs/
 
