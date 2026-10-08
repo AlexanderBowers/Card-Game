@@ -620,9 +620,13 @@ public sealed class TableUi
     // free slot, so the grid never grows or shifts. Their size in the scene is the board card
     // size.
     //
-    // Portrait shows two rows of three (pass 32). The seventh card opens the third row, and every
+    // Portrait shows two rows of three (pass 32). The SIXTH card opens the third row, and every
     // card on THAT board shrinks so three rows fill exactly the height two did - so nothing else
     // on the table moves mid-set. The board goes back to two rows when it is cleared.
+    //
+    // Sixth, not seventh (playtest, 2026-10-08: "it wasn't clear you can play more than 6
+    // cards"). A full two-row board read as a full board; opening the row as the last of the six
+    // slots fills shows three empty slots waiting, so the board itself says there is room.
     // ------------------------------------------------------------------
     private const int PortraitRows = 2;
 
@@ -638,7 +642,7 @@ public sealed class TableUi
         int i = 0;
         foreach (Node child in board.GetChildren())
         {
-            if (i++ >= PortraitSlots && child.GetChildCount() > 0) return true;
+            if (i++ >= PortraitSlots - 1 && child.GetChildCount() > 0) return true;
         }
         return false;
     }
@@ -1382,7 +1386,7 @@ public sealed class TableUi
         TextureRect cardNode = Cards.CreateCardView(card, BoardCardSizeFor(parentContainer), parentContainer == L?.P2Board);
 
         // Drop the card into the next empty slot; if the board is somehow full, let the grid grow.
-        // In portrait the seventh card opens the third row, and RefreshBoardSlots below re-sizes
+        // In portrait the sixth card opens the third row, and RefreshBoardSlots below re-sizes
         // every card on the board for it - this one included.
         Control slot = FindFreeSlot(parentContainer);
         cardNode.Modulate = new Color(1, 1, 1, 0); // invisible until the turn animation lands

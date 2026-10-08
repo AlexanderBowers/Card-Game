@@ -18,6 +18,7 @@ public partial class OptionsOverlay : Control
 
     private CheckButton _animations;
     private CheckButton _batterySaver;
+    private CheckButton _highFrameRate;
     private CheckButton _table3D;
     private CheckButton _showFps;
     private CheckButton _debugButtons;
@@ -121,6 +122,8 @@ public partial class OptionsOverlay : Control
         colB.AddChild(_animations);
         _batterySaver = Toggle("Battery saver (30 fps)", GameSettings.SetBatterySaver);
         colB.AddChild(_batterySaver);
+        _highFrameRate = Toggle("High frame rate (up to 120 fps)", GameSettings.SetHighFrameRate);
+        colB.AddChild(_highFrameRate);
 
         // --- Debug. An exported build has no debug rows to show, so it gets no switch either.
         if (OS.IsDebugBuild())
@@ -145,6 +148,7 @@ public partial class OptionsOverlay : Control
 
         _animations.SetPressedNoSignal(GameSettings.CardAnimations);
         _batterySaver.SetPressedNoSignal(GameSettings.BatterySaver);
+        _highFrameRate.SetPressedNoSignal(GameSettings.HighFrameRate);
         _table3D.SetPressedNoSignal(GameSettings.Table3D);
         _showFps.SetPressedNoSignal(GameSettings.ShowFps);
         _debugButtons?.SetPressedNoSignal(GameSettings.ShowDebugButtons);

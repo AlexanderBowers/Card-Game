@@ -34,6 +34,12 @@ public static class GameSettings
     /// A card game spends most of its life waiting for a tap, so this is where the battery goes.
     public static bool BatterySaver { get; private set; }
 
+    /// Off (the default) = capped at 60 fps. On = uncapped, so a 120 Hz phone draws at 120.
+    /// Default off since the Pixel 11 playtest (2026-10-08): it ran at 120 and the phone got hot,
+    /// and a card game gains next to nothing from the extra frames. Battery saver wins over this.
+    public static bool HighFrameRate { get; private set; }
+    public const int DefaultMaxFps = 60;
+
     /// The debug rows on the table. Only offered in debug builds; an exported build never builds
     /// those rows, so this setting cannot turn them on there.
     public static bool ShowDebugButtons { get; private set; } = true;
@@ -65,6 +71,7 @@ public static class GameSettings
             }
             CardAnimations = cfg.GetValue("battery", "card_animations", true).AsBool();
             BatterySaver = cfg.GetValue("battery", "battery_saver", false).AsBool();
+            HighFrameRate = cfg.GetValue("battery", "high_frame_rate", false).AsBool();
             ShowDebugButtons = cfg.GetValue("debug", "show_buttons", true).AsBool();
             Table3D = cfg.GetValue("graphics", "table_3d", true).AsBool();
             ShowFps = cfg.GetValue("graphics", "show_fps", false).AsBool();
@@ -95,6 +102,7 @@ public static class GameSettings
 
     public static void SetCardAnimations(bool on) { EnsureLoaded(); CardAnimations = on; Commit(); }
     public static void SetBatterySaver(bool on) { EnsureLoaded(); BatterySaver = on; Commit(); }
+    public static void SetHighFrameRate(bool on) { EnsureLoaded(); HighFrameRate = on; Commit(); }
     public static void SetShowDebugButtons(bool on) { EnsureLoaded(); ShowDebugButtons = on; Commit(); }
     public static void SetTable3D(bool on) { EnsureLoaded(); Table3D = on; Commit(); }
     public static void SetShowFps(bool on) { EnsureLoaded(); ShowFps = on; Commit(); }
@@ -112,7 +120,7 @@ public static class GameSettings
         ApplyBus(MusicBus, Channel.Music);
         ApplyBus(SfxBus, Channel.Sfx);
 
-        Engine.MaxFps = BatterySaver ? 30 : 0;
+        Engine.MaxFps = BatterySaver ? 30 : HighFrameRate ? 0 : DefaultMaxFps;
         OS.LowProcessorUsageMode = BatterySaver;
     }
 
@@ -149,6 +157,7 @@ public static class GameSettings
         }
         cfg.SetValue("battery", "card_animations", CardAnimations);
         cfg.SetValue("battery", "battery_saver", BatterySaver);
+        cfg.SetValue("battery", "high_frame_rate", HighFrameRate);
         cfg.SetValue("debug", "show_buttons", ShowDebugButtons);
         cfg.SetValue("graphics", "table_3d", Table3D);
         cfg.SetValue("graphics", "show_fps", ShowFps);
