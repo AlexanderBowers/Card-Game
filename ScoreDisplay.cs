@@ -40,6 +40,16 @@ public sealed class ScoreDisplay
     private int Shown(Player player) =>
         player != null && _shownOverride.TryGetValue(player, out int value) ? value : player?.CurrentScore ?? 0;
 
+    /// The score as written on the table. With face-down cards on the board (the hidden-card rule)
+    /// it is only what the face-up cards add up to, and "+?" for the rest - "14+?" - so the player
+    /// can see how much they know and that there is more they don't.
+    private string ScoreText(Player player)
+    {
+        if (!_host.GameStarted || player == null) return "-";
+        if (!player.HasHiddenCards) return Shown(player).ToString();
+        return $"{Shown(player) - player.HiddenTotal}+?";
+    }
+
     /// Keep showing `value` for this player until ReleaseShown.
     public void HoldShown(Player player, int value)
     {
@@ -135,8 +145,8 @@ public sealed class ScoreDisplay
     /// left empty there rather than repeating your score across the table.
     private void RefreshOpponentLines()
     {
-        string p1 = _host.GameStarted ? Shown(P1).ToString() : "-";
-        string p2 = _host.GameStarted ? Shown(P2).ToString() : "-";
+        string p1 = ScoreText(P1);
+        string p2 = ScoreText(P2);
 
         if (L.ScoreBadges)
         {
@@ -238,7 +248,9 @@ public sealed class ScoreDisplay
         // The opponent boxes show the real score, so they never use the preview.
         int? previewed = preview ? PreviewedScore(player) : null;
         int shown = previewed ?? Shown(player);
-        bool started = _host.GameStarted;
+        // A score with face-down cards in it is neither red nor green: either would tell the
+        // player what the hidden cards add up to.
+        bool started = _host.GameStarted && !player.HasHiddenCards;
         bool over = started && shown > State.TargetScore;
         bool onTarget = started && previewed.HasValue && previewed.Value == State.TargetScore;
 
@@ -435,7 +447,7 @@ public sealed class ScoreDisplay
         if (player == null) return;
         bool started = _host.GameStarted;
         string targetText = started && withTarget ? $"/{State.TargetScore}" : string.Empty;
-        string scoreText = started ? Shown(player).ToString() : "-";
+        string scoreText = ScoreText(player);
 
         if (value != null)
         {
@@ -521,8 +533,7 @@ public sealed class ScoreDisplay
         }
         else
         {
-            lines.YouValue.Text = withTarget ? ScoreOf(player)
-                                             : (_host.GameStarted ? Shown(player).ToString() : "-");
+            lines.YouValue.Text = withTarget ? ScoreOf(player) : ScoreText(player);
             lines.YouValue.RemoveThemeColorOverride("font_color");
         }
 
@@ -545,5 +556,5 @@ public sealed class ScoreDisplay
     /// A player's score with the target behind it - "17/20" - so "how close am I" is one glance
     /// rather than arithmetic against a number somewhere else on the screen.
     private string ScoreOf(Player player) =>
-        _host.GameStarted ? $"{Shown(player)}/{State.TargetScore}" : "-";
+        _host.GameStarted ? $"{ScoreText(player)}/{State.TargetScore}" : "-";
 }

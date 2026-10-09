@@ -153,6 +153,38 @@ public sealed class Table
     public Player OpponentOf(Player player) => player == P1 ? P2 : P1;
 
     // ------------------------------------------------------------------
+    // Face-down cards (the hidden-card rule, 2026-10-09)
+    //
+    // After Chuck's playtest: "I can see what the other player has ... so I know exactly what I
+    // have to do." On a rung that hides (GameState.HiddenOpponent - the boss and Endless) the bot's
+    // first two cards each set land face up, so there is something to read, and everything after
+    // them - its draws and the plain Modifiers it plays - lands face down, as does its hand. The
+    // set's end turns the board over.
+    //
+    // What a face-down card is NOT is a secret from the rules: it is a Card.IsHidden flag the
+    // views draw as a back, so the bot, the scoring and every effect read the real values. The
+    // only rule that bends is what the PLAYER is told - the legality and wording of effects aimed
+    // at a face-down board (CardEffects.CanPlay, EffectPreview, TryPlayEffect's narration).
+    // ------------------------------------------------------------------
+
+    /// How many of the bot's cards each set are face up before the rest start landing face down.
+    public const int FaceUpOpeningCards = 2;
+
+    /// This match hides the bot's cards. Never in local 2-player, whatever the state says.
+    public bool HidesOpponent => _host.VsBot && _host.State.HiddenOpponent;
+
+    /// The set is over: the bot's board turns face up so the result can be read. Its hand stays
+    /// face down - those cards are still to be played this match. Returns the cards that turned.
+    public List<Card> RevealOpponentBoard() => HidesOpponent ? P2.RevealBoard() : new List<Card>();
+
+    private static void Reveal(Card card, List<Card> turned)
+    {
+        if (card == null || !card.IsHidden) return;
+        card.IsHidden = false;
+        turned.Add(card);
+    }
+
+    // ------------------------------------------------------------------
     // Effect cards: one set of rules for both sides
     //
     // The bot reaches these through IBotTable, the player through their hand. Neither gets its
@@ -194,14 +226,22 @@ public sealed class Table
         public readonly Card Destroyed;
         /// The target's turn was re-opened (the answering rule).
         public readonly bool Reopened;
+        /// Face-down cards this play turned face up (the hidden-card rule), for the table to flip.
+        public readonly List<Card> Revealed;
+        /// What to say about it - the result's narration, unless that would read out a face-down
+        /// number (see TryPlayEffect).
+        public readonly string Narration;
 
-        public EffectPlay(CardEffects.EffectResult result, Player target, Player boardOwner, Card destroyed, bool reopened)
+        public EffectPlay(CardEffects.EffectResult result, Player target, Player boardOwner, Card destroyed, bool reopened,
+                          List<Card> revealed, string narration)
         {
             Result = result;
             Target = target;
             BoardOwner = boardOwner;
             Destroyed = destroyed;
             Reopened = reopened;
+            Revealed = revealed ?? new List<Card>();
+            Narration = narration ?? result.Narration;
         }
     }
 
@@ -221,6 +261,12 @@ public sealed class Table
         // LastPlayedModifier - so the card is grabbed here, or the caller has nothing to burn.
         Card destroyed = (card.Effect == CardEffect.Veto) ? target.LastPlayedModifier : null;
 
+        // Taken before Resolve moves anything: which card Copy reads, the drawn card it rewrites,
+        // and whether the card Recall brings back was one played face down.
+        Card copySource = (card.Effect == CardEffect.Copy) ? CardEffects.CopySource(target) : null;
+        bool recalledHidden = chosen != null && chosen.IsHidden;
+        bool targetHidden = target.HasHiddenCards;
+
         CardEffects.EffectResult result = CardEffects.Resolve(card, owner, target, _host.State.TargetScore, chosen);
         if (!result.Applied)
         {
@@ -229,6 +275,58 @@ public sealed class Table
         }
 
         NoteEffectPlayed(owner);
+
+        // The hidden-card rule. An effect card is a public act - it reaches across the table, so it
+        // is played face up even out of a face-down hand - and some of them name a face-down card
+        // outright. Those turn over; everything else stays down and is narrated without numbers.
+        List<Card> revealed = new List<Card>();
+        string narration = null;
+        if (HidesOpponent)
+        {
+            card.IsHidden = false;
+            switch (card.Effect)
+            {
+                case CardEffect.Copy:
+                    // Yours copies theirs: the card it read is named. Theirs copies yours: their
+                    // drawn card now shows your number, so there is nothing left to hide on it.
+                    Reveal(owner == P1 ? copySource : owner.LastDrawnCard, revealed);
+                    if (owner == P2)
+                        narration = $"{Speech.Does(owner.PlayerName, "plays", "play")} Copy - their drawn card becomes a copy of your {owner.LastDrawnCard?.Value}";
+                    break;
+
+                case CardEffect.TradeTotals:
+                    // Your score is now theirs, so their total is no secret: the whole board turns.
+                    foreach (Card c in P2.ActiveCardsOnBoard.ToArray()) Reveal(c, revealed);
+                    break;
+
+                case CardEffect.TradeHands:
+                    // Their hand is yours now. (Yours, now theirs, was never face down.)
+                    foreach (Card c in P1.Modifiers) Reveal(c, revealed);
+                    break;
+
+                case CardEffect.Veto:
+                    // The burned card is shown as it goes, so the player sees what they destroyed -
+                    // but not the score it leaves, which the rest of their board still hides.
+                    Reveal(destroyed, revealed);
+                    if (owner == P1 && targetHidden && destroyed != null)
+                        narration = $"{Speech.Does(owner.PlayerName, "plays", "play")} Veto - destroys {Speech.Possessive(target.PlayerName)} "
+                                  + $"{(destroyed.Value > 0 ? "+" : "")}{destroyed.Value}"
+                                  // Still the old hold here: the release is applied just below.
+                                  + (target.IsHolding ? " - and they are no longer holding" : string.Empty);
+                    break;
+
+                case CardEffect.Shave:
+                    // (On the target it changed nothing, and Resolve already says so in words.)
+                    if (owner == P1 && targetHidden && target.CurrentScore < _host.State.TargetScore)
+                        narration = $"{Speech.Does(owner.PlayerName, "plays", "play")} Shave - {Speech.Possessive(target.PlayerName)} score goes down by 1";
+                    break;
+
+                case CardEffect.Recall:
+                    if (owner == P2 && recalledHidden)
+                        narration = $"{Speech.Does(owner.PlayerName, "plays", "play")} Recall - takes back a Modifier";
+                    break;
+            }
+        }
 
         // Recall's card is back in hand but dead until the next turn. Set AFTER Resolve, because
         // Resolve is what moved it out of the spent pile.
@@ -249,7 +347,7 @@ public sealed class Table
         Player boardOwner = CardEffects.LandsOnTarget(card.Effect) ? target : owner;
         boardOwner.ActiveCardsOnBoard.Add(card);
 
-        play = new EffectPlay(result, target, boardOwner, destroyed, reopened);
+        play = new EffectPlay(result, target, boardOwner, destroyed, reopened, revealed, narration);
         return true;
     }
 
@@ -264,18 +362,25 @@ public sealed class Table
         string refusal = EffectRefusal(player, picked);
         if (refusal != null) return $"{name}: {refusal}";
 
+        // Face-down cards are previewed without their numbers (the hidden-card rule).
+        bool hidden = other.HasHiddenCards;
+
         switch (picked.Effect)
         {
             case CardEffect.Copy:
             {
                 int mine = player.LastDrawnCard?.Value ?? 0;
-                int theirs = CardEffects.CopySource(other)?.Value ?? 0;
+                Card source = CardEffects.CopySource(other);
+                if (source != null && source.IsHidden) return $"Your {mine} becomes a copy of their face-down card";
+                int theirs = source?.Value ?? 0;
                 int after = player.CurrentScore - mine + theirs;
                 return $"Your {mine} becomes a {theirs}: {player.CurrentScore} to {after}";
             }
             case CardEffect.Shave:
+                if (hidden) return $"{other.PlayerName}: their score goes down by 1, unless they are on the target";
                 return $"{other.PlayerName}: {other.CurrentScore} - 1 = {other.CurrentScore - 1}";
             case CardEffect.TradeTotals:
+                if (hidden) return $"Trade Totals: your {player.CurrentScore} for their hidden total";
                 return $"Trade Totals: {player.CurrentScore} and {other.CurrentScore} change places";
             case CardEffect.TradeHands:
                 return $"Trade Hands: your {player.Modifiers.Count - 1} Modifiers for their {other.Modifiers.Count}";
@@ -287,6 +392,7 @@ public sealed class Table
                 // a plain modifier they played this turn. Named with its sign, because vetoing a
                 // minus card sends their score UP and the preview has to show that honestly.
                 Card theirs = other.LastPlayedModifier;
+                if (theirs.IsHidden) return "Destroy the face-down Modifier they just played";
                 string theirSign = theirs.Value < 0 ? "-" : "+";
                 return $"Destroy their {theirSign}{Math.Abs(theirs.Value)}: "
                      + $"{other.CurrentScore} back to {other.CurrentScore - theirs.Value}";
@@ -472,6 +578,12 @@ public sealed class Table
         P2.ResetForNewMatch();
 
         _host.DealBotHand();
+
+        // The hidden-card rule: the bot's hand is face down for the whole match, so the Modifiers
+        // it plays from it land face down too. (An effect card turns up as it is played.)
+        if (HidesOpponent)
+            foreach (Card card in P2.Modifiers) card.IsHidden = true;
+
         _host.HandsDealt(introduceCards: true);
     }
 
@@ -560,6 +672,10 @@ public sealed class Table
 
         Card drawnMainCard = new Card(cardValue, CardType.Main, cardValue.ToString());
         player.ActiveCardsOnBoard.Add(drawnMainCard);
+
+        // The hidden-card rule: past the bot's first two cards this set, its draws land face down.
+        if (HidesOpponent && player == P2 && player.ActiveCardsOnBoard.Count > FaceUpOpeningCards)
+            drawnMainCard.IsHidden = true;
 
         // Copy names this exact card. On a two-card opening deal that is the SECOND one, because
         // this runs once per card and the last write wins - which is the right answer (it is the

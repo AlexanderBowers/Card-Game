@@ -136,6 +136,8 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
                 // "--target=23": local 2-player's target, to look at the board's emblem off 20.
                 if (arg.StartsWith("--target=") && int.TryParse(arg["--target=".Length..], out int target))
                     Menus.Local2PlayerTarget = target;
+                if (arg == "--hidden-cards") _debugHiddenCards = true;
+                if (arg == "--autoplay") StartDebugAutoplay();
             }
         }
 
@@ -299,7 +301,9 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
         string moved = (run.TargetMovedThisStage && run.CurrentRolledEffects == null)
             ? $"  ({(run.CurrentTarget > run.PreviousTarget ? "up" : "down")} from {run.PreviousTarget})"
             : string.Empty;
-        StageIntro.Play(this, title, $"Target: {_gameState.TargetScore}{moved}{run.FinaleRulesLine("\n")}", () =>
+        // The hidden-card rule is said where the stage's other rules are (no full stop: tutorial style).
+        string hidden = _gameState.HiddenOpponent ? "\nTheir cards are face down after the first two" : string.Empty;
+        StageIntro.Play(this, title, $"Target: {_gameState.TargetScore}{moved}{run.FinaleRulesLine("\n")}{hidden}", () =>
         {
             _arrivalPending = false;
             _ui.DeferRefresh();
@@ -330,8 +334,26 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
 
         _inRun = true;
         _gameState.TargetScore = run.CurrentTarget;
+        _gameState.HiddenOpponent = run.CurrentStep.HidesOpponentCards || _debugHiddenCards;
         _player2.PlayerName = run.CurrentOpponent;
         _ui.ApplyRankTheme();
+    }
+
+    /// Debug builds: "-- --hidden-cards" plays any rung face down, for looking at the rule.
+    private static bool _debugHiddenCards;
+
+    /// Debug builds: "-- --autoplay" presses your Draw Card / Hold in a solo match (Draw below 16,
+    /// Hold from there), so a Movie Maker run plays whole turns with nobody at the table. It stops
+    /// at the set-end panel, which is usually the picture wanted.
+    private void StartDebugAutoplay()
+    {
+        Timer timer = new Timer { WaitTime = 1.6, Autostart = true };
+        AddChild(timer);
+        timer.Timeout += () =>
+        {
+            if (_online || !_isVsBot || TableArriving || _ui.Moments.Busy || !HumanCanActFor(_player1)) return;
+            FinishTurn(_player1, hold: _player1.CurrentScore >= 16);
+        };
     }
 
 
@@ -607,7 +629,7 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
     void IBotTable.PlayBotModifier(Card card)
     {
         _player2.PlayModifierCard(card, _gameState);
-        NoteModifierMet(card); // played at you, so you have met it
+        if (!card.IsHidden) NoteModifierMet(card); // played at you, so you have met it - unless face down
         _ui.InstantiateCardView(card, _p2BoardContainer);
     }
 
@@ -670,6 +692,13 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
         if (!_table.TryPlayEffect(owner, card, chosen, out Table.EffectPlay play)) return false;
         Player target = play.Target;
 
+        // Face-down cards this play named turn over (the hidden-card rule). Two are left to the
+        // effect's own picture: a burned Veto card changes face at once and then burns, and the
+        // bot's drawn card under its own Copy turns as the Copy flips it.
+        List<Card> flip = play.Revealed;
+        if (card.Effect == CardEffect.Copy && owner == _player2) flip = flip.FindAll(c => c != owner.LastDrawnCard);
+        _ui.RevealCards(flip, instant: play.Destroyed);
+
         // The vetoed card leaves the table. Burn it BEFORE the Veto card drops, so the eye follows
         // the card being destroyed rather than the one arriving - a score that ticks down on its
         // own tells the target nothing about WHICH card they just lost.
@@ -703,10 +732,11 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
         if (CardEffects.RewritesDrawnCards(card.Effect))
         {
             _ui.PlayCopy(owner, ownerBefore, target, BoardOf(owner), BoardOf(target));
-            _ui.RefreshCardFace(CardEffects.CopySource(target), BoardOf(target));
+            Card source = CardEffects.CopySource(target);
+            if (!play.Revealed.Contains(source)) _ui.RefreshCardFace(source, BoardOf(target)); // a revealed one is mid-flip
         }
 
-        _ui.Toasts.ShowEffectBanner(play.Result.Narration); // the player has to SEE it
+        _ui.Toasts.ShowEffectBanner(play.Narration); // the player has to SEE it
 
         // The ladder's promise, kept: you meet a card when it is used on you, and the game says
         // once what it was. Only the bot's cards - your own were introduced when you were dealt them.
@@ -788,6 +818,10 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
     {
         // A rescue card lasts the set it was given in, played or not (monetization-spec.md §3.4).
         _player1.DiscardRescueCards();
+
+        // The hidden-card rule: the set is decided, so the bot's board turns over and the result
+        // can be read off the table. Before the refresh below, so the scores are whole numbers again.
+        _ui.RevealCards(_table.RevealOpponentBoard());
 
         SetRules.Outcome outcome = SetRules.Describe(_player1.PlayerName, _player1.CurrentScore,
                                                      _player2.PlayerName, _player2.CurrentScore,

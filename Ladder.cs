@@ -25,11 +25,15 @@ public readonly struct LadderStep
     /// (RunData.EnsureRuleset). TargetScore is then only a fallback that nothing should reach.
     public readonly bool Randomised;
 
+    /// The opponent's cards after its first two are face down (GameState.HiddenOpponent).
+    public readonly bool HidesOpponentCards;
+
     public LadderStep(int rank, string opponent, int targetScore, int medalReward,
                       bool aiHasFlipValueCards = true, CardEffect aiEffect = CardEffect.None,
-                      bool randomised = false)
+                      bool randomised = false, bool hidesOpponentCards = false)
     {
         Randomised = randomised;
+        HidesOpponentCards = hidesOpponentCards;
         Rank = rank;
         Opponent = opponent;
         TargetScore = targetScore;
@@ -73,8 +77,14 @@ public static class Ladder
         new LadderStep(3, "Ruby Challenger",     24,  6, true, CardEffect.TradeHands),      // 7
         new LadderStep(3, "Ruby Champion",       24,  8, true, CardEffect.Recall),          // 8
         new LadderStep(4, "Obsidian Challenger", 22,  8, true, CardEffect.Veto),            // 9
-        new LadderStep(4, "Obsidian Champion",   25, 10, true, randomised: true),           // 10 ruleset rolled
+        new LadderStep(4, "Obsidian Champion",   25, 10, true, randomised: true,            // 10 ruleset rolled,
+                       hidesOpponentCards: true),                                           //    cards face down
     };
+
+    // The boss plays face down (2026-10-09). Hidden cards are the finale's twist rather than a
+    // rung of their own, so stages 1-9 still bring exactly one new idea each - and Endless, parked
+    // on this rung (RunData.StartEndless), inherits it: the mode for the players who have learned
+    // everything else is the one where you cannot see what you are up against.
 
     public static int Length => Steps.Length;
 

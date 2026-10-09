@@ -41,6 +41,38 @@ public class Player
         PlayerName = name;
     }
 
+    // ------------------------------------------------------------------
+    // Face-down cards (the hidden-card rule: the boss rung and Endless, 2026-10-09)
+    //
+    // Only the bot's cards are ever face down offline (Table decides which). Every face-down card
+    // on a board is a main-deck draw or a plain Modifier, so its Value is part of CurrentScore -
+    // which is what lets the score the other side can see be worked out from the board.
+    // ------------------------------------------------------------------
+
+    /// Some of this player's cards on the board are face down to the other side.
+    public bool HasHiddenCards => ActiveCardsOnBoard.Exists(c => c.IsHidden);
+
+    /// What the face-down cards on this board add up to. The other side sees CurrentScore minus
+    /// this, followed by "+?".
+    public int HiddenTotal
+    {
+        get
+        {
+            int total = 0;
+            foreach (Card card in ActiveCardsOnBoard)
+                if (card.IsHidden) total += card.Value;
+            return total;
+        }
+    }
+
+    /// Turns every face-down card on the board face up, and returns the ones that turned.
+    public List<Card> RevealBoard()
+    {
+        List<Card> turned = ActiveCardsOnBoard.FindAll(c => c.IsHidden);
+        foreach (Card card in turned) card.IsHidden = false;
+        return turned;
+    }
+
     /// Deals a fresh modifier hand for a new match. Every card is a random non-zero value in
     /// -maxMagnitude..+maxMagnitude, and each one has a flipValueChance of being a "+/-" card that the
     /// player can swap between plus and minus before playing it.

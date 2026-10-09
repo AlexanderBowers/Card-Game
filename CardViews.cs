@@ -187,13 +187,11 @@ public sealed class CardViews
         view.SetMeta("cardId", card.Id); // so a redraw can find this view again
         if (card.Effect != CardEffect.None) view.SetMeta("effectCard", true);
 
-        // Online, the opponent's hand is face down: the phone does not know what is in it.
+        // Face down: online, the opponent's hand (the phone does not know what is in it); against
+        // the bot on a hiding rung, its hand and its cards after the first two (Table).
         if (card.IsHidden)
         {
-            view.Texture = Art($"backs/card_back_{PlayerDeckKey}.png") ?? _cardBack;
-            // The template's number belongs to a face; a back has none. Marked like a pre-rendered
-            // face so ApplyCardSize (which runs again on every resize) keeps the label hidden.
-            view.SetMeta(PrerenderedMeta, true);
+            PaintBack(view, opponentSide);
             ApplyCardSize(view, size);
             return view;
         }
@@ -263,6 +261,16 @@ public sealed class CardViews
     /// keeping a picture of the old value.
     public void Redraw(TextureRect view, Card card, Vector2 size, bool opponentSide)
     {
+        if (card.IsHidden)
+        {
+            PaintBack(view, opponentSide);
+            ApplyCardSize(view, size);
+            return;
+        }
+
+        // A card turning face up (the hidden-card rule) was made as a back, with no shine of its own.
+        bool hadShine = view.GetNodeOrNull<ColorRect>("Shine") != null;
+
         Texture2D face = PrerenderedFace(card, opponentSide);
         if (face != null)
         {
@@ -277,7 +285,19 @@ public sealed class CardViews
         }
         ApplyCardSize(view, size);
 
-        if (view.GetNodeOrNull<ColorRect>("Shine")?.Material is ShaderMaterial shine)
+        if (!hadShine) AddShine(view, card);
+        else if (view.GetNodeOrNull<ColorRect>("Shine")?.Material is ShaderMaterial shine)
             shine.SetShaderParameter("card_face", view.Texture);
+    }
+
+    /// A card face down: the back of the deck it came from - the stage's deck for the bot's cards
+    /// in a ladder match, otherwise yours. The template's number belongs to a face, and a back has
+    /// none, so the view is marked like a pre-rendered face and ApplyCardSize (which runs again on
+    /// every resize) keeps the label hidden.
+    private void PaintBack(TextureRect view, bool opponentSide)
+    {
+        view.Texture = Art($"backs/card_back_{DeckKeyFor(opponentSide)}.png") ?? _cardBack;
+        view.SelfModulate = Colors.White;
+        view.SetMeta(PrerenderedMeta, true);
     }
 }

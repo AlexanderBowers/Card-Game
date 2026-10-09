@@ -10,6 +10,13 @@ public class GameState
 	public const int SetsToWinMatch = 3;
 
 	public int TargetScore { get; set; } = 20;
+
+	/// The hidden-card rule (2026-10-09, after Chuck's playtest: "I need more tension"): the bot's
+	/// first two cards each set are face up, everything after them - its draws and the Modifiers it
+	/// plays - lands face down, and its hand is face down all match. Set per match from the rung
+	/// (LadderStep.HidesOpponentCards). Only ever on against the bot: a phone shared across a table
+	/// cannot hide anything, and online has its own rules.
+	public bool HiddenOpponent { get; set; }
 	public int SetsWonPlayer1 { get; set; } = 0;
 	public int SetsWonPlayer2 { get; set; } = 0;
 

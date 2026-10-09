@@ -1003,7 +1003,7 @@ public sealed class TableUi
         {
             L.P2Hand.AddChild(CreateModifierButton(
                 card, !p2Can, card == p2Picked, p2Picked != null,
-                () => _host.ModifierPressed(P2, card), p2Size, p2Lift));
+                () => _host.ModifierPressed(P2, card), p2Size, p2Lift, opponentSide: true));
         }
     }
 
@@ -1230,7 +1230,7 @@ public sealed class TableUi
     /// and focus handling still apply) with the card art drawn on top. A picked-up card is lifted
     /// and the rest of the hand dims, so which card is in play is obvious without reading anything.
     private Button CreateModifierButton(Card card, bool disabled, bool selected, bool anySelected, Action onPressed,
-                                        Vector2 size, float lift, bool pulse = false)
+                                        Vector2 size, float lift, bool pulse = false, bool opponentSide = false)
     {
         Button button = new Button
         {
@@ -1244,7 +1244,8 @@ public sealed class TableUi
             button.AddThemeStyleboxOverride(state, empty);
         button.Pressed += onPressed;
 
-        TextureRect view = Cards.CreateCardView(card, size);
+        // opponentSide only matters face down: whose deck's back it wears (CardViews.PaintBack).
+        TextureRect view = Cards.CreateCardView(card, size, opponentSide);
         view.MouseFilter = Control.MouseFilterEnum.Ignore;
 
         if (disabled) view.Modulate = new Color(0.55f, 0.55f, 0.55f);
@@ -1346,6 +1347,42 @@ public sealed class TableUi
         TextureRect view = FindCardView(card, board);
         if (view == null) return;
         Cards.Redraw(view, card, BoardCardSizeFor(board), board == L?.P2Board);
+    }
+
+    private const float RevealHalfSeconds = 0.14f;
+    private const float RevealStagger = 0.08f;
+
+    /// Face-down cards that have just turned face up in the model (the hidden-card rule: the set's
+    /// end, or an effect that named them) flip over where they sit: edge-on, the new face, back
+    /// out - one after another, left to right, so a board turning over reads as cards being turned
+    /// rather than a picture swapping. `instant` (Veto's burned card) just changes face, because it
+    /// already has an animation of its own to play. Hand cards need nothing: the refresh redraws
+    /// the hands.
+    public void RevealCards(IReadOnlyList<Card> cards, Card instant = null)
+    {
+        if (cards == null) return;
+        int order = 0;
+        foreach (Card card in cards)
+        {
+            Control board = FindCardView(card, L?.P2Board) != null ? L?.P2Board : L?.P1Board;
+            TextureRect view = FindCardView(card, board);
+            if (view == null) continue;
+
+            if (card == instant || !GameSettings.CardAnimations || !view.IsInsideTree())
+            {
+                RefreshCardFace(card, board);
+                continue;
+            }
+
+            view.PivotOffset = view.Size / 2f;
+            Tween flip = view.CreateTween();
+            flip.TweenInterval(order++ * RevealStagger);
+            flip.TweenProperty(view, "scale:x", 0f, RevealHalfSeconds)
+                .SetTrans(Tween.TransitionType.Sine).SetEase(Tween.EaseType.In);
+            flip.TweenCallback(Callable.From(() => RefreshCardFace(card, board)));
+            flip.TweenProperty(view, "scale:x", 1f, RevealHalfSeconds)
+                .SetTrans(Tween.TransitionType.Sine).SetEase(Tween.EaseType.Out);
+        }
     }
 
     // ------------------------------------------------------------------

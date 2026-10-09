@@ -154,11 +154,13 @@ public static class CardEffects
             //
             // And the two cards have to actually DIFFER. Copying a 5 onto a 5 spends the card to
             // change nothing, which is the one outcome no player ever means to buy.
+            // A face-down card is the exception (the hidden-card rule): refusing "because theirs is
+            // the same" would tell you what it is. Copying blind is a gamble you are allowed to lose.
             case CardEffect.Copy:
             {
                 Card source = CopySource(opponent);
                 return !self.IsHolding && self.LastDrawnCard != null && source != null
-                    && self.LastDrawnCard.Value != source.Value;
+                    && (source.IsHidden || self.LastDrawnCard.Value != source.Value);
             }
 
             // A held score is locked in. TradeTotals cannot take it.
@@ -167,8 +169,12 @@ public static class CardEffects
 
             // The one card aimed at a locked score, and only a locked score BELOW the target -
             // the GDD is explicit that a player sitting exactly on the target is safe.
+            //
+            // Against face-down cards the "below the target" half cannot be checked without giving
+            // their score away, so it is played blind: it lands on any hold and changes nothing if
+            // they were sitting exactly on the target (Resolve).
             case CardEffect.Shave:
-                return opponent.IsHolding && opponent.CurrentScore < target;
+                return opponent.IsHolding && (opponent.CurrentScore < target || opponent.HasHiddenCards);
 
             // The card being played is spent first, so an owner left empty-handed is the BEST case
             // (take theirs, give nothing). What has to be true is that there is something to take.
@@ -349,6 +355,11 @@ public static class CardEffects
 
             case CardEffect.Shave:
             {
+                // Only reachable blind (CanPlay): a score exactly on the target is safe, as ever.
+                if (opponent.CurrentScore >= target)
+                    return new EffectResult(true, false,
+                        $"{Speech.Does(self.PlayerName, "plays", "play")} Shave - but {Speech.Is(opponent.PlayerName)} on the target, so nothing changes");
+
                 int before = opponent.CurrentScore;
                 opponent.CurrentScore -= 1;
 
