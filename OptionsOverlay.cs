@@ -49,6 +49,9 @@ public partial class OptionsOverlay : Control
         _onlineNote.Text = "Your online account is gone. Opening Online again starts a new one.";
     }
     private CheckButton _table3D;
+    private VBoxContainer _cloudSection;
+    private CheckButton _cloudToggle;
+    private Label _cloudNote;
     private CheckButton _showFps;
     private CheckButton _debugButtons;
     private Button _closeButton;
@@ -154,6 +157,24 @@ public partial class OptionsOverlay : Control
         _highFrameRate = Toggle("High frame rate (up to 120 fps)", GameSettings.SetHighFrameRate);
         colB.AddChild(_highFrameRate);
 
+        // --- Cloud Save (2026-10-09). Only where it can work: an Android build with Play Games set
+        // up (CloudSave.Available). Off until the player turns it on.
+        _cloudSection = new VBoxContainer();
+        _cloudSection.AddThemeConstantOverride("separation", 6);
+        _cloudSection.AddChild(SectionLabel("Cloud Save"));
+        _cloudToggle = Toggle("Save progress to Google Play Games", on =>
+        {
+            if (CloudSave.Instance == null) return;
+            if (on) CloudSave.Instance.Enable(); else CloudSave.Instance.Disable();
+            RefreshCloud();
+        });
+        _cloudSection.AddChild(_cloudToggle);
+        _cloudNote = new Label { AutowrapMode = TextServer.AutowrapMode.WordSmart, CustomMinimumSize = new Vector2(260, 0) };
+        _cloudNote.AddThemeFontSizeOverride("font_size", OverlayUi.Readable(14));
+        _cloudNote.AddThemeColorOverride("font_color", OverlayUi.Muted);
+        _cloudSection.AddChild(_cloudNote);
+        colB.AddChild(_cloudSection);
+
         // --- Online. Only once an online account exists (Google Play requires in-app deletion).
         _onlineSection = new VBoxContainer();
         _onlineSection.AddChild(SectionLabel("Online"));
@@ -204,6 +225,12 @@ public partial class OptionsOverlay : Control
         if (_closeButton != null) _closeButton.CustomMinimumSize = WideButton;
         FillStore(); // sized here too, because WideButton follows the viewport
         if (_privacySection != null) _privacySection.Visible = AdService.PrivacyOptionsRequired;
+        RefreshCloud();
+        if (CloudSave.Instance != null)
+        {
+            CloudSave.Instance.Changed -= RefreshCloud;
+            CloudSave.Instance.Changed += RefreshCloud;
+        }
 
         Node parent = GetParent();
         if (parent != null) OverlayUi.BringToFront(this);
@@ -212,10 +239,25 @@ public partial class OptionsOverlay : Control
 
     private void Close()
     {
+        if (CloudSave.Instance != null) CloudSave.Instance.Changed -= RefreshCloud;
         Visible = false;
         Action done = _onClosed;
         _onClosed = null;
         done?.Invoke();
+    }
+
+    /// The Cloud Save switch and the line under it: what it does when off, how it is doing when on.
+    private void RefreshCloud()
+    {
+        if (_cloudSection == null || !GodotObject.IsInstanceValid(_cloudSection)) return;
+        _cloudSection.Visible = CloudSave.Available && CloudSave.Instance != null;
+        if (!_cloudSection.Visible) return;
+
+        _cloudToggle.SetPressedNoSignal(GameSettings.CloudSave);
+        string status = CloudSave.Instance.StatusText;
+        _cloudNote.Text = !GameSettings.CloudSave
+            ? "Keeps your cards, decks, medals and climb in your Google Play Games account, so a new phone picks up where this one left off."
+            : string.IsNullOrEmpty(status) ? "On" : status;
     }
 
     /// Rebuilt every time the screen opens: buying No Ads replaces the button with a thank-you,

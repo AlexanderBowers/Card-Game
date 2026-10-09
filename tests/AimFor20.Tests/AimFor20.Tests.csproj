@@ -35,6 +35,7 @@
     <Compile Include="../../SetRules.cs" Link="Game/SetRules.cs" />
     <Compile Include="../../Bot.cs" Link="Game/Bot.cs" />
     <Compile Include="../../DeckOdds.cs" Link="Game/DeckOdds.cs" />
+    <Compile Include="../../CloudBundle.cs" Link="Game/CloudBundle.cs" />
   </ItemGroup>
 
   <ItemGroup>

@@ -88,6 +88,17 @@ public partial class RunData
         w.WriteEndArray();
     }
 
+    /// Replaces this whole profile with a saved one (the cloud save's "use the cloud save") and
+    /// writes it, so the phone's own file matches. False, and nothing changed, if it won't read.
+    public bool ReplaceFrom(string json)
+    {
+        RunData probe = new RunData();
+        if (!probe.LoadSaveJson(json)) return false;
+        if (!LoadSaveJson(json)) return false;
+        Save();
+        return true;
+    }
+
     /// Replaces this profile with what a save holds, migrating anything older on the way in.
     /// Returns false, changing nothing, for text that is not a JSON object.
     public bool LoadSaveJson(string json)

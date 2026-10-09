@@ -139,6 +139,27 @@ public partial class OnlineService : Node
         return null;
     }
 
+    /// The account this phone signs in with, for the cloud save to carry to a new phone (CloudSave).
+    /// Nulls when there is none yet.
+    public (string Id, string Secret) ExportAccount()
+    {
+        LoadAccount();
+        return (_accountId, _secret);
+    }
+
+    /// Takes over an account carried in from the cloud save: the same player on a new phone keeps
+    /// their name, friends and leaderboard place instead of starting a stranger.
+    public void ImportAccount(string id, string secret)
+    {
+        if (string.IsNullOrEmpty(id) || string.IsNullOrEmpty(secret)) return;
+        _accountLoaded = true;
+        _accountId = id;
+        _secret = secret;
+        _token = null;
+        Me = null;
+        SaveAccount();
+    }
+
     private void ForgetAccount()
     {
         _accountId = null;
