@@ -478,7 +478,25 @@ public sealed partial class Menus
             banked.CustomMinimumSize = new Vector2(MenuButtonWidth, 0);
             _startMenuBox.AddChild(banked);
         }
+
+        // The build's version, so a tester can tell they have the latest one (Chuck's playtest,
+        // 2026-10-08). CI stamps application/config/version with the same name as the store
+        // build ("0.9.<run>"); an editor run reads "dev".
+        _startMenuBox.AddChild(MenuSpacer());
+        _startMenuBox.AddChild(OverlayUi.MakeLabel(BuildVersion, MenuVersionFont, OverlayUi.Muted));
     }
+
+    /// "v0.9.14" on a CI build; "dev build" when run from the editor (project.godot says "dev").
+    private static string BuildVersion
+    {
+        get
+        {
+            string v = ProjectSettings.GetSetting("application/config/version").AsString();
+            return (string.IsNullOrWhiteSpace(v) || v == "dev") ? "dev build" : $"v{v}";
+        }
+    }
+
+    private const int MenuVersionFont = 14;
 
     /// One row of the menu: a wide button, and optionally a line under it saying what it does. The
     /// note is a separate label rather than a second line inside the button so that arming the New

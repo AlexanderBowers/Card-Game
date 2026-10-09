@@ -37,6 +37,8 @@ public interface ITableUiHost
     /// rules write them; the table only decides how big they are and what colour.
     string StatusFor(Player player);
     string SetInfoLine();
+    /// The middle line is the target (offline), not the turn clock (online).
+    bool SetInfoIsTarget { get; }
 
     /// A picked-up card that can no longer be played is dropped before anything is drawn, so the
     /// status line and the buttons agree. First thing in every refresh.
@@ -224,6 +226,103 @@ public sealed class TableUi
     /// The ink for words printed straight onto the board (the target, the stage line). Dark,
     /// because the boards are light (2026-10-02); it was gold on dark felt.
     private static readonly Color BoardInk = new Color(0.2f, 0.27f, 0.36f);
+
+    // ------------------------------------------------------------------
+    // The board's emblem: the live target (2026-10-08, Chuck's playtest)
+    // ------------------------------------------------------------------
+    // The painted "20" in the board's disc read as the target even on a stage where the target was
+    // 23, so the art's disc is empty now (cardgen build_playmat) and the game writes the CURRENT
+    // target into it - ON the board, under the cards, like the paint was: a Label behind the canvas
+    // on the flat table, a Label3D lying on the 3D table (TableWorld3D.SetEmblem).
+
+    /// The number's size as a fraction of the board's short side, in the painted "20"'s font
+    /// (Fredoka Bold). Godot's em runs larger than Blender's text size, so 0.31 here matches the
+    /// width the art's 0.36 had and leaves the disc a margin round two digits.
+    public const float EmblemEm = 0.31f;
+    /// Nudged down by this much of the short side (0: centred reads right on the tilted table).
+    public const float EmblemDrop = 0f;
+    public static readonly Font EmblemFont = ResourceLoader.Exists("res://assets/fonts/Fredoka-Bold.ttf")
+        ? GD.Load<Font>("res://assets/fonts/Fredoka-Bold.ttf") : null;
+    private const string EmblemNodeName = "EmblemNumber";
+
+    /// What the emblem says right now: the target, offline, while the middle of the table is not
+    /// using the space for words (a set ending, the finale's rules) - empty otherwise. Online the
+    /// middle is the turn clock, so the emblem stays plain there.
+    private void UpdateEmblem()
+    {
+        bool middleBusy = (_setInfoLabel != null && _setInfoLabel.Visible)
+                          || (_targetLabel != null && _targetLabel.Visible);
+        bool show = _host.SetInfoIsTarget && !State.IsGameOver && !_host.SetOverPending && !middleBusy;
+        string text = show ? $"{State.TargetScore}" : string.Empty;
+        Color ink = EmblemInk;
+
+        Label flat = EmblemLabel();
+        if (flat != null)
+        {
+            flat.Text = text;
+            flat.AddThemeColorOverride("font_color", ink);
+            FitEmblem(flat);
+        }
+        World3D?.SetEmblem(text, ink);
+    }
+
+    /// The flat table's emblem label, made on first use as a child of the board's own picture, so it
+    /// draws above the art and below everything on the canvas (and hides with it on the 3D table).
+    private Label EmblemLabel()
+    {
+        TextureRect board = L?.Background;
+        if (board == null) return null;
+        if (board.GetNodeOrNull<Label>(EmblemNodeName) is Label existing) return existing;
+
+        Label label = new Label
+        {
+            Name = EmblemNodeName,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center,
+            MouseFilter = Control.MouseFilterEnum.Ignore,
+            UseParentMaterial = false,
+        };
+        if (EmblemFont != null) label.AddThemeFontOverride("font", EmblemFont);
+        // Printed into the board, not stuck on it: none of the theme's label shadow or outline.
+        label.AddThemeColorOverride("font_shadow_color", Colors.Transparent);
+        label.AddThemeConstantOverride("outline_size", 0);
+        label.SetAnchorsPreset(Control.LayoutPreset.FullRect);
+        board.AddChild(label);
+        board.Resized += () => FitEmblem(label);
+        return label;
+    }
+
+    private static void FitEmblem(Label label)
+    {
+        if (label.GetParent() is not Control board) return;
+        float shortSide = Mathf.Min(board.Size.X, board.Size.Y);
+        if (shortSide <= 0f) return;
+        label.AddThemeFontSizeOverride("font_size", Mathf.RoundToInt(EmblemEm * shortSide));
+        float drop = EmblemDrop * shortSide;
+        label.OffsetTop = drop;
+        label.OffsetBottom = drop;
+    }
+
+    // Each board's rim colour (cardgen MATS - keep in step), so the number reads as part of the
+    // board it sits on. Nudged a little toward BoardInk so the pale boards (Gold, Silver) still
+    // read it at a glance.
+    private static readonly Dictionary<string, Color> BoardRims = new Dictionary<string, Color>
+    {
+        ["classic"] = new Color("7cbdea"),
+        ["bronze"] = new Color("86bf98"),
+        ["silver"] = new Color("a3b5c6"),
+        ["gold"] = new Color("e9c055"),
+        ["ruby"] = new Color("df8797"),
+        ["obsidian"] = new Color("9a82d3"),
+        ["endless"] = new Color("b3a9ea"),
+    };
+    private string _boardKey; // the painted board on show, or null for the old tinted mat
+
+    private Color EmblemInk =>
+        (_boardKey != null && BoardRims.TryGetValue(_boardKey, out Color rim))
+            ? rim.Lerp(BoardInk, 0.12f)
+            : BoardInk;
+
     /// An empty win chip, inked so its outline reads on a light board.
     private static readonly Color EmptyChipInk = new Color(0.29f, 0.37f, 0.47f, 0.75f);
 
@@ -801,6 +900,7 @@ public sealed class TableUi
         // has no stage line, and the target line only speaks when the target moved).
         HideIfEmpty(_setInfoLabel);
         HideIfEmpty(_targetLabel);
+        UpdateEmblem();
 
         // Both sides act at once: each player's row stays live until THAT player has ended the
         // turn or is holding. Everything is locked while a set-end explanation is waiting.
@@ -963,6 +1063,7 @@ public sealed class TableUi
             string boardKey = Cards.RankKey ?? RunData.Instance?.SelectedBoard ?? Cosmetics.Default;
             Texture2D mat = Cards.Art($"playmats/playmat_{boardKey}_{(L.Portrait ? "portrait" : "landscape")}.png");
             L.Background.Texture = mat ?? authored;
+            _boardKey = mat != null ? boardKey : null;
             L.Background.SelfModulate = mat != null ? Colors.White : _playmatTint;
             ApplyBoardFx(L.Background, mat != null);
         }
@@ -1117,19 +1218,12 @@ public sealed class TableUi
             return;
         }
 
-        if (run == null || !run.TargetMovedThisStage)
-        {
-            _targetLabel.Text = string.Empty;
-            _targetLabel.RemoveThemeColorOverride("font_color");
-            return;
-        }
-
-        // A target that changes quietly is the game changing its own rules behind the player's back.
-        string direction = run.CurrentTarget > run.PreviousTarget ? "up" : "down";
-        // Non-breaking spaces inside each half: if it has to wrap, it wraps as "Target 23" over
-        // "(up from 20)", never "Targe" over "t 23" or "(up" over "from 20)".
-        _targetLabel.Text = $"Target\u00A0{State.TargetScore}  ({direction}\u00A0from\u00A0{run.PreviousTarget})";
-        _targetLabel.AddThemeColorOverride("font_color", BoardInk);
+        // A moved target used to be announced here for the whole stage ("Target 23 (up from 20)").
+        // Since 2026-10-08 the target is written big in the board's emblem, which this line would
+        // cover, so the move is said once instead - by the stage's slide-in ("Target: 23 (up from
+        // 20)", GameManager) - and the emblem carries the number from then on.
+        _targetLabel.Text = string.Empty;
+        _targetLabel.RemoveThemeColorOverride("font_color");
     }
 
     /// A tappable modifier card: an invisible Button (so the theme's touch-friendly hit area

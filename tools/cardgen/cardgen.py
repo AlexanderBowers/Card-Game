@@ -360,7 +360,10 @@ def iridescent(m, thickness=520.0):
         e.color = srgb(c)
     nt.links.new(wrap.outputs[0], ramp.inputs["Fac"])
     nt.links.new(ramp.outputs["Color"], p.inputs["Base Color"])
-    p.inputs["Thin Film Thickness"].default_value = thickness
+    # Thin film arrived in Blender 4.2. Older Blender (4.0 on the msi PC) renders everything else
+    # the same, just without the film's sheen - fine for a disc-only re-render, not for a final rim.
+    if "Thin Film Thickness" in p.inputs:
+        p.inputs["Thin Film Thickness"].default_value = thickness
     return m
 
 
@@ -497,9 +500,12 @@ def build_back(style="default"):
             for sy in (-1, 1):
                 pip((sx * 1.9, sy * 2.85, THICK + 0.02), 0.13, iri)
         return
-    # Emblem: a ring with "20" inside.
+    # Emblem: a ring with a diamond inside. No number on a back (2026-10-08): a "20" read as the
+    # deck's card count, or as the target on a stage where the target isn't 20.
     ring = slab("EmblemRing", 2.9, 2.9, 1.45, THICK, 0.03, gold, bevel=0.01, hole=(2.5, 2.5, 1.25))
-    text("Twenty", "20", 1.45, (0, 0, THICK + 0.012), gold)
+    d = 1.15
+    ob = slab("Diamond", d, d, 0.08, THICK + 0.012, 0.05, gold, bevel=0.02)
+    ob.rotation_euler.z = math.pi / 4
     for sx in (-1, 1):
         for sy in (-1, 1):
             pip((sx * 1.9, sy * 2.85, THICK + 0.02), 0.13, gold)
@@ -540,9 +546,12 @@ def build_back_classic():
          hole=(2 * r_in, 2 * r_in, r_in))
     disc = mat("Disc", srgb("#3a4659"), rough=0.6)
     slab("Disc", 2 * r_in, 2 * r_in, r_in, THICK, 0.012, disc, bevel=0.004)
-    # The mark in the middle is the game's "20" (2026-10-02; it was a gold diamond).
-    gold = mat("Twenty", srgb("#ffc86e"), rough=0.3, coat=0.5)
-    text("Twenty", "20", 1.5, (0, -0.02, THICK + 0.012), gold, extrude=0.04)
+    # The gold diamond again (2026-10-08). It was "20" from 2026-10-02, which testers read as the
+    # card count or as the target.
+    gold = mat("Diamond", srgb("#ffc86e"), rough=0.3, coat=0.5)
+    d = 0.95
+    ob = slab("Diamond", d, d, 0.07, THICK + 0.012, 0.05, gold, bevel=0.02)
+    ob.rotation_euler.z = math.pi / 4
 
 
 # ----------------------------------------------------------------------------------------------
@@ -851,7 +860,9 @@ def build_playmat(rank, portrait):
     r2_out, r2_in = disc, disc - 0.004 * short
     slab("Ring2", 2 * r2_out, 2 * r2_out, r2_out, z + 0.003, 0.002, line_mat, bevel=0.0,
          hole=(2 * r2_in, 2 * r2_in, r2_in))
-    text("Twenty", "20", 0.36 * short, (0, -0.012 * short, z + 0.003), line_mat, extrude=0.002)
+    # The disc is left empty (2026-10-08): the game writes the CURRENT target into it (the middle
+    # line, TableUi / RunHeader). A painted "20" read as the target even on stages where the target
+    # is 23 (Chuck's playtest), so the number has to be live, not baked into the art.
 
     # Soft light: a broad pool from above, and a low key from the top left that puts a gloss on
     # the rim's rounded edge.

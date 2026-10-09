@@ -133,6 +133,9 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
                 if (arg == "--autostart=local") autoLocal2P = true;
                 if (arg == "--mirror") _mirrorToggle.SetPressedNoSignal(true);
                 if (arg == "--online-autoqueue") Menus.PendingOnlineQueue = true; // straight onto Quick Match
+                // "--target=23": local 2-player's target, to look at the board's emblem off 20.
+                if (arg.StartsWith("--target=") && int.TryParse(arg["--target=".Length..], out int target))
+                    Menus.Local2PlayerTarget = target;
             }
         }
 
@@ -290,7 +293,13 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
         }
 
         string title = run.Endless ? $"Endless Match {run.EndlessStreak + 1}" : $"Stage {run.MatchNumber}";
-        StageIntro.Play(this, title, $"Target: {_gameState.TargetScore}{run.FinaleRulesLine("\n")}", () =>
+        // A target that changes quietly is the game changing its own rules behind the player's back,
+        // so a move is said here, once (it was a line in the middle of the table all stage until
+        // 2026-10-08, when the target went into the board's emblem and that line would cover it).
+        string moved = (run.TargetMovedThisStage && run.CurrentRolledEffects == null)
+            ? $"  ({(run.CurrentTarget > run.PreviousTarget ? "up" : "down")} from {run.PreviousTarget})"
+            : string.Empty;
+        StageIntro.Play(this, title, $"Target: {_gameState.TargetScore}{moved}{run.FinaleRulesLine("\n")}", () =>
         {
             _arrivalPending = false;
             _ui.DeferRefresh();
@@ -501,6 +510,7 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
     // Pass 33: the stage line only. Whose move it is was said three times over ("Both players: play
     // or draw" here, "Your move" on each side) - the buttons say it now, by reading "Waiting...".
     string ITableUiHost.SetInfoLine() => RunHeader();
+    bool ITableUiHost.SetInfoIsTarget => !_online;
     void ITableUiHost.ValidateSelections() => ValidateSelections();
     void ITableUiHost.ModifierPressed(Player player, Card card) => OnModifierCardPressed(player, card);
     void ITableUiHost.PlayPressed(Player player) => PlaySelectedCard(player);
@@ -880,12 +890,12 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
     private string RunHeader()
     {
         if (_online) return OnlineHeader(); // the turn clock
-        RunData run = _inRun ? RunData.Instance : null;
-        if (run == null) return string.Empty;
         // Alexander, 2026-09-30: the middle of the table shows the TARGET, not the stage - "if it's
         // 20, just say 20". The stage is announced once, by the slide-in at the start of the match.
-        int target = _gameState.TargetScore;
-        return target == 20 ? "20" : $"Target\u00A0{target}"; // never wrapped as "Targe" / "t 23"
+        // 2026-10-08 (Chuck's playtest): the target is now written INTO the board's emblem, under the
+        // cards (TableUi.UpdateEmblem), in every offline mode - so this line has nothing left to say
+        // mid-set. It is still where a set's end is announced (EndSet) and, online, the clock.
+        return string.Empty;
     }
 
     /// Drops the run one rung either way and walks straight into that match (the debug row).
