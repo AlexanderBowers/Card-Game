@@ -270,12 +270,12 @@ public static class Ladder
         LadderStep step = At(index);
         List<string> lines = new List<string>();
         if (step.HidesOpponentCards)
-            lines.Add(step.FaceUpCards == 1 ? "Face down after their first card"
-                                             : "Face down after their first two cards");
-        if (step.DeckChangesEachSet) lines.Add("The decks change every set");
+            lines.Add(step.FaceUpCards == 1 ? "Face down after one card"
+                                             : "Face down after two cards");
+        if (step.DeckChangesEachSet) lines.Add("Decks change every set");
         else if (step.Deck != DeckShape.Standard) lines.Add(DeckShapes.Label(step.Deck));
-        if (step.Refill) lines.Add("Played Modifiers refill from your deck");
-        if (step.TargetMovesEachSet) lines.Add("The target changes every set");
+        if (step.Refill) lines.Add("Modifiers refill from your deck");
+        if (step.TargetMovesEachSet) lines.Add("Target changes every set");
         return lines.Count == 0 ? string.Empty : string.Join("\n", lines);
     }
 }

@@ -307,10 +307,10 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
         // The rung's rules are said where the target is (no full stop: tutorial style) - face down,
         // the deck's shape, refill, a moving target. Endless plays stage 10's: face down only.
         string rules = run.Endless
-            ? (_gameState.HiddenOpponent ? "Face down after their first two cards" : string.Empty)
+            ? (_gameState.HiddenOpponent ? "Face down after two cards" : string.Empty)
             : Ladder.RulesLines(run.StepIndex);
         if (!run.Endless && _debugHiddenCards && !run.CurrentStep.HidesOpponentCards)
-            rules = string.IsNullOrEmpty(rules) ? "Face down after their first two cards" : rules;
+            rules = string.IsNullOrEmpty(rules) ? "Face down after two cards" : rules;
         if (rules.Length > 0) rules = "\n" + rules;
         StageIntro.Play(this, title, $"Target: {_gameState.TargetScore}{moved}{run.FinaleRulesLine("\n")}{rules}", () =>
         {

@@ -96,12 +96,12 @@ public class TierTests
     public void The_stage_banner_names_every_rule_in_play()
     {
         Assert.Equal(string.Empty, Ladder.RulesLines(3));
-        Assert.Equal("Face down after their first two cards", Ladder.RulesLines(9));
+        Assert.Equal("Face down after two cards", Ladder.RulesLines(9));
         string fifty = Ladder.RulesLines(49);
-        Assert.Contains("after their first card", fifty);
-        Assert.Contains("decks change every set", fifty);
+        Assert.Contains("after one card", fifty);
+        Assert.Contains("Decks change every set", fifty);
         Assert.Contains("refill from your deck", fifty);
-        Assert.Contains("target changes every set", fifty);
+        Assert.Contains("Target changes every set", fifty);
     }
 
     [Fact]
