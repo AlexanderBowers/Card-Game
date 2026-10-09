@@ -237,7 +237,9 @@ public partial class CosmeticShopOverlay : Control
         string note = owned ? (inUse ? "In use" : "Owned")
                     : unlocked ? $"{price} medals"
                     : secret ? "???"
-                    : "Climb further up the ladder to unlock.";
+                    : Cosmetics.UnlockStepIndex(key) >= 0
+                        ? $"Beat stage {Cosmetics.UnlockStepIndex(key) + 1} to unlock."
+                        : "Climb further up the ladder to unlock.";
         Label sub = OverlayUi.MakeLabel(note, 14, owned || unlocked ? OverlayUi.Muted : OverlayUi.Warning);
         sub.HorizontalAlignment = HorizontalAlignment.Left;
         sub.AutowrapMode = TextServer.AutowrapMode.WordSmart;

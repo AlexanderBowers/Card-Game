@@ -162,6 +162,13 @@ public sealed class Bot
         RunData run = _table.Run;
         if (run == null) return Skill.Basic; // a one-off solo match is never a boss fight
 
+        // Above stage 10 (2026-10-09) the player has learned the whole table, so the ranks start
+        // again from a sharper opponent: tier 2 chains from Bronze and reads you from Gold, and
+        // every tier after reads you from the first stage. (Endless plays on stage 10: tier 1.)
+        int tier = run.Endless ? 0 : Ladder.TierOf(run.StepIndex);
+        if (tier >= 2) return Skill.Reads;
+        if (tier == 1) return run.CurrentStep.Rank >= 2 ? Skill.Reads : Skill.Chains;
+
         switch (run.CurrentStep.Rank)
         {
             case 4: return Skill.Reads;
@@ -772,6 +779,7 @@ public sealed class Bot
 
             Me.Modifiers = hand;
             Me.EnsureBothSigns(_table.Rng);
+            DealRefillPile(step, rolled);
             return;
         }
 
@@ -804,5 +812,31 @@ public sealed class Bot
 
         Me.Modifiers = hand;
         Me.EnsureBothSigns(_table.Rng);
+        DealRefillPile(step, null);
+    }
+
+    /// The bot's own deck for the refill rule (stages 31+): eight more cards waiting behind its
+    /// hand, as the player has the eight of their 12 that were not dealt. Plain cards with the usual
+    /// "+/-" chance - and on the stage 40 and 50 bosses, one of each of its specials shuffled in,
+    /// so the boss comes back with tricks as its hand runs down. Empty on every other rung.
+    private const int RefillPileSize = 8;
+
+    private void DealRefillPile(LadderStep step, List<CardEffect> rolled)
+    {
+        Me.RefillPile.Clear();
+        if (!_table.State.RefillHands) return;
+
+        List<Card> pile = new List<Card>();
+        if (step.BotRefillsSpecials && rolled != null)
+            foreach (CardEffect effect in rolled) pile.Add(CardEffects.Create(effect, _table.Rng));
+        while (pile.Count < RefillPileSize)
+            pile.Add(Player.CreateRandomModifier(_table.Rng, 0.10, _table.MaxModifierMagnitude));
+
+        for (int i = pile.Count - 1; i > 0; i--)
+        {
+            int j = _table.Rng.Next(i + 1);
+            (pile[i], pile[j]) = (pile[j], pile[i]);
+        }
+        Me.RefillPile.AddRange(pile);
     }
 }

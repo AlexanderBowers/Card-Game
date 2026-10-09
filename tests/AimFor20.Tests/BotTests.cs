@@ -118,8 +118,9 @@ public class BotHandTests
     public void The_finale_deals_every_rolled_effect()
     {
         for (int seed = 0; seed < 50; seed++)
+        foreach (int step in new[] { Ladder.EndlessStepIndex, Ladder.Length - 1 }) // stage 10, and stage 50's three
         {
-            RunData run = RunAt(Ladder.Length - 1, seed);
+            RunData run = RunAt(step, seed);
             var bot = new BotHarness(run);
             bot.Bot.DealHand();
             foreach (CardEffect rolled in run.CurrentRolledEffects)

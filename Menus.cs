@@ -382,8 +382,10 @@ public sealed partial class Menus
 
         // Over an unfinished climb this button throws the climb away, so it asks twice. A second
         // tap is the cheapest confirmation there is and it costs no second overlay.
+        // A new run starts at the highest tier checkpoint (stages 11-50), and the button says where.
+        int startStage = (run?.CheckpointStep ?? 0) + 1;
         _newRunButton = AddMenuButton(
-            runInProgress ? "New Run" : "Start a Run",
+            runInProgress ? "New Run" : startStage > 1 ? $"Start at Stage {startStage}" : "Start a Run",
             runInProgress ? "Gives up the climb above. Your cards and medals stay." : null,
             () =>
             {

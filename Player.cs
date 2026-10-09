@@ -129,7 +129,30 @@ public class Player
         if (CardEffects.IsPlainModifier(card) && !card.IsRescue) SpentCards.Add(card);
 
         CurrentScore += card.Value;
+        RefillAfter(card);
         return true;
+    }
+
+    // ------------------------------------------------------------------
+    // Refill (stages 31-50, 2026-10-09 - Chuck's idea)
+    //
+    // The rest of the match deck, waiting: the player's is the eight cards of their 12-card deck
+    // that were not dealt (RunData.DrawMatchModifiers), the bot's its own pile (Bot.DealHand). Every
+    // hand card played - plain or special - is replaced by the next one, so a hand stays four for
+    // as long as the deck lasts, and what you put in your deck matters as much as what you draw.
+    // Empty everywhere the rule is off, which is what switches it off.
+    // ------------------------------------------------------------------
+    public List<Card> RefillPile { get; } = new List<Card>();
+
+    /// Puts the next card of the pile into the hand after `played` left it. A rescue card is a
+    /// one-off gift, not a card of the deck, so it is not replaced. Returns the card that came in.
+    public Card RefillAfter(Card played)
+    {
+        if (played == null || played.IsRescue || RefillPile.Count == 0) return null;
+        Card next = RefillPile[0];
+        RefillPile.RemoveAt(0);
+        Modifiers.Add(next);
+        return next;
     }
     public void ResetForNewSet()
     {

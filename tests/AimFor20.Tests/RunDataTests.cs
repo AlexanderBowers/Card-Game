@@ -80,7 +80,7 @@ public class RunDataTests
     public void The_finale_rolls_its_rules_once_on_arrival_and_keeps_them()
     {
         RunData run = NewRun();
-        run.DebugJumpToStep(Ladder.Length - 2);
+        run.DebugJumpToStep(Ladder.EndlessStepIndex - 1);
         run.CompleteMatch(3, won: true);
 
         Assert.True(run.CurrentStep.Randomised);
@@ -94,13 +94,13 @@ public class RunDataTests
     }
 
     [Fact]
-    public void Clearing_the_ladder_unlocks_endless()
+    public void Beating_stage_ten_unlocks_endless_and_the_climb_goes_on()
     {
         RunData run = NewRun();
         Assert.False(run.EndlessUnlocked);
-        run.DebugJumpToStep(Ladder.Length - 1);
+        run.DebugJumpToStep(Ladder.EndlessStepIndex);
         run.CompleteMatch(3, won: true);
-        Assert.True(run.RunComplete);
+        Assert.False(run.RunComplete); // stages 11-50 (2026-10-09)
         Assert.True(run.EndlessUnlocked);
     }
 
@@ -258,14 +258,14 @@ public class LadderAndCatalogueTests
     public void Every_rung_below_the_finale_after_stage_3_introduces_exactly_one_new_effect()
     {
         var seen = new HashSet<CardEffect>();
-        for (int i = 3; i < Ladder.Length - 1; i++)
+        for (int i = 3; i < Ladder.EndlessStepIndex; i++)
         {
             CardEffect effect = Ladder.At(i).AiEffect;
             Assert.NotEqual(CardEffect.None, effect);
             Assert.True(seen.Add(effect), $"{effect} introduced twice");
             Assert.True(CardEffects.IsWired(effect), $"{effect} is on the ladder but not wired");
         }
-        Assert.True(Ladder.At(Ladder.Length - 1).Randomised);
+        Assert.True(Ladder.At(Ladder.EndlessStepIndex).Randomised);
     }
 
     [Fact]

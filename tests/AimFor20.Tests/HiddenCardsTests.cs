@@ -257,9 +257,20 @@ public class HiddenCardsTests
     }
 
     [Fact]
-    public void Only_the_boss_rung_hides_cards_so_every_earlier_rung_still_brings_one_new_idea()
+    public void Stages_one_to_nine_play_face_up_and_every_stage_from_ten_hides()
     {
+        // 1-9 each bring one new idea; face down is stage 10's twist, and every tier above it keeps it.
         for (int i = 0; i < Ladder.Length; i++)
-            Assert.Equal(i == Ladder.Length - 1, Ladder.At(i).HidesOpponentCards);
+            Assert.Equal(i >= 9, Ladder.At(i).HidesOpponentCards);
+    }
+
+    [Fact]
+    public void A_boss_with_one_face_up_card_hides_the_second_draw_too()
+    {
+        var (host, table) = NewTable();
+        host.State.FaceUpCards = 1;
+        table.DealTurn(); // the two-card opening
+        Assert.False(host.Player2.ActiveCardsOnBoard[0].IsHidden);
+        Assert.True(host.Player2.ActiveCardsOnBoard[1].IsHidden);
     }
 }

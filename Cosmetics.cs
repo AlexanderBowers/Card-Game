@@ -16,8 +16,15 @@ public static class Cosmetics
 
     public const string EndlessKey = "endless";
 
-    /// Shop order. The five rank sets in ladder order, then Endless's own set.
-    public static readonly string[] Keys = { "classic", "bronze", "silver", "gold", "ruby", "obsidian", "endless" };
+    /// Shop order: the five rank sets in ladder order, Endless's own set (opened by stage 10), then
+    /// the tier sets in the order their bosses come.
+    public static readonly string[] Keys = { "classic", "bronze", "silver", "gold", "ruby", "obsidian", "endless",
+                                             "jade", "sapphire", "pearl", "diamond" };
+
+    /// The tier sets (2026-10-09): one for beating each tier's boss above the first - Jade for
+    /// stage 20, Sapphire for 30, Pearl for 40, Diamond for 50. The ladder's medal sink, priced
+    /// for players who have climbed that far and banked a tier's worth of purses on the way.
+    private static readonly string[] TierKeys = { "jade", "sapphire", "pearl", "diamond" };
     private static readonly string[] RankKeys = { "bronze", "silver", "gold", "ruby", "obsidian" };
 
     /// Medals to buy a deck or board. Classic is free and owned from the start.
@@ -29,6 +36,10 @@ public static class Cosmetics
         "ruby" => 40,
         "obsidian" => 60,
         "endless" => 100,
+        "jade" => 120,
+        "sapphire" => 150,
+        "pearl" => 200,
+        "diamond" => 250,
         _ => 0,
     };
 
@@ -41,8 +52,10 @@ public static class Cosmetics
     /// -1 for a set no stage opens.
     public static int UnlockStepIndex(string key)
     {
+        int tier = Array.IndexOf(TierKeys, key);
+        if (tier >= 0) return (tier + 2) * Ladder.TierSize - 1; // the boss of tier 2, 3, 4 or 5
         int rank = RankOf(key);
-        return rank < 0 ? -1 : Math.Min(rank * 2, Ladder.Length - 1);
+        return rank < 0 ? -1 : Math.Min(rank * 2, Ladder.TierSize - 1);
     }
 
     /// The name of the stage that has to be beaten before this set can be bought. Null for

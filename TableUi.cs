@@ -1191,37 +1191,14 @@ public sealed class TableUi
     // The middle panel
     // ------------------------------------------------------------------
 
+    /// The middle line under the target: empty now. It once read "TARGET 20" (pass 33 took it out
+    /// as clutter), then "Target 23 (up from 20)" all stage, then the finale's specials all match;
+    /// since the target went into the board's emblem (2026-10-08) and every stage above 10 rolls
+    /// its own specials (2026-10-09), each of those is said once by the stage banner instead, and a
+    /// line here would only sit over the emblem. Kept as a label so a layout can still hold one.
     private void UpdateTargetLabel()
     {
         if (_targetLabel == null) return;
-
-        if (!_host.GameStarted)
-        {
-            _targetLabel.Text = string.Empty;
-            _targetLabel.RemoveThemeColorOverride("font_color");
-            return;
-        }
-
-        // The target lives on each player's own score line now ("17 / 20"), so this banner is no
-        // longer where the target is READ - it is where the game says the target has MOVED. A
-        // permanent "TARGET 20" here as well was one line of the clutter the playtest complained
-        // about, and it said nothing the score line does not say closer to the number it governs.
-        RunData run = _host.InRun ? RunData.Instance : null;
-
-        // The finale's rules were rolled, so they are news every time - say them whether or not
-        // the target happens to have moved.
-        if (run != null && run.CurrentRolledEffects != null)
-        {
-            string heading = run.Endless ? "ENDLESS" : "FINAL";
-            _targetLabel.Text = $"{heading}  -  Target {State.TargetScore}{run.FinaleRulesLine("\n")}";
-            _targetLabel.AddThemeColorOverride("font_color", BoardInk);
-            return;
-        }
-
-        // A moved target used to be announced here for the whole stage ("Target 23 (up from 20)").
-        // Since 2026-10-08 the target is written big in the board's emblem, which this line would
-        // cover, so the move is said once instead - by the stage's slide-in ("Target: 23 (up from
-        // 20)", GameManager) - and the emblem carries the number from then on.
         _targetLabel.Text = string.Empty;
         _targetLabel.RemoveThemeColorOverride("font_color");
     }

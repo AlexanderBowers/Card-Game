@@ -38,6 +38,12 @@ public partial class RunData
     public bool RunActive { get; private set; }
     public int Medals { get; private set; }
 
+    /// Where a new run starts (2026-10-09, with stages 11-50): the first rung of the highest tier
+    /// the player has reached by beating a boss - 0, 10, 20, 30 or 40. A loss at stage 34 sends the
+    /// player back to stage 31, never to stage 1. Profile level, like FurthestStep: a lost run does
+    /// not take a tier away.
+    public int CheckpointStep { get; private set; }
+
     /// The highest rung ever reached, across every run. Nothing gates on it yet - it is the
     /// player's record, and the proof on the losing screen that a loss did not erase them.
     public int FurthestStep { get; private set; }
@@ -207,7 +213,8 @@ public partial class RunData
     /// Profile level: the record survives every run, like FurthestStep.
     public int EndlessBest { get; private set; }
 
-    public bool EndlessUnlocked => FurthestStep >= Ladder.Length;
+    /// Beating stage 10 opens it, as it always has - the tiers above (2026-10-09) did not move it.
+    public bool EndlessUnlocked => FurthestStep >= Ladder.EndlessUnlockSteps;
 
     // ------------------------------------------------------------------
     // The endless scoreboard (pass 24)
@@ -245,7 +252,7 @@ public partial class RunData
         Endless = true;
         EndlessRunBanked = false;
         EndlessStreak = 0;
-        StepIndex = Ladder.Length - 1;
+        StepIndex = Ladder.EndlessStepIndex; // stage 10's rules, however long the ladder above it gets
         EnsureRuleset();
         Save();
     }
@@ -285,9 +292,13 @@ public partial class RunData
     public int RolledTarget { get; private set; }
     public List<CardEffect> RolledEffects { get; } = new List<CardEffect>();
 
-    /// The finale's rules, if the player is standing on it; otherwise null.
+    /// The opponent's rolled specials, if the player is standing on a rung that rolls them (the
+    /// finale and every stage above it); otherwise null.
     public List<CardEffect> CurrentRolledEffects =>
-        (CurrentStep.Randomised && RolledStep == StepIndex) ? RolledEffects : null;
+        (RollsRules(CurrentStep) && RolledStep == StepIndex) ? RolledEffects : null;
+
+    /// A rung whose target and/or specials are rolled on arrival.
+    private static bool RollsRules(LadderStep step) => step.Randomised || step.RolledSpecials > 0;
 
     /// "Opponent's specials: Copy + Shave" for the finale (and every endless match), after the
     /// prefix; empty on any other rung.
@@ -308,7 +319,7 @@ public partial class RunData
     /// any number of times: the second call is a no-op, which is the whole point.
     public void EnsureRuleset()
     {
-        if (!CurrentStep.Randomised || RolledStep == StepIndex) return;
+        if (!RollsRules(CurrentStep) || RolledStep == StepIndex) return;
 
         Ruleset rolled;
         if (Endless)
@@ -318,10 +329,11 @@ public partial class RunData
         }
         else
         {
-            rolled = Ruleset.Roll(_random);
+            rolled = Ruleset.Roll(_random, count: Math.Max(1, CurrentStep.RolledSpecials));
         }
         RolledStep = StepIndex;
-        RolledTarget = rolled.Target;
+        // Only a randomised rung (a boss) plays to the rolled target; the others keep their rank's.
+        RolledTarget = CurrentStep.Randomised ? rolled.Target : CurrentStep.TargetScore;
         RolledEffects.Clear();
         RolledEffects.AddRange(rolled.Effects);
         Save();
@@ -348,7 +360,7 @@ public partial class RunData
         BankEndlessRun();       // an endless run being given up still earned its place
         RunActive = true;
         EndlessRunBanked = false;
-        StepIndex = 0;
+        StepIndex = CheckpointStep; // the start of the highest tier reached - see CheckpointStep
         Endless = false;
         EndlessStreak = 0;
         MatchRescueUsed = false;
@@ -415,8 +427,11 @@ public partial class RunData
         {
             // A medal per set taken, plus the rung's purse - a clean 3-0 is worth keeping.
             Medals += setsWon + CurrentStep.MedalReward;
+            bool beatBoss = Ladder.IsBoss(StepIndex);
             StepIndex++;
             if (StepIndex > FurthestStep) FurthestStep = StepIndex;
+            // A tier's boss beaten: its next tier is where every later run starts.
+            if (beatBoss && StepIndex < Ladder.Length && StepIndex > CheckpointStep) CheckpointStep = StepIndex;
             // Rolled now, not when the match starts, so the market can already say what is next.
             if (!RunComplete) EnsureRuleset();
         }
@@ -581,7 +596,11 @@ public partial class RunData
 
     /// Draws MatchModifierCount cards at random from the player's side deck. This is the whole point of
     /// the 12-card deck: the deck is chosen, the hand is not.
-    public List<Card> DrawMatchModifiers()
+    public List<Card> DrawMatchModifiers() => DrawMatchModifiers(null);
+
+    /// The same draw, and - for the refill rule (stages 31+) - the rest of the deck, shuffled, in
+    /// `rest`: the order the cards will come into the hand as Modifiers are played.
+    public List<Card> DrawMatchModifiers(List<Card> rest)
     {
         List<int> pool = new List<int>(SideDeck);
         List<Card> hand = new List<Card>();
@@ -595,6 +614,19 @@ public partial class RunData
             if (inventoryIndex >= 0 && inventoryIndex < Inventory.Count)
             {
                 hand.Add(Inventory[inventoryIndex].ToCard());
+            }
+        }
+
+        if (rest != null)
+        {
+            rest.Clear();
+            while (pool.Count > 0)
+            {
+                int pick = _random.Next(pool.Count);
+                int inventoryIndex = pool[pick];
+                pool.RemoveAt(pick);
+                if (inventoryIndex >= 0 && inventoryIndex < Inventory.Count)
+                    rest.Add(Inventory[inventoryIndex].ToCard());
             }
         }
 
@@ -628,6 +660,7 @@ public partial class RunData
         if (stepIndex >= Ladder.Length) FurthestStep = Ladder.Length;
         StepIndex = Ladder.ClampIndex(stepIndex);
         if (StepIndex > FurthestStep) FurthestStep = StepIndex;
+        if (Ladder.TierStart(StepIndex) > CheckpointStep) CheckpointStep = Ladder.TierStart(StepIndex);
         ClearRuleset();
         EnsureRuleset(); // a debug jump onto the finale re-rolls it, which is what testing wants
         Save();
@@ -641,6 +674,7 @@ public partial class RunData
         Medals = 0;
         StepIndex = 0;
         FurthestStep = 0;
+        CheckpointStep = 0;
         Endless = false;
         EndlessStreak = 0;
         EndlessBest = 0;

@@ -37,16 +37,29 @@ public static class StageIntro
         box.AddThemeConstantOverride("separation", 4);
         panel.AddChild(box);
         box.AddChild(OverlayUi.MakeLabel(title, 64));
+
+        // The panel is never wider than the screen: the rules lines wrap inside it (2026-10-09 - the
+        // stage 50 banner names a target, three specials and four rules, and ran off a phone).
+        Vector2 view = layer.GetViewport().GetVisibleRect().Size;
+        float width = Mathf.Min(view.X * 0.9f, 560f) - 2 * 28f;
+        float hold = Hold;
         if (!string.IsNullOrEmpty(subtitle))
         {
-            // The first line is the target; any line after it (the finale's and endless's
-            // "Opponent's specials: ...") is smaller, so three card names still fit a phone.
+            // The first line is the target; any line after it (the opponent's specials, and the
+            // rules of the stages above 10) is smaller, so a full list still fits a phone.
             string[] lines = subtitle.Split('\n', 2);
             box.AddChild(OverlayUi.MakeLabel(lines[0], 36));
-            if (lines.Length > 1) box.AddChild(OverlayUi.MakeLabel(lines[1], 24, OverlayUi.Muted));
+            if (lines.Length > 1)
+            {
+                Label rules = OverlayUi.MakeLabel(lines[1], 24, OverlayUi.Muted);
+                rules.AutowrapMode = TextServer.AutowrapMode.WordSmart;
+                rules.CustomMinimumSize = new Vector2(width, 0);
+                box.AddChild(rules);
+                // More to read, a little longer to read it.
+                hold += 0.5f * lines[1].Split('\n').Length;
+            }
         }
 
-        Vector2 view = layer.GetViewport().GetVisibleRect().Size;
         Vector2 size = panel.GetCombinedMinimumSize();
         size.X = Mathf.Max(size.X, Mathf.Min(view.X * 0.8f, 520f));
         panel.Size = size;
@@ -58,7 +71,7 @@ public static class StageIntro
         Tween tween = panel.CreateTween();
         tween.TweenProperty(panel, "position:x", centreX, SlideIn)
              .SetTrans(Tween.TransitionType.Back).SetEase(Tween.EaseType.Out);
-        tween.TweenInterval(Hold);
+        tween.TweenInterval(hold);
         tween.TweenProperty(panel, "position:x", view.X + 40f, SlideOut)
              .SetTrans(Tween.TransitionType.Cubic).SetEase(Tween.EaseType.In);
         tween.TweenCallback(Callable.From(() =>

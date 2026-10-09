@@ -16,7 +16,7 @@ using System.Text.Json;
 /// the Variant-based reader treated it.
 public partial class RunData
 {
-    public const int SaveVersion = 10;
+    public const int SaveVersion = 11;
 
     public string ToSaveJson()
     {
@@ -33,6 +33,7 @@ public partial class RunData
             w.WriteNumber("medals", Medals);
             w.WriteNumber("step", StepIndex);
             w.WriteNumber("furthest", FurthestStep);
+            w.WriteNumber("checkpoint", CheckpointStep);
             w.WriteBoolean("tutorialSeen", TutorialSeen);
             w.WriteBoolean("marketLessonSeen", MarketLessonSeen);
             w.WriteBoolean("flipLessonPending", FlipLessonPending);
@@ -161,6 +162,12 @@ public partial class RunData
         Medals = Int(data, "medals");
         StepIndex = Int(data, "step");
         FurthestStep = Int(data, "furthest", StepIndex);
+        // Version 11 (stages 11-50): where a new run starts. An older save never saw a tier above the
+        // first, so it starts at stage 1 - unless it beat stage 10 (FurthestStep 10), which is the
+        // first tier's boss: then stage 11 is already its checkpoint.
+        CheckpointStep = Math.Clamp(Int(data, "checkpoint", FurthestStep >= Ladder.TierSize ? Ladder.TierSize : 0),
+                                    0, (Ladder.TierCount - 1) * Ladder.TierSize);
+        CheckpointStep = Ladder.TierStart(CheckpointStep);
         TutorialSeen = Bool(data, "tutorialSeen");
         MarketLessonSeen = Bool(data, "marketLessonSeen");
         FlipLessonPending = Bool(data, "flipLessonPending");
@@ -200,7 +207,7 @@ public partial class RunData
         // Version 7. A version 6 save carried "endlessRescueUsed" (once per endless RUN), which
         // no longer means anything; it is ignored, and a missing key loads as a fresh match.
         MatchRescueUsed = Bool(data, "matchRescueUsed");
-        if (Endless) StepIndex = Ladder.Length - 1;
+        if (Endless) StepIndex = Ladder.EndlessStepIndex; // stage 10, wherever the ladder ends
 
         // A version 4 save has no key and loads as an empty set, so an existing player is
         // introduced to each card once more. That is the right way round: the alternative is

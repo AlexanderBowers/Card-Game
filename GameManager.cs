@@ -138,6 +138,9 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
                     Menus.Local2PlayerTarget = target;
                 if (arg == "--hidden-cards") _debugHiddenCards = true;
                 if (arg == "--autoplay") StartDebugAutoplay();
+                // "--stage=34": the solo autostart plays that rung (the debug row's jump, by number).
+                if (arg.StartsWith("--stage=") && int.TryParse(arg["--stage=".Length..], out int stage))
+                    RunData.Instance?.DebugJumpToStep(stage - 1);
             }
         }
 
@@ -298,12 +301,18 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
         // A target that changes quietly is the game changing its own rules behind the player's back,
         // so a move is said here, once (it was a line in the middle of the table all stage until
         // 2026-10-08, when the target went into the board's emblem and that line would cover it).
-        string moved = (run.TargetMovedThisStage && run.CurrentRolledEffects == null)
+        string moved = (run.TargetMovedThisStage && !run.CurrentStep.Randomised)
             ? $"  ({(run.CurrentTarget > run.PreviousTarget ? "up" : "down")} from {run.PreviousTarget})"
             : string.Empty;
-        // The hidden-card rule is said where the stage's other rules are (no full stop: tutorial style).
-        string hidden = _gameState.HiddenOpponent ? "\nTheir cards are face down after the first two" : string.Empty;
-        StageIntro.Play(this, title, $"Target: {_gameState.TargetScore}{moved}{run.FinaleRulesLine("\n")}{hidden}", () =>
+        // The rung's rules are said where the target is (no full stop: tutorial style) - face down,
+        // the deck's shape, refill, a moving target. Endless plays stage 10's: face down only.
+        string rules = run.Endless
+            ? (_gameState.HiddenOpponent ? "Face down after their first two cards" : string.Empty)
+            : Ladder.RulesLines(run.StepIndex);
+        if (!run.Endless && _debugHiddenCards && !run.CurrentStep.HidesOpponentCards)
+            rules = string.IsNullOrEmpty(rules) ? "Face down after their first two cards" : rules;
+        if (rules.Length > 0) rules = "\n" + rules;
+        StageIntro.Play(this, title, $"Target: {_gameState.TargetScore}{moved}{run.FinaleRulesLine("\n")}{rules}", () =>
         {
             _arrivalPending = false;
             _ui.DeferRefresh();
@@ -334,7 +343,14 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
 
         _inRun = true;
         _gameState.TargetScore = run.CurrentTarget;
-        _gameState.HiddenOpponent = run.CurrentStep.HidesOpponentCards || _debugHiddenCards;
+        // The rung's rules. Endless plays on stage 10's (face down, standard deck, no refill).
+        LadderStep step = run.CurrentStep;
+        _gameState.HiddenOpponent = step.HidesOpponentCards || _debugHiddenCards;
+        _gameState.FaceUpCards = step.FaceUpCards;
+        _gameState.Deck = step.Deck;
+        _gameState.DeckChangesEachSet = step.DeckChangesEachSet;
+        _gameState.RefillHands = step.Refill;
+        _gameState.TargetMovesEachSet = step.TargetMovesEachSet;
         _player2.PlayerName = run.CurrentOpponent;
         _ui.ApplyRankTheme();
     }
@@ -369,6 +385,14 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
         _ui.FillBoardWithSlots(_p2BoardContainer);
 
         _table.StartSet(); // a fresh forty, and the next turn is this set's opening one
+
+        // Stages 30 and 41-50: a rule that moved between sets is said as the set starts - the
+        // emblem shows a moved target too, but a number changing quietly is the game changing its
+        // own rules behind the player's back.
+        List<string> news = new List<string>();
+        if (_table.TargetMovedThisSet) news.Add($"New target: {_gameState.TargetScore}");
+        if (_table.DeckChangedThisSet) news.Add(DeckShapes.Label(_gameState.Deck));
+        if (news.Count > 0) _ui.Toasts.ShowEffectBanner(string.Join("   -   ", news));
 
         DealCards();
     }
@@ -868,7 +892,8 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
             else if (run != null)
             {
                 bool wasEndless = run.Endless;
-                buttonText = "Start New Run";
+                // A loss above stage 10 restarts at the tier's first stage, and the button says where.
+                buttonText = (!wasEndless && run.CheckpointStep > 0) ? $"Restart at Stage {run.CheckpointStep + 1}" : "Start New Run";
                 next = () =>
                 {
                     if (wasEndless) RunData.Instance.StartEndless();

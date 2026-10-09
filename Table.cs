@@ -167,7 +167,8 @@ public sealed class Table
     // at a face-down board (CardEffects.CanPlay, EffectPreview, TryPlayEffect's narration).
     // ------------------------------------------------------------------
 
-    /// How many of the bot's cards each set are face up before the rest start landing face down.
+    /// How many of the bot's cards each set are face up before the rest start landing face down -
+    /// two, unless the rung says otherwise (GameState.FaceUpCards: one on the stage 20 and 50 bosses).
     public const int FaceUpOpeningCards = 2;
 
     /// This match hides the bot's cards. Never in local 2-player, whatever the state says.
@@ -275,6 +276,7 @@ public sealed class Table
         }
 
         NoteEffectPlayed(owner);
+        owner.RefillAfter(card); // the refill rule: an effect card leaves the hand like any other
 
         // The hidden-card rule. An effect card is a public act - it reaches across the table, so it
         // is played face up even out of a face-down hand - and some of them name a face-down card
@@ -403,10 +405,60 @@ public sealed class Table
     }
 
     /// A fresh set: a fresh forty for each player, and the next turn is this set's opening one.
+    ///
+    /// On the rungs whose rules move between sets (stages 30 and 41-50), every set after the first
+    /// rolls the new target and/or deck shape here, before the shuffle that uses them. The first set
+    /// keeps the stage's own, which is what the stage banner announced. What changed is left in
+    /// TargetMovedThisSet / DeckChangedThisSet for the table to say out loud.
     public void StartSet()
     {
+        TargetMovedThisSet = false;
+        DeckChangedThisSet = false;
+        if (_setsStarted > 0)
+        {
+            GameState state = _host.State;
+            if (state.TargetMovesEachSet)
+            {
+                int was = state.TargetScore;
+                state.TargetScore = RollSetTarget(was);
+                TargetMovedThisSet = state.TargetScore != was;
+            }
+            if (state.DeckChangesEachSet)
+            {
+                DeckShape was = state.Deck;
+                state.Deck = RollSetDeck(was);
+                DeckChangedThisSet = state.Deck != was;
+            }
+        }
+        _setsStarted++;
+
         Shuffle();
         _firstTurnOfSet = true;
+    }
+
+    private int _setsStarted;
+
+    /// The set just started moved the target / changed the decks (see StartSet).
+    public bool TargetMovedThisSet { get; private set; }
+    public bool DeckChangedThisSet { get; private set; }
+
+    /// A moving target's range: the tier ladder's own spread (18 to 25) and a step either side, so
+    /// it still reads as "the target moved", never as a different game. Never the same twice running.
+    public const int MovingTargetMin = 17;
+    public const int MovingTargetMax = 26;
+
+    private int RollSetTarget(int previous)
+    {
+        int target;
+        do target = _host.Rng.Next(MovingTargetMin, MovingTargetMax + 1); while (target == previous);
+        return target;
+    }
+
+    private DeckShape RollSetDeck(DeckShape previous)
+    {
+        DeckShape shape;
+        do shape = DeckShapes.Shaped[_host.Rng.Next(DeckShapes.Shaped.Length)]; while (shape == previous);
+        return shape;
     }
 
     /// The flat random hand local 2-player and a runless solo match still deal, and the shape the
@@ -488,9 +540,18 @@ public sealed class Table
     private void ShuffleDeck(List<int> deck)
     {
         deck.Clear();
-        for (int value = 1; value <= 10; value++)
-            for (int copy = 0; copy < MainDeckCopies; copy++)
-                deck.Add(value);
+        // The standard forty, or the stage's shape of it (stages 21+: DeckShapes) - the same for
+        // both players, so a shaped deck changes the counting and never the fairness.
+        if (_host.State.Deck == DeckShape.Standard)
+        {
+            for (int value = 1; value <= 10; value++)
+                for (int copy = 0; copy < MainDeckCopies; copy++)
+                    deck.Add(value);
+        }
+        else
+        {
+            deck.AddRange(DeckShapes.Values(_host.State.Deck));
+        }
 
         // Fisher-Yates, off the table's one Random, the same stream every other deal uses.
         for (int i = deck.Count - 1; i > 0; i--)
@@ -559,12 +620,16 @@ public sealed class Table
             return;
         }
 
-        List<Card> runModifiers = _host.Run?.DrawMatchModifiers();
+        List<Card> rest = new List<Card>();
+        List<Card> runModifiers = _host.Run?.DrawMatchModifiers(rest);
+        P1.RefillPile.Clear();
         if (runModifiers != null && runModifiers.Count > 0)
         {
             P1.Modifiers.Clear();
             P1.Modifiers.AddRange(runModifiers);
             if (_host.TutorialFlipLesson) EnsureFlipCard(P1);
+            // The refill rule: the eight cards of the deck that were not dealt wait their turn.
+            if (_host.State.RefillHands) P1.RefillPile.AddRange(rest);
         }
         else
         {
@@ -582,7 +647,10 @@ public sealed class Table
         // The hidden-card rule: the bot's hand is face down for the whole match, so the Modifiers
         // it plays from it land face down too. (An effect card turns up as it is played.)
         if (HidesOpponent)
+        {
             foreach (Card card in P2.Modifiers) card.IsHidden = true;
+            foreach (Card card in P2.RefillPile) card.IsHidden = true;
+        }
 
         _host.HandsDealt(introduceCards: true);
     }
@@ -674,7 +742,7 @@ public sealed class Table
         player.ActiveCardsOnBoard.Add(drawnMainCard);
 
         // The hidden-card rule: past the bot's first two cards this set, its draws land face down.
-        if (HidesOpponent && player == P2 && player.ActiveCardsOnBoard.Count > FaceUpOpeningCards)
+        if (HidesOpponent && player == P2 && player.ActiveCardsOnBoard.Count > _host.State.FaceUpCards)
             drawnMainCard.IsHidden = true;
 
         // Copy names this exact card. On a two-card opening deal that is the SECOND one, because
