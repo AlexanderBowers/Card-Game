@@ -23,6 +23,7 @@ config/version="dev"
 run/main_scene="uid://b7qn5xyxoj23q"
 config/features=PackedStringArray("4.7", "C#", "Mobile")
 config/icon="res://assets/aimfor20_art/icon_1024.png"
+run/flush_stdout_on_print.debug=true
 
 [autoload]
 
@@ -44,6 +45,10 @@ window/size/window_height_override=648
 window/stretch/mode="canvas_items"
 window/stretch/aspect="expand"
 window/handheld/orientation=6
+
+[debug]
+
+file_logging/enable_file_logging.debug=true
 
 [dotnet]
 

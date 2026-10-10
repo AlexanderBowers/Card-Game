@@ -202,6 +202,12 @@ public partial class OptionsOverlay : Control
             colB.AddChild(SectionLabel("Debug"));
             _debugButtons = Toggle("Show debug buttons", GameSettings.SetShowDebugButtons);
             colB.AddChild(_debugButtons);
+
+            // Test builds keep a log file (DebugLog); this hands it over without a cable.
+            Button copyLog = new Button { Text = "Copy debug log", CustomMinimumSize = WideButton };
+            copyLog.AddThemeFontSizeOverride("font_size", ButtonFont);
+            copyLog.Pressed += () => copyLog.Text = DebugLog.CopyToClipboard() ? "Copied - paste it in a message" : "No log yet";
+            colB.AddChild(copyLog);
         }
 
         _closeButton = new Button { Text = "Close" };

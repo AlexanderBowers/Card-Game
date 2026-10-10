@@ -128,7 +128,9 @@ public partial class CloudSave : Node
         SetStatus(State.SigningIn, "Signing in to Google Play Games...");
         // Play Games v2 signs a returning player in by itself at launch; asking is for the moment
         // the player has just pressed the switch.
+        DebugLog.Write("CloudSave", interactive ? "calling sign_in" : "calling is_authenticated");
         _signIn.Call(interactive ? "sign_in" : "is_authenticated");
+        DebugLog.Write("CloudSave", "returned from the sign-in call");
     }
 
     private bool EnsurePlugin()
@@ -136,7 +138,9 @@ public partial class CloudSave : Node
         if (_pluginReady) return true;
         Node autoload = GetNodeOrNull(PluginAutoload);
         if (autoload == null) return false;
+        DebugLog.Write("CloudSave", "initializing the Play Games plugin");
         if (autoload.Call("initialize").AsInt32() != 0) return false;
+        DebugLog.Write("CloudSave", "plugin initialized");
 
         _signIn = MakeClient(SignInScript);
         _snapshots = MakeClient(SnapshotsScript);
@@ -167,6 +171,7 @@ public partial class CloudSave : Node
 
     private void OnAuthenticated(bool ok)
     {
+        DebugLog.Write("CloudSave", $"user_authenticated({ok})");
         _signedIn = ok;
         if (!ok)
         {
@@ -179,6 +184,7 @@ public partial class CloudSave : Node
 
     private void OnGameLoaded(GodotObject snapshot)
     {
+        DebugLog.Write("CloudSave", $"game_loaded({(snapshot == null ? "nothing" : "a snapshot")})");
         RunData local = RunData.Instance;
         if (local == null) return;
 
@@ -272,6 +278,7 @@ public partial class CloudSave : Node
 
     private void OnGameSaved(bool saved, string name, string description)
     {
+        DebugLog.Write("CloudSave", $"game_saved({saved})");
         if (saved) SetStatus(State.Ready, $"Saved to Google Play Games at {Time.GetTimeStringFromSystem().Substring(0, 5)}");
         else
         {
@@ -292,6 +299,7 @@ public partial class CloudSave : Node
     {
         Status = state;
         StatusText = text;
+        DebugLog.Write("CloudSave", $"{state}: {text}");
         // Waiting on Google: give up after a while rather than sit on "Signing in..." for ever.
         if (state == State.SigningIn || state == State.Syncing) _watchdog.Start();
         else _watchdog.Stop();
