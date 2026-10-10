@@ -84,12 +84,12 @@ public partial class CloudSave : Node
 
     private double _beat;
 
-    /// Test builds: one line every two seconds, so a log shows exactly when frames stopped.
+    /// Test builds: one line every ten seconds, so a log shows roughly when frames stopped.
     public override void _Process(double delta)
     {
         if (!DebugLog.Enabled) return;
         _beat += delta;
-        if (_beat < 2.0) return;
+        if (_beat < 10.0) return;
         _beat = 0;
         DebugLog.Write("Heartbeat", $"frame {Engine.GetProcessFrames()}");
     }

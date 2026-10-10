@@ -44,7 +44,6 @@ public partial class DragScroll : ScrollContainer
     public override void _Input(InputEvent e)
     {
         if (!IsVisibleInTree()) return;
-        DebugLog.Count("DragScroll.Input", e.GetType().Name);
         bool touch = DisplayServer.IsTouchscreenAvailable();
         switch (e)
         {
@@ -83,7 +82,6 @@ public partial class DragScroll : ScrollContainer
 
     private void Drag(float dy)
     {
-        DebugLog.Count("DragScroll.Drag");
         _distance += Mathf.Abs(dy);
         if (_distance > DragThreshold) _moved = true;
         if (_moved) ScrollVertical -= Mathf.RoundToInt(dy);
