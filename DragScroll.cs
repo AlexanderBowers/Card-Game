@@ -14,6 +14,16 @@ public partial class DragScroll : ScrollContainer
     private const float DragThreshold = 12f;
     private static readonly Vector2 Away = new Vector2(-100000f, -100000f);
 
+    /// Is this one of our own replayed events? Never compared exactly: on a phone Godot rescales
+    /// event positions to the stretched canvas (and turns a replayed touch into an emulated mouse
+    /// event at the rescaled spot), so a replay arrives at roughly -66000, not -100000. The exact
+    /// test missed it, the replay was replayed, and Options froze on the S25 the moment it was
+    /// scrolled (2026-10-10: 10,000 replays in under a second, found with a logcat trace).
+    private static bool IsAway(Vector2 p) => p.X < -10000f || p.Y < -10000f;
+
+    /// Set while a replay is being fed back in, in case the engine hands it straight back.
+    private static bool _replaying;
+
     private bool _dragging;
     private bool _moved;
     private float _distance;
@@ -39,11 +49,11 @@ public partial class DragScroll : ScrollContainer
         switch (e)
         {
             case InputEventScreenTouch t when touch:
-                if (t.Position == Away) return;
+                if (_replaying || IsAway(t.Position)) return;
                 if (Press(t.Pressed, t.Position)) Replay(t);
                 break;
             case InputEventMouseButton mb when mb.ButtonIndex == MouseButton.Left:
-                if (mb.Position == Away) return;
+                if (_replaying || IsAway(mb.Position)) return;
                 if (touch) { if (!mb.Pressed && _moved) Replay(mb); return; } // the emulated twin
                 if (Press(mb.Pressed, mb.Position)) Replay(mb);
                 break;
@@ -99,6 +109,8 @@ public partial class DragScroll : ScrollContainer
         InputEvent copy = (InputEvent)e.Duplicate();
         if (copy is InputEventScreenTouch t) t.Position = Away;
         if (copy is InputEventMouseButton mb) { mb.Position = Away; mb.GlobalPosition = Away; }
-        Input.ParseInputEvent(copy);
+        _replaying = true;
+        try { Input.ParseInputEvent(copy); }
+        finally { _replaying = false; }
     }
 }
