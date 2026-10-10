@@ -58,6 +58,8 @@ public partial class CloudSave : Node
     private bool _synced;         // the cloud copy has been read and settled: uploading is now safe
     private bool _uploadPending;
     private Timer _uploadTimer;
+    private Timer _watchdog;
+    private const double AnswerTimeout = 45.0;
 
     // The cloud copy waiting on the player's choice.
     private string _cloudRun;
@@ -70,6 +72,9 @@ public partial class CloudSave : Node
         _uploadTimer = new Timer { OneShot = true, WaitTime = UploadDelay };
         _uploadTimer.Timeout += Upload;
         AddChild(_uploadTimer);
+        _watchdog = new Timer { OneShot = true, WaitTime = AnswerTimeout };
+        _watchdog.Timeout += OnWatchdog;
+        AddChild(_watchdog);
 
         if (RunData.Instance != null) RunData.Instance.Changed += ScheduleUpload;
 
@@ -97,7 +102,8 @@ public partial class CloudSave : Node
     public void Enable()
     {
         GameSettings.SetCloudSave(true);
-        Start(interactive: true);
+        // After this frame: the switch redraws as "on" before Google's sign-in screen takes over.
+        Callable.From(() => Start(interactive: true)).CallDeferred();
     }
 
     /// Stops keeping the cloud copy up to date. The copy itself stays in the player's Play Games
@@ -136,10 +142,13 @@ public partial class CloudSave : Node
         _snapshots = MakeClient(SnapshotsScript);
         if (_signIn == null || _snapshots == null) return false;
 
-        _signIn.Connect("user_authenticated", Callable.From<bool>(OnAuthenticated));
-        _snapshots.Connect("game_loaded", Callable.From<GodotObject>(OnGameLoaded));
-        _snapshots.Connect("game_saved", Callable.From<bool, string, string>(OnGameSaved));
-        _snapshots.Connect("conflict_emitted", Callable.From<GodotObject>(OnConflict));
+        // The plugin raises these from Android's own threads, not Godot's main thread. Touching the
+        // scene tree, a Timer or the Options screen from there is what froze the app on the S25
+        // (2026-10-10), so every answer is handed to the main thread first - as AdMobBackend does.
+        _signIn.Connect("user_authenticated", Callable.From<bool>(ok => Main(() => OnAuthenticated(ok))));
+        _snapshots.Connect("game_loaded", Callable.From<GodotObject>(snap => Main(() => OnGameLoaded(snap))));
+        _snapshots.Connect("game_saved", Callable.From<bool, string, string>((ok, n, d) => Main(() => OnGameSaved(ok, n, d))));
+        _snapshots.Connect("conflict_emitted", Callable.From<GodotObject>(c => Main(() => OnConflict(c))));
         _pluginReady = true;
         return true;
     }
@@ -173,7 +182,9 @@ public partial class CloudSave : Node
         RunData local = RunData.Instance;
         if (local == null) return;
 
-        byte[] content = snapshot?.Get("content").AsByteArray();
+        byte[] content = null;
+        try { content = snapshot?.Get("content").AsByteArray(); }
+        catch (Exception e) { GD.PushWarning($"CloudSave: unreadable snapshot ({e.Message})"); }
         if (!CloudBundle.TryUnpack(content, out string run, out string id, out string secret))
         {
             // Nothing there yet (or nothing this version can read): this phone's becomes the copy.
@@ -281,8 +292,21 @@ public partial class CloudSave : Node
     {
         Status = state;
         StatusText = text;
+        // Waiting on Google: give up after a while rather than sit on "Signing in..." for ever.
+        if (state == State.SigningIn || state == State.Syncing) _watchdog.Start();
+        else _watchdog.Stop();
         Changed?.Invoke();
     }
+
+    private void OnWatchdog()
+    {
+        if (Status != State.SigningIn && Status != State.Syncing) return;
+        if (_cloudRun != null) return; // waiting on the player's choice, not on Google
+        SetStatus(State.Failed, "Google Play Games didn't answer. Turn Cloud Save off and on to try again");
+    }
+
+    /// Runs an action on Godot's main thread (see the note where the plugin's signals are connected).
+    private static void Main(Action action) => Callable.From(action).CallDeferred();
 
     // ------------------------------------------------------------------
     // The choice

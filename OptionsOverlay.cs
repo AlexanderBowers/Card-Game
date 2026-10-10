@@ -13,8 +13,6 @@ using System;
 /// </summary>
 public partial class OptionsOverlay : Control
 {
-    private static readonly Color PanelStone = new Color(0.16f, 0.15f, 0.14f, 0.98f);
-    private static readonly Color PanelEdge = new Color(0.05f, 0.05f, 0.05f);
 
     private CheckButton _animations;
     private CheckButton _batterySaver;
@@ -103,14 +101,24 @@ public partial class OptionsOverlay : Control
         colB.AddThemeConstantOverride("separation", 10);
         _columns.AddChild(colB);
 
-        // --- Sound: the RuneScape-style block, on its own dark stone plate.
+        // --- Sound: icon + notched slider per channel, on a card styled like the menu buttons.
         colA.AddChild(SectionLabel("Sound"));
         PanelContainer plate = new PanelContainer();
-        StyleBoxFlat stone = new StyleBoxFlat { BgColor = PanelStone, BorderColor = PanelEdge };
-        stone.SetBorderWidthAll(2);
-        stone.SetCornerRadiusAll(4);
-        stone.SetContentMarginAll(10);
-        plate.AddThemeStyleboxOverride("panel", stone);
+        StyleBoxFlat card = new StyleBoxFlat
+        {
+            BgColor = OverlayUi.Surface,
+            BorderColor = OverlayUi.SurfaceEdge,
+            ShadowColor = OverlayUi.Shadow,
+            ShadowSize = 8,
+            ShadowOffset = new Vector2(0, 3),
+            AntiAliasingSize = 1.2f,
+        };
+        card.SetCornerRadiusAll(20);
+        card.SetBorderWidthAll(1);
+        card.BorderWidthBottom = 5;
+        card.ContentMarginLeft = card.ContentMarginRight = 16;
+        card.ContentMarginTop = card.ContentMarginBottom = 10;
+        plate.AddThemeStyleboxOverride("panel", card);
         colA.AddChild(plate);
 
         VBoxContainer rows = new VBoxContainer();

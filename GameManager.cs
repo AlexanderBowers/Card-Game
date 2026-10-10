@@ -146,6 +146,10 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
 
         if (autoRun || autoLocal2P) Callable.From(() => StartMatch(local2Player: autoLocal2P)).CallDeferred();
         else _menus.ShowStartMenu();
+
+        // "--options": open Options over the start menu (Movie Maker screenshots of that screen).
+        if (OS.IsDebugBuild() && System.Array.IndexOf(OS.GetCmdlineUserArgs(), "--options") >= 0)
+            Callable.From(() => OpenOptions()).CallDeferred();
     }
 
     public override void _ExitTree()

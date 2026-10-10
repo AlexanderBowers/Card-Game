@@ -9,6 +9,9 @@ public partial class RunStore : Node
 
     public override void _Ready()
     {
+        // The first autoload, so the theme is finished before any screen is built.
+        ToggleIcons.Apply();
+
         RunData run = new RunData();
         string saved = Read();
         if (saved != null && !run.LoadSaveJson(saved))

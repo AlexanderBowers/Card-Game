@@ -2,9 +2,9 @@ using Godot;
 using System;
 
 /// <summary>
-/// A notched volume slider in the style of the old RuneScape options panel: a dark stone rail
-/// with arrow-shaped ends, five dots, and a green gem that sits on one of them. Tap anywhere on
-/// the rail or drag along it; the gem snaps to the nearest notch.
+/// A notched volume slider: a pale rounded track, filled blue up to the level, with five notches
+/// and a white knob that snaps to the nearest one. Tap anywhere on the track or drag along it.
+/// (The layout - notches, icon-to-mute - came from the old RuneScape options panel.)
 ///
 /// Drawn in code - there is no art for it yet, and a drawn control scales cleanly with the
 /// table's UI zoom. Swapping in textures later only changes _Draw.
@@ -13,15 +13,12 @@ public partial class VolumeSlider : Control
 {
     public GameSettings.Channel Channel { get; set; }
 
-    private static readonly Color RailFill = new Color(0.11f, 0.11f, 0.105f);
-    private static readonly Color RailEdge = new Color(0.03f, 0.03f, 0.03f);
-    private static readonly Color RailLight = new Color(0.33f, 0.33f, 0.30f);
-    private static readonly Color Groove = new Color(0.19f, 0.19f, 0.18f);
-    private static readonly Color Dot = new Color(0.40f, 0.40f, 0.37f);
-    private static readonly Color GemFrame = new Color(0.78f, 0.78f, 0.76f);
-    private static readonly Color GemDark = new Color(0.04f, 0.30f, 0.07f);
-    private static readonly Color Gem = new Color(0.12f, 0.70f, 0.18f);
-    private static readonly Color GemShine = new Color(0.50f, 0.93f, 0.52f);
+    // Pale track, blue fill up to the level, white knob: the same palette as the rest of the menus
+    // (OverlayUi). Was a dark RuneScape stone rail with a green gem until 2026-10-10.
+    private static readonly Color Track = new Color(0.86f, 0.89f, 0.93f);
+    private static readonly Color TrackEdge = OverlayUi.SurfaceEdge;
+    private static readonly Color Dot = new Color(0.62f, 0.67f, 0.75f);
+    private static readonly Color MutedFill = new Color(0.66f, 0.7f, 0.76f);
 
     public VolumeSlider()
     {
@@ -48,39 +45,38 @@ public partial class VolumeSlider : Control
     public override void _Draw()
     {
         float cy = Size.Y / 2f;
-        float t = Thickness;
-        float x0 = RailLeft, x1 = RailRight;
-
-        // The rail: a long hexagon, pointed at both ends.
-        Vector2[] rail =
-        {
-            new Vector2(x0, cy), new Vector2(x0 + t / 2f, cy - t / 2f),
-            new Vector2(x1 - t / 2f, cy - t / 2f), new Vector2(x1, cy),
-            new Vector2(x1 - t / 2f, cy + t / 2f), new Vector2(x0 + t / 2f, cy + t / 2f),
-        };
-        DrawColoredPolygon(rail, RailFill);
-        Vector2[] outline = new Vector2[rail.Length + 1];
-        rail.CopyTo(outline, 0);
-        outline[rail.Length] = rail[0];
-        DrawPolyline(outline, RailEdge, 2f);
-        // Bevel: light along the top edge, like carved stone catching the light.
-        DrawLine(new Vector2(x0 + t / 2f + 1, cy - t / 2f + 2), new Vector2(x1 - t / 2f - 1, cy - t / 2f + 2), RailLight, 1f);
-
-        DrawLine(new Vector2(NotchLeft, cy), new Vector2(NotchRight, cy), Groove, 2f);
-        for (int i = 0; i <= GameSettings.VolumeSteps; i++)
-            DrawCircle(new Vector2(NotchX(i), cy), Mathf.Max(1.5f, t * 0.12f), Dot);
-
-        // The gem. Grey when the channel is muted, so the slider says so too.
+        float t = Thickness * 0.62f;
+        float r = t / 2f;
+        float x0 = RailLeft + r, x1 = RailRight - r;
         bool muted = GameSettings.IsMuted(Channel);
-        float k = Size.Y * 0.62f;
-        Vector2 c = new Vector2(NotchX(GameSettings.GetLevel(Channel)), cy);
-        Rect2 frame = new Rect2(c - new Vector2(k, k) / 2f, new Vector2(k, k));
-        DrawRect(frame, GemFrame);
-        Rect2 inner = frame.Grow(-2f);
-        DrawRect(inner, muted ? new Color(0.2f, 0.2f, 0.2f) : GemDark);
-        Rect2 body = inner.Grow(-1.5f);
-        DrawRect(body, muted ? new Color(0.42f, 0.42f, 0.42f) : Gem);
-        DrawRect(new Rect2(body.Position, body.Size * 0.4f), muted ? new Color(0.62f, 0.62f, 0.62f) : GemShine);
+        float knobX = NotchX(GameSettings.GetLevel(Channel));
+        Color fill = muted ? MutedFill : OverlayUi.Accent;
+
+        // The track: a pill, with the part up to the knob filled in.
+        Pill(x0, x1, cy, r + 1f, TrackEdge);
+        Pill(x0, x1, cy, r, Track);
+        Pill(x0, knobX, cy, r, fill);
+
+        for (int i = 0; i <= GameSettings.VolumeSteps; i++)
+        {
+            float x = NotchX(i);
+            DrawCircle(new Vector2(x, cy), Mathf.Max(1.5f, t * 0.16f), x <= knobX ? new Color(1f, 1f, 1f, 0.8f) : Dot);
+        }
+
+        // The knob: white, ringed in the fill colour, with a soft shadow under it.
+        float k = Size.Y * 0.34f;
+        Vector2 c = new Vector2(knobX, cy);
+        DrawCircle(c + new Vector2(0, 2f), k, new Color(0f, 0.04f, 0.1f, 0.18f));
+        DrawCircle(c, k, muted ? MutedFill : OverlayUi.AccentDeep);
+        DrawCircle(c, k - 2f, Colors.White);
+    }
+
+    private void Pill(float xa, float xb, float cy, float r, Color color)
+    {
+        if (xb < xa) return;
+        DrawRect(new Rect2(xa, cy - r, xb - xa, r * 2f), color);
+        DrawCircle(new Vector2(xa, cy), r, color);
+        DrawCircle(new Vector2(xb, cy), r, color);
     }
 
     public override void _GuiInput(InputEvent @event)
