@@ -533,6 +533,7 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
     bool ITableUiHost.GameStarted => _isGameStarted;
     // Online looks like a match against the bot: one set of buttons, the opponent across the table.
     bool ITableUiHost.VsBot => _isVsBot || _online;
+    bool ITableUiHost.IsOnlineMatch => _online;
     bool ITableUiHost.InRun => _inRun;
     bool ITableUiHost.SetOverPending => _setOverPending;
 

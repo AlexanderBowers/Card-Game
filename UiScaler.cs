@@ -22,6 +22,7 @@ public partial class UiScaler : Control
     {
         Name = "OverlayLayer";
         MouseFilter = MouseFilterEnum.Ignore;
+        ZIndex = OverlayUi.PopupZ; // over the table's banners and toasts, always
     }
 
     public override void _EnterTree()

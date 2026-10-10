@@ -17,6 +17,8 @@ public interface ITableUiHost
 
     bool GameStarted { get; }
     bool VsBot { get; }
+    /// An online match: the opponent is a person choosing at the same time as you.
+    bool IsOnlineMatch { get; }
     bool InRun { get; }
 
     /// The set-end explanation is up and owns the middle label; nothing else may write to it.

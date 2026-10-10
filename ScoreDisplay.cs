@@ -100,6 +100,7 @@ public sealed class ScoreDisplay
         ApplyScoreDanger(L.P2OpponentBox, P1);
         UpdateHoldLock(L.P1ScoreBox, P1);
         UpdateHoldLock(L.P2ScoreBox, P2);
+        UpdateReadyBadge(L.P2ScoreBox, P2);
         _scoreFeedbackPrimed = true; // from here on, changes animate and make their sound
     }
 
@@ -297,6 +298,7 @@ public sealed class ScoreDisplay
         _authoredBoxStyle.Clear();
         _dangerBoxStyle.Clear();
         _holdLocks.Clear(); // the old layout's locks went with its nodes
+        _readyBadges.Clear();
     }
 
     private void CelebrateOnTarget(Control box)
@@ -341,6 +343,59 @@ public sealed class ScoreDisplay
         Player holder = box == L.P1ScoreBox ? P1 : P2;
         Control board = holder == P1 ? _ui.P1Board : _ui.P2Board;
         _ui.Moments.PlayHold(box, padlock, board, BuildPadlock, LockSize, _sfxLock);
+    }
+
+    // ------------------------------------------------------------------
+    // "Ready" (online, 2026-10-10). Both players choose at once and the turn resolves when the
+    // second one does, so without this you can't tell whether the other player has already
+    // chosen. A green Ready badge pops onto their score box's top-right corner once they have, and
+    // leaves when the turn plays out. Holding shows the padlock there instead - never both.
+    // ------------------------------------------------------------------
+    private readonly Dictionary<Control, Control> _readyBadges = new Dictionary<Control, Control>();
+    private static readonly Color ReadyGreen = new Color(0.13f, 0.62f, 0.33f);
+
+    private void UpdateReadyBadge(Control box, Player player)
+    {
+        if (box == null || player == null || box.GetParent() is not Control parent) return;
+        bool ready = _host.IsOnlineMatch && _host.GameStarted && !State.IsGameOver
+                     && player.HasEndedTurn && !player.IsHolding;
+
+        if (!_readyBadges.TryGetValue(box, out Control badge) || !GodotObject.IsInstanceValid(badge))
+        {
+            if (!ready) return; // built the first time it is needed
+            badge = BuildReadyBadge();
+            parent.AddChild(badge);
+            parent.MoveChild(badge, box.GetIndex() + 1);
+            _readyBadges[box] = badge;
+        }
+
+        badge.Position = box.Position + new Vector2(box.Size.X - badge.Size.X * 0.6f, -badge.Size.Y * 0.5f);
+        if (ready == badge.Visible) return;
+        badge.Visible = ready;
+        if (!ready) return;
+
+        badge.PivotOffset = badge.Size / 2f;
+        badge.Scale = new Vector2(0.4f, 0.4f);
+        Tween pop = badge.CreateTween();
+        pop.TweenProperty(badge, "scale", new Vector2(1.15f, 1.15f), 0.12f).SetTrans(Tween.TransitionType.Back).SetEase(Tween.EaseType.Out);
+        pop.TweenProperty(badge, "scale", Vector2.One, 0.10f);
+    }
+
+    private static Control BuildReadyBadge()
+    {
+        PanelContainer badge = new PanelContainer { Name = "ReadyBadge", MouseFilter = Control.MouseFilterEnum.Ignore, Visible = false };
+        StyleBoxFlat style = new StyleBoxFlat { BgColor = ReadyGreen, BorderColor = Colors.White, AntiAliasingSize = 1.2f };
+        style.SetBorderWidthAll(2);
+        style.SetCornerRadiusAll(14);
+        style.ContentMarginLeft = style.ContentMarginRight = 14;
+        style.ContentMarginTop = style.ContentMarginBottom = 2;
+        badge.AddThemeStyleboxOverride("panel", style);
+        Label text = new Label { Text = "Ready", MouseFilter = Control.MouseFilterEnum.Ignore };
+        text.AddThemeFontSizeOverride("font_size", 26);
+        text.AddThemeColorOverride("font_color", Colors.White);
+        badge.AddChild(text);
+        badge.ResetSize();
+        return badge;
     }
 
     /// A padlock from three flat shapes - a shackle (an arch of border only), a body and a

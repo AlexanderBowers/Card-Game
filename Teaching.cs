@@ -225,7 +225,7 @@ void fragment() {
     /// "tell" step drops a transparent blocker over the hole as well, and nothing is clickable.
     public void BuildSpotlight()
     {
-        _spotlightOverlay = new Control { Visible = false, MouseFilter = Control.MouseFilterEnum.Ignore };
+        _spotlightOverlay = new Control { Visible = false, MouseFilter = Control.MouseFilterEnum.Ignore, ZIndex = OverlayUi.PopupZ };
         _root.AddChild(_spotlightOverlay);
         _spotlightOverlay.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
 
