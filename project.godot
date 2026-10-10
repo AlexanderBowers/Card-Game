@@ -33,7 +33,7 @@ CloudSave="*res://CloudSave.cs"
 
 [critical_count]
 
-play_games/game_id=""
+play_games/game_id="633434549646"
 
 [display]
 
@@ -51,7 +51,7 @@ project/assembly_name="AimFor20"
 
 [editor_plugins]
 
-enabled=PackedStringArray("res://addons/admob/plugin.cfg")
+enabled=PackedStringArray("res://addons/admob/plugin.cfg", "res://addons/GodotPlayGameServices/plugin.cfg")
 
 [gui]
 
