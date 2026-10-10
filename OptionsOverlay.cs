@@ -172,9 +172,12 @@ public partial class OptionsOverlay : Control
         _cloudSection.AddChild(SectionLabel("Cloud Save"));
         _cloudToggle = Toggle("Save progress to Google Play Games", on =>
         {
+            DebugLog.Write("Options", $"Cloud Save switch -> {on}");
             if (CloudSave.Instance == null) return;
             if (on) CloudSave.Instance.Enable(); else CloudSave.Instance.Disable();
+            DebugLog.Write("Options", "cloud switch handled");
             RefreshCloud();
+            DebugLog.Write("Options", "cloud note refreshed");
         });
         _cloudSection.AddChild(_cloudToggle);
         _cloudNote = new Label { AutowrapMode = TextServer.AutowrapMode.WordSmart, CustomMinimumSize = new Vector2(260, 0) };
@@ -206,7 +209,14 @@ public partial class OptionsOverlay : Control
             // Test builds keep a log file (DebugLog); this hands it over without a cable.
             Button copyLog = new Button { Text = "Copy debug log", CustomMinimumSize = WideButton };
             copyLog.AddThemeFontSizeOverride("font_size", ButtonFont);
-            copyLog.Pressed += () => copyLog.Text = DebugLog.CopyToClipboard() ? "Copied - paste it in a message" : "No log yet";
+            copyLog.Pressed += () =>
+            {
+                DebugLog.Write("Options", "Copy debug log pressed");
+                bool ok = DebugLog.CopyToClipboard();
+                DebugLog.Write("Options", $"copied to clipboard: {ok}");
+                copyLog.Text = ok ? "Copied - paste it in a message" : "No log yet";
+                DebugLog.Write("Options", "button text changed");
+            };
             colB.AddChild(copyLog);
         }
 
@@ -263,6 +273,7 @@ public partial class OptionsOverlay : Control
     /// The Cloud Save switch and the line under it: what it does when off, how it is doing when on.
     private void RefreshCloud()
     {
+        DebugLog.Count("Options.RefreshCloud");
         if (_cloudSection == null || !GodotObject.IsInstanceValid(_cloudSection)) return;
         _cloudSection.Visible = CloudSave.Available && CloudSave.Instance != null;
         if (!_cloudSection.Visible) return;

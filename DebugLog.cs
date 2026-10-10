@@ -29,6 +29,26 @@ public static class DebugLog
         if (Enabled) GD.Print($"[{Time.GetTimeStringFromSystem()}] {tag}: {message}");
     }
 
+    private static readonly System.Collections.Generic.Dictionary<string, long> _counts = new();
+
+    /// Counts calls to a spot and logs the 1st, 2nd, 3rd, 10th, 100th, 1000th... so a spot that
+    /// runs away fills the log with ever-larger numbers instead of drowning it (freeze hunt,
+    /// 2026-10-10). Debug builds only.
+    public static void Count(string spot, string detail = null)
+    {
+        if (!Enabled) return;
+        long n;
+        lock (_counts) { _counts.TryGetValue(spot, out n); _counts[spot] = ++n; }
+        if (n <= 3 || IsPowerOfTen(n))
+            GD.Print($"[{Time.GetTimeStringFromSystem()}] COUNT {spot} #{n}{(detail == null ? "" : " " + detail)}");
+    }
+
+    private static bool IsPowerOfTen(long n)
+    {
+        while (n >= 10 && n % 10 == 0) n /= 10;
+        return n == 1;
+    }
+
     /// The end of the previous session's log, then the end of this one. Empty when there is none.
     public static string Collect()
     {
@@ -44,6 +64,7 @@ public static class DebugLog
     public static bool CopyToClipboard()
     {
         string text = Collect();
+        Write("DebugLog", $"collected {text.Length} chars; setting the clipboard");
         if (string.IsNullOrWhiteSpace(text)) return false;
         DisplayServer.ClipboardSet(text);
         return true;

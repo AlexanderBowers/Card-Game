@@ -82,6 +82,18 @@ public partial class CloudSave : Node
         if (Available && GameSettings.CloudSave) Start(interactive: false);
     }
 
+    private double _beat;
+
+    /// Test builds: one line every two seconds, so a log shows exactly when frames stopped.
+    public override void _Process(double delta)
+    {
+        if (!DebugLog.Enabled) return;
+        _beat += delta;
+        if (_beat < 2.0) return;
+        _beat = 0;
+        DebugLog.Write("Heartbeat", $"frame {Engine.GetProcessFrames()}");
+    }
+
     public override void _ExitTree()
     {
         if (RunData.Instance != null) RunData.Instance.Changed -= ScheduleUpload;

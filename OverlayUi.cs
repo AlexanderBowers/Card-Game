@@ -217,6 +217,7 @@ public static class OverlayUi
         void Fit()
         {
             if (fitting || !GodotObject.IsInstanceValid(panel) || !panel.IsInsideTree()) return;
+            DebugLog.Count("KeepOnScreen.Fit", panel.GetParent()?.GetType().Name);
             fitting = true;
             try { FitNow(); }
             finally { fitting = false; }
@@ -347,6 +348,7 @@ public static class OverlayUi
 
         Vector2I window = DisplayServer.WindowGetSize();
         if (window.X <= 0 || window.Y <= 0) return (0f, 0f);
+        DebugLog.Count("SafeInsets");
         Rect2I safe = DisplayServer.GetDisplaySafeArea();
         float scale = ViewSize(anyControl).Y / window.Y; // window px -> canvas units
 
