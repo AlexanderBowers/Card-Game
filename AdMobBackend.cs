@@ -371,18 +371,7 @@ public static class AdMobBackend
                 GD.Print($"AdMob: interstitial failed to load ({error?.Message}).");
             }),
         };
-        new InterstitialAdLoader().Load(InterstitialUnitId, NewRequest(), callback);
-    }
-
-    /// Every ad request asks for Restricted Data Processing ("rdp"), so no player's data is sold
-    /// or shared for ads by default - Alexander's call, 2026-10-10. Google then serves ads as a
-    /// service provider: no profile is built from the player for other advertisers. This holds
-    /// whatever the US-states "data preferences" form shows; it can only make ads more private.
-    private static AdRequest NewRequest()
-    {
-        AdRequest request = new AdRequest();
-        request.Extras["rdp"] = 1;
-        return request;
+        new InterstitialAdLoader().Load(InterstitialUnitId, new AdRequest(), callback);
     }
 
     private static void LoadRewarded()
@@ -403,7 +392,7 @@ public static class AdMobBackend
                 GD.Print($"AdMob: rewarded failed to load ({error?.Message}).");
             }),
         };
-        new RewardedAdLoader().Load(RewardedUnitId, NewRequest(), callback);
+        new RewardedAdLoader().Load(RewardedUnitId, new AdRequest(), callback);
     }
 
     // ------------------------------------------------------------------
