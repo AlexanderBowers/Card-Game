@@ -761,6 +761,20 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
             ("target_before", opponentBefore), ("target_after", target.CurrentScore),
             ("reopened", play.Reopened), ("said", play.Narration));
 
+        // Simultaneous play's one race (tester feedback, 2026-10-12): you pick up a Copy, its line
+        // says "your 4 becomes a 6: 18 to 24", and the bot's Trade Totals lands before your tap -
+        // so the tap plays a card whose preview described a score you no longer have. A special
+        // that changed YOUR score or hand puts whatever you were holding back in your hand; the
+        // banner says what happened, and the next pick-up previews the table as it is now.
+        bool touchedTarget = card.Effect == CardEffect.TradeTotals || card.Effect == CardEffect.TradeHands
+                          || card.Effect == CardEffect.Shave || card.Effect == CardEffect.Veto;
+        if (touchedTarget && target != owner && SelectedFor(target) != null)
+        {
+            PlayLog.Event("selection_dropped", ("side", SideOf(target)), ("card", PlayLog.Name(SelectedFor(target))),
+                ("because", PlayLog.Name(card)));
+            SetSelection(target, null);
+        }
+
         // Face-down cards this play named turn over (the hidden-card rule). Two are left to the
         // effect's own picture: a burned Veto card changes face at once and then burns, and the
         // bot's drawn card under its own Copy turns as the Copy flips it.
