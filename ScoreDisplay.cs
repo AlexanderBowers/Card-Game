@@ -605,7 +605,13 @@ public sealed class ScoreDisplay
     {
         Card picked = _host.SelectedFor(player);
         if (picked == null || picked.Effect != CardEffect.None || _host.Table.IsRecallLocked(player, picked)) return null;
-        return Shown(player) + picked.Value;
+        // While an effect moment holds this score at its OLD number (HoldShown), a preview built
+        // on it is a lie: the card would land on the real, already-changed score. Tester feedback
+        // (2026-10-12): a +/-4 preview read 20 while the bot's Trade Totals was still flying, and
+        // playing it landed somewhere else entirely. No preview until the real number is showing;
+        // ReleaseShown refreshes the boxes, which brings it back built on the right score.
+        if (_shownOverride.ContainsKey(player)) return null;
+        return player.CurrentScore + picked.Value;
     }
 
     /// A player's score with the target behind it - "17/20" - so "how close am I" is one glance

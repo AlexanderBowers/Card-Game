@@ -134,6 +134,53 @@ public class TableTests
         Assert.False(host.Player1.HasEndedTurn);
     }
 
+    // Tester feedback, 2026-10-12: refusals that named the wrong thing.
+
+    [Fact]
+    public void The_one_special_per_turn_refusal_names_the_special_already_played()
+    {
+        var (host, table) = NewTable();
+        table.NoteEffectPlayed(host.Player1, CardEffect.Copy);
+        host.Player2.IsHolding = true;
+        host.Player2.CurrentScore = 15;
+
+        string why = table.EffectRefusal(host.Player1, TestTable.Effect(CardEffect.Shave));
+        Assert.Contains("Copy", why);
+        Assert.DoesNotContain("Shave", why);
+    }
+
+    [Fact]
+    public void Veto_against_a_special_says_which_special_and_why_it_cannot_be_undone()
+    {
+        var (host, table) = NewTable();
+        table.NoteEffectPlayed(host.Player2, CardEffect.TradeHands);
+
+        string why = table.EffectRefusal(host.Player1, TestTable.Effect(CardEffect.Veto));
+        Assert.Contains("Trade Hands", why);
+        Assert.Contains("number Modifier", why);
+    }
+
+    [Fact]
+    public void Veto_still_works_on_a_number_Modifier_played_alongside_a_special()
+    {
+        var (host, table) = NewTable();
+        Card plus = TestTable.Mod(3);
+        host.Player2.Modifiers.Add(plus);
+        host.Player2.PlayModifierCard(plus, host.State);
+        table.NoteEffectPlayed(host.Player2, CardEffect.TradeTotals);
+
+        Assert.Null(table.EffectRefusal(host.Player1, TestTable.Effect(CardEffect.Veto)));
+    }
+
+    [Fact]
+    public void Recall_with_only_specials_spent_says_specials_cannot_come_back()
+    {
+        Player me = TestTable.Player("You");
+        me.SpentCards.Add(TestTable.Effect(CardEffect.TradeTotals));
+        string why = CardEffects.RefusalReason(TestTable.Effect(CardEffect.Recall), me, TestTable.Player("Them"), TestTable.Target);
+        Assert.Contains("special Modifiers cannot be recalled", why);
+    }
+
     [Fact]
     public void The_tutorials_staged_opening_is_drawn_in_order_and_decks_stay_whole()
     {

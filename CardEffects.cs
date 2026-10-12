@@ -235,13 +235,18 @@ public static class CardEffects
             case CardEffect.TradeHands:
                 return $"{them} has no Modifiers left to take.";
 
+            // Tester feedback (2026-10-12): after spending a Trade Totals, "you have not spent a
+            // Modifier" read as a bug - a special IS a Modifier. Name the real rule instead.
             case CardEffect.Recall:
-                return "You have not spent a Modifier yet this match.";
+                return self.SpentCards.Count > 0
+                    ? "Recall only brings back number Modifiers - special Modifiers cannot be recalled."
+                    : "You have not spent a number Modifier yet this match.";
 
             // Only PlayModifierCard sets LastPlayedModifier and it is never called for an effect
-            // card, so "they played an effect card" cannot reach here - there is one real reason.
+            // card. When they DID play a special this turn, Table.EffectRefusal answers first and
+            // names it; this is the plain case.
             case CardEffect.Veto:
-                return $"{them} has not played a Modifier this turn.";
+                return $"{them} has not played a number Modifier this turn.";
         }
 
         return $"{Label(card.Effect)} cannot be played right now.";
@@ -298,8 +303,8 @@ public static class CardEffects
             case CardEffect.TradeTotals: return "Swap the two current scores.";
             case CardEffect.Shave: return "Take 1 off an opponent who is holding\nbelow the target. They cannot answer.";
             case CardEffect.TradeHands: return "Swap your remaining Modifiers for theirs.";
-            case CardEffect.Recall: return "Take back a Modifier you already spent.\nYou can play it from your next turn.";
-            case CardEffect.Veto: return "Destroy the last Modifier they played.\nTheir score reverts and their turn re-opens.";
+            case CardEffect.Recall: return "Take back a number Modifier you already spent.\nYou can play it from your next turn.";
+            case CardEffect.Veto: return "Destroy the last number Modifier they played.\nTheir score reverts and their turn re-opens.";
             default: return string.Empty;
         }
     }

@@ -52,6 +52,8 @@ public partial class OptionsOverlay : Control
     private Label _cloudNote;
     private CheckButton _showFps;
     private CheckButton _debugButtons;
+    private CheckButton _playLog;
+    private Button _copyPlayLog;
     private Button _closeButton;
     private Control _storeSection;      // the heading and the row, so both hide when there is no store
     private VBoxContainer _storeRows;   // refilled on every Open: what it says depends on what is owned
@@ -199,6 +201,30 @@ public partial class OptionsOverlay : Control
         _onlineSection.AddChild(_onlineNote);
         colB.AddChild(_onlineSection);
 
+        // --- Bug reports (tester feedback, 2026-10-12). In every build: the play log is how a
+        // tester on a release build shows what the game did, without a cable or logcat. Test builds
+        // always log, so the switch is shown on and cannot be turned off there - a switch that
+        // looked off while logging carried on would be a switch that does nothing.
+        colB.AddChild(SectionLabel("Bug reports"));
+        _playLog = Toggle("Keep a play log", GameSettings.SetPlayLog);
+        if (OS.IsDebugBuild()) _playLog.Disabled = true;
+        colB.AddChild(_playLog);
+        _copyPlayLog = new Button { Text = "Copy play log", CustomMinimumSize = WideButton };
+        _copyPlayLog.AddThemeFontSizeOverride("font_size", ButtonFont);
+        _copyPlayLog.Pressed += () =>
+            _copyPlayLog.Text = PlayLog.CopyToClipboard() ? "Copied - paste it in a message" : "Nothing logged yet";
+        colB.AddChild(_copyPlayLog);
+        Label playLogNote = new Label
+        {
+            Text = "Records your matches on this device only: cards, scores and why a card could not be played. "
+                 + "Copy it and paste it into a message when you report a bug.",
+            AutowrapMode = TextServer.AutowrapMode.WordSmart,
+            CustomMinimumSize = new Vector2(260, 0),
+        };
+        playLogNote.AddThemeFontSizeOverride("font_size", OverlayUi.Readable(14));
+        playLogNote.AddThemeColorOverride("font_color", OverlayUi.Muted);
+        colB.AddChild(playLogNote);
+
         // --- Debug. An exported build has no debug rows to show, so it gets no switch either.
         if (OS.IsDebugBuild())
         {
@@ -244,6 +270,12 @@ public partial class OptionsOverlay : Control
         _table3D.SetPressedNoSignal(GameSettings.Table3D);
         _showFps.SetPressedNoSignal(GameSettings.ShowFps);
         _debugButtons?.SetPressedNoSignal(GameSettings.ShowDebugButtons);
+        _playLog?.SetPressedNoSignal(PlayLog.Enabled);
+        if (_copyPlayLog != null)
+        {
+            _copyPlayLog.Text = "Copy play log";
+            _copyPlayLog.CustomMinimumSize = WideButton;
+        }
         Vector2 view = OverlayUi.ViewSize(this);
         if (_columns != null) _columns.Vertical = view.X <= view.Y * 1.25f;
         if (_closeButton != null) _closeButton.CustomMinimumSize = WideButton;

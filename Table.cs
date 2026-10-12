@@ -94,8 +94,11 @@ public sealed class Table
 
     // One opponent-facing card per side per turn. Two in one turn cannot be read, however well
     // they animate - see claude/stage-ladder-spec.md.
-    private bool _p1PlayedEffect;
-    private bool _p2PlayedEffect;
+    // Which special Modifier each side played this turn, or null. The effect rather than a bool so
+    // the refusal can NAME it (tester feedback, 2026-10-12: Copy then Shave was refused with
+    // "you have played yours", which read as "you already played a Shave").
+    private CardEffect? _p1PlayedEffect;
+    private CardEffect? _p2PlayedEffect;
 
     /// A card just brought back by Recall cannot be played until the NEXT turn. This is the whole
     /// of Recall's design: without it the card is "an extra modifier exactly when I need one",
@@ -130,12 +133,15 @@ public sealed class Table
     // ------------------------------------------------------------------
 
     /// Has this player already reached across the table this turn?
-    public bool HasPlayedEffect(Player owner) => owner == P1 ? _p1PlayedEffect : _p2PlayedEffect;
+    public bool HasPlayedEffect(Player owner) => EffectPlayedThisTurn(owner).HasValue;
 
-    public void NoteEffectPlayed(Player owner)
+    /// The special Modifier this player played this turn, or null.
+    public CardEffect? EffectPlayedThisTurn(Player owner) => owner == P1 ? _p1PlayedEffect : _p2PlayedEffect;
+
+    public void NoteEffectPlayed(Player owner, CardEffect effect = CardEffect.None)
     {
-        if (owner == P1) _p1PlayedEffect = true;
-        else _p2PlayedEffect = true;
+        if (owner == P1) _p1PlayedEffect = effect;
+        else _p2PlayedEffect = effect;
     }
 
     /// True when this card came back through a Recall during THIS turn and so cannot be played
@@ -212,8 +218,22 @@ public sealed class Table
     public string EffectRefusal(Player owner, Card card)
     {
         if (card == null || card.Effect == CardEffect.None) return null;
-        if (HasPlayedEffect(owner)) return "one card across the table per turn, and you have played yours.";
-        return CardEffects.RefusalReason(card, owner, OpponentOf(owner), _host.State.TargetScore);
+        CardEffect? played = EffectPlayedThisTurn(owner);
+        if (played.HasValue)
+            return played.Value == CardEffect.None
+                ? "one special Modifier per turn, and you have already played one."
+                : $"one special Modifier per turn, and you already played {CardEffects.Label(played.Value)} this turn.";
+
+        // Veto's one real refusal ("they have not played a Modifier") is wrong when they DID play
+        // one - a special. Name it, and say why it cannot be undone (tester feedback, 2026-10-12).
+        Player other = OpponentOf(owner);
+        CardEffect? theirs = EffectPlayedThisTurn(other);
+        if (card.Effect == CardEffect.Veto && theirs.HasValue && theirs.Value != CardEffect.None
+            && !CardEffects.CanPlay(card, owner, other, _host.State.TargetScore))
+            return $"Veto only destroys a number Modifier - {other.PlayerName} played "
+                 + $"{CardEffects.Label(theirs.Value)}, which cannot be undone.";
+
+        return CardEffects.RefusalReason(card, owner, other, _host.State.TargetScore);
     }
 
     /// What an effect play did, for the caller to show.
@@ -275,7 +295,7 @@ public sealed class Table
             return false;
         }
 
-        NoteEffectPlayed(owner);
+        NoteEffectPlayed(owner, card.Effect);
         owner.RefillAfter(card); // the refill rule: an effect card leaves the hand like any other
 
         // The hidden-card rule. An effect card is a public act - it reaches across the table, so it
@@ -387,7 +407,7 @@ public sealed class Table
             case CardEffect.TradeHands:
                 return $"Trade Hands: your {player.Modifiers.Count - 1} Modifiers for their {other.Modifiers.Count}";
             case CardEffect.Recall:
-                return "Take a Modifier back - you can play it from your next turn";
+                return "Take a number Modifier back - you can play it from your next turn";
             case CardEffect.Veto:
             {
                 // EffectRefusal returned null above, so CanPlay said yes, so LastPlayedModifier is
@@ -701,8 +721,8 @@ public sealed class Table
         P2.LastDrawnCard = null;
         P1.LastPlayedModifier = null;
         P2.LastPlayedModifier = null;
-        _p1PlayedEffect = false;
-        _p2PlayedEffect = false;
+        _p1PlayedEffect = null;
+        _p2PlayedEffect = null;
 
         // A card recalled during the last turn becomes playable now. This is the ONLY place the
         // lock is lifted, so a recalled card is always dead for exactly one turn.

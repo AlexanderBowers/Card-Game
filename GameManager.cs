@@ -277,6 +277,17 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
 
         _table.DealMatchHands(); // the hand has to last all three sets of the match
 
+        if (PlayLog.Enabled)
+        {
+            RunData logRun = _inRun ? RunData.Instance : null;
+            string mode = !_isVsBot ? "local2p" : logRun == null ? "solo" : logRun.Endless ? "endless" : "ladder";
+            string rules = logRun == null ? null : logRun.Endless ? logRun.FinaleRulesLine(" ") : Ladder.RulesLines(logRun.StepIndex);
+            PlayLog.MatchStart(mode, logRun?.MatchNumber ?? 0, _gameState.TargetScore, _player2.PlayerName, rules);
+            PlayLog.Event("hands",
+                ("you", _player1.Modifiers.ConvertAll(PlayLog.Name)),
+                ("them", _player2.Modifiers.ConvertAll(PlayLog.Name)));
+        }
+
         StartNewSet(); // UpdateUI enables the Draw Card / Hold buttons
 
         if (tutorial) _teaching.StartTutorial();
@@ -417,6 +428,7 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
     {
         _bot.ResetForTurn();  // the bot's re-opening is the bot's, not the deck's
         _table.DealTurn();    // ...and everything the cards do is the table's
+        PlayLog.TurnDealt(_player1.CurrentScore, _player2.CurrentScore);
         _ui.Refresh();
 
         if (_isVsBot) _bot.ProcessTurn();
@@ -442,6 +454,10 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
         if (_ui.Moments.Busy) return;
 
         if (_player1.CanAct || _player2.CanAct) return; // one side is still deciding
+
+        PlayLog.Event("turn_end",
+            ("you", _player1.CurrentScore), ("you_holding", _player1.IsHolding),
+            ("them", _player2.CurrentScore), ("them_holding", _player2.IsHolding));
 
         if (SetRules.IsSetOver(_player1, _player2, _gameState.TargetScore))
         {
@@ -612,8 +628,15 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
     List<CardEffect> ITableHost.UnlockedLocalSpecials() => Menus.UnlockedLocalSpecials();
     void ITableHost.DealBotHand() => _bot.DealHand();
 
-    void ITableHost.ShowDrawnCard(Player player, Card card, float delay) =>
+    void ITableHost.ShowDrawnCard(Player player, Card card, float delay)
+    {
+        PlayLog.Event("draw", ("side", SideOf(player)), ("card", PlayLog.Name(card)),
+            ("hidden", card.IsHidden ? (object)true : null), ("score", player.CurrentScore));
         _ui.InstantiateCardView(card, BoardOf(player), delay);
+    }
+
+    /// "you" / "them" (or "p1" / "p2" in local 2-player), for the play log.
+    private string SideOf(Player player) => PlayLog.Side(player == _player1, _isVsBot);
 
     void ITableHost.HandsDealt(bool introduceCards)
     {
@@ -657,7 +680,11 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
 
     void IBotTable.PlayBotModifier(Card card)
     {
+        int before = _player2.CurrentScore;
         _player2.PlayModifierCard(card, _gameState);
+        PlayLog.Event("modifier", ("side", SideOf(_player2)), ("card", PlayLog.Name(card)),
+            ("value", card.Value), ("hidden", card.IsHidden ? (object)true : null),
+            ("before", before), ("after", _player2.CurrentScore));
         if (!card.IsHidden) NoteModifierMet(card); // played at you, so you have met it - unless face down
         _ui.InstantiateCardView(card, _p2BoardContainer);
     }
@@ -718,8 +745,21 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
         int ownerBefore = owner.CurrentScore;
         int opponentBefore = opponent.CurrentScore;
 
-        if (!_table.TryPlayEffect(owner, card, chosen, out Table.EffectPlay play)) return false;
+        if (!_table.TryPlayEffect(owner, card, chosen, out Table.EffectPlay play))
+        {
+            PlayLog.Event("special_refused", ("side", SideOf(owner)), ("card", PlayLog.Name(card)),
+                ("reason", EffectRefusal(owner, card) ?? "resolve did nothing"),
+                ("you", _player1.CurrentScore), ("them", _player2.CurrentScore),
+                ("their_last_modifier", PlayLog.Name(opponent.LastPlayedModifier)),
+                ("their_special_this_turn", _table.EffectPlayedThisTurn(opponent)?.ToString()));
+            return false;
+        }
         Player target = play.Target;
+        PlayLog.Event("special", ("side", SideOf(owner)), ("card", PlayLog.Name(card)),
+            ("chosen", PlayLog.Name(chosen)), ("destroyed", PlayLog.Name(play.Destroyed)),
+            ("owner_before", ownerBefore), ("owner_after", owner.CurrentScore),
+            ("target_before", opponentBefore), ("target_after", target.CurrentScore),
+            ("reopened", play.Reopened), ("said", play.Narration));
 
         // Face-down cards this play named turn over (the hidden-card rule). Two are left to the
         // effect's own picture: a burned Veto card changes face at once and then burns, and the
@@ -937,6 +977,9 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
 
         string whyOneLine = why.Replace('\n', ' ');
         GD.Print($"Set over: {title} ({whyOneLine})");
+        PlayLog.Event(matchOver ? "match_end" : "set_end", ("result", title), ("why", whyOneLine),
+            ("you", _player1.CurrentScore), ("them", _player2.CurrentScore),
+            ("sets_you", _gameState.SetsWonPlayer1), ("sets_them", _gameState.SetsWonPlayer2));
 
         _setOverPending = true;
         _ui.Refresh(); // locks every button and Modifier; sides show Bust! / Holding
@@ -1096,6 +1139,8 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
         // A card that came back this turn through a Recall is not playable until the next one.
         if (IsRecallLocked(player, card))
         {
+            PlayLog.Event("modifier_refused", ("side", SideOf(player)), ("card", PlayLog.Name(card)),
+                ("reason", "recalled this turn"));
             SetSelection(player, card); // keep it under their finger so the status line explains
             _ui.Refresh();
             return;
@@ -1107,8 +1152,11 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
             return;
         }
 
+        int before = player.CurrentScore;
         if (player.PlayModifierCard(card, _gameState))
         {
+            PlayLog.Event("modifier", ("side", SideOf(player)), ("card", PlayLog.Name(card)),
+                ("value", card.Value), ("before", before), ("after", player.CurrentScore));
             _ui.InstantiateCardView(card, BoardOf(player));
         }
 
@@ -1140,6 +1188,14 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
         }
 
         SetSelection(player, card);
+        // A special that cannot be played right now says why on the status line - and the play
+        // log keeps that sentence, since "it told me no" is most of what testers report.
+        if (card.Effect != CardEffect.None && !_online)
+        {
+            string refusal = EffectRefusal(player, card);
+            if (refusal != null)
+                PlayLog.Event("refusal_shown", ("side", SideOf(player)), ("card", PlayLog.Name(card)), ("reason", refusal));
+        }
         _ui.SoundSlide();
         _ui.Refresh();
     }

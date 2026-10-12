@@ -21,6 +21,7 @@ The game saves the following on your device only. It is never sent to us:
 - Your progress (stages cleared, cards collected, your current run)
 - Your settings (volume, animations, battery saver)
 - Whether you own Remove Ads, so the game remembers it offline
+- If you turn on **Keep a play log** in Options (off by default): a record of your recent matches - the cards played, the scores, and why a card could not be played - plus your game version, device model and screen size. It stays on your device; it only leaves it if you press **Copy play log** and paste it into a message yourself.
 
 Uninstalling the game deletes this data.
 

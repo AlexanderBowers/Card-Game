@@ -375,8 +375,13 @@ public sealed partial class Menus
         }
         else if (runInProgress)
         {
-            continueButton = AddMenuButton($"Continue - Match {run.MatchNumber} of {Ladder.Length}",
-                          $"{run.CurrentOpponent}   -   target {run.CurrentTarget}",
+            // "Match 3 of 10" read as a best-of-ten with no score kept (tester feedback, 2026-10-12).
+            // The table and the banner call a rung a Stage, so the menu does too, and the run's
+            // progress is said as a count of wins rather than a fraction of a series.
+            int cleared = run.StepIndex;
+            string clearedText = cleared == 1 ? "1 stage cleared" : $"{cleared} stages cleared";
+            continueButton = AddMenuButton($"Continue - Stage {run.MatchNumber}",
+                          $"{clearedText}   -   {run.CurrentOpponent}   -   target {run.CurrentTarget}",
                           () => MenuStartRun(fresh: false));
         }
 

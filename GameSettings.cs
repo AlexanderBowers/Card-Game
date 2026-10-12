@@ -54,6 +54,10 @@ public static class GameSettings
     /// as well as on the phone (CloudSave). Off until the player turns it on.
     public static bool CloudSave { get; private set; }
 
+    /// Keep a play log on this device for bug reports (tester feedback, 2026-10-12). Off until the
+    /// player turns it on; test builds log regardless (see PlayLog.Enabled).
+    public static bool PlayLog { get; private set; }
+
     /// Raised after any change, so open screens can react (the table shows or hides debug rows).
     public static event Action Changed;
 
@@ -80,6 +84,7 @@ public static class GameSettings
             Table3D = cfg.GetValue("graphics", "table_3d", true).AsBool();
             ShowFps = cfg.GetValue("graphics", "show_fps", false).AsBool();
             CloudSave = cfg.GetValue("cloud", "enabled", false).AsBool();
+            PlayLog = cfg.GetValue("diagnostics", "play_log", false).AsBool();
         }
 
         Apply();
@@ -112,6 +117,7 @@ public static class GameSettings
     public static void SetTable3D(bool on) { EnsureLoaded(); Table3D = on; Commit(); }
     public static void SetShowFps(bool on) { EnsureLoaded(); ShowFps = on; Commit(); }
     public static void SetCloudSave(bool on) { EnsureLoaded(); CloudSave = on; Commit(); }
+    public static void SetPlayLog(bool on) { EnsureLoaded(); PlayLog = on; Commit(); }
 
     private static void Commit()
     {
@@ -168,6 +174,7 @@ public static class GameSettings
         cfg.SetValue("graphics", "table_3d", Table3D);
         cfg.SetValue("graphics", "show_fps", ShowFps);
         cfg.SetValue("cloud", "enabled", CloudSave);
+        cfg.SetValue("diagnostics", "play_log", PlayLog);
         // "debug/grid_board" (pass 22's stacked-board switch) is no longer written; an old
         // settings file keeps the stale key and nothing reads it.
 

@@ -27,6 +27,9 @@ public static class DebugLog
     public static void Write(string tag, string message)
     {
         if (Enabled) GD.Print($"[{Time.GetTimeStringFromSystem()}] {tag}: {message}");
+        // Release builds have no godot.log, but a player who turned the play log on gets these
+        // traces there too (cloud save's steps, mostly) - the reason they turned it on.
+        else if (PlayLog.Enabled) PlayLog.Event("note", ("tag", tag), ("msg", message));
     }
 
     private static readonly System.Collections.Generic.Dictionary<string, long> _counts = new();
