@@ -1,14 +1,18 @@
-# Privacy policy draft for the online release
+# Privacy policy for the online release
 
 **Do not publish this yet.** It replaces `PRIVACY.md` (the live policy URL) in the same release
-that ships the online features, and not before. `PRIVACY.md` §9 promises the policy will be
-updated before such a change ships.
+that ships the online features and cloud save, and not before. The live `PRIVACY.md` promises the
+policy will be updated before such a change ships.
 
 When it ships:
 
-- Copy the text below over `PRIVACY.md`.
-- Set the effective date.
-- Update **Play Console → App content → Data safety** to match (see the end of this file).
+1. Set the effective date below.
+2. Copy everything under the line over `PRIVACY.md`.
+3. Put up the account deletion page (`server/ACCOUNT_DELETION.md`) and paste its URL into Play
+   Console → App content → Data safety.
+4. Update the rest of the Data safety form to match (see the end of this file).
+
+Updated 2026-10-12: added cloud save (Google Play Games) and the opt-in play log.
 
 ---
 
@@ -23,11 +27,13 @@ package `com.cloudydaygames.criticalcount`), who handles it, and the choices you
 
 ## 1. The short version
 
-- **Offline play never needs the internet.** Everything except the online features works fully
-  offline.
+- **Offline play never needs the internet.** Everything except the online features and cloud
+  save works fully offline.
 - **Online is optional.** That means online matches, friends and the Endless leaderboard. If you
   use them, our game server keeps a small anonymous account for you: a random ID, the display
   name you choose, your friend list, and your best Endless streak.
+- **Cloud save is optional and off by default.** If you turn it on, your progress is saved in
+  your own Google Play Games account. It is not stored on our server.
 - **No email, phone number, real name or password, ever.** We never ask for them.
 - **We never store your IP address.** Other players never see your IP address or any other
   information about your device.
@@ -46,10 +52,32 @@ The game saves the following on your device:
 - whether you own Remove Ads
 - if you have used the online features, the random key that signs your device in to your
   anonymous online account
+- if you turn on **Keep a play log** in Options (off by default): a record of your recent matches
+  (the cards played, the scores, and why a card could not be played), plus the game version,
+  your device model and screen size. It is used to diagnose bugs. It stays on your device and
+  only leaves it if you press **Copy play log** and paste it somewhere yourself.
 
 Uninstalling the game deletes this data from the device.
 
-## 3. Online features
+## 3. Cloud save (Google Play Games)
+
+**Options → Cloud Save → Save progress to Google Play Games** is off until you turn it on.
+
+When it is on, the game signs in to Google Play Games and saves a copy of the following in your
+own Google Play Games account:
+
+- your progress (the same data the game keeps on your device)
+- if you have an online account, its random ID and secret key, so a new phone or a reinstall
+  keeps your online name, friends and leaderboard place
+
+This copy is stored by Google, not by us. We never receive it, and our game server is not
+involved. Google handles it under the Google Privacy Policy: https://policies.google.com/privacy
+
+Turning cloud save off stops the game from saving to Google Play Games. It does not delete the
+copy already there. You can delete it from your Google Play Games settings, or from your Google
+Account's data and privacy settings.
+
+## 4. Online features
 
 The online features are run on a game server operated by Cloudy Day Games. They are:
 
@@ -85,6 +113,7 @@ Other players never see your IP address, your device or any other information ab
 - real names
 - locations
 - match histories
+- play logs
 
 To limit abuse (for example, mass account creation), the server counts recent requests per IP
 address in memory for a few minutes, then forgets them. These counts are never written to disk
@@ -108,11 +137,11 @@ its own privacy policy: https://www.cloudflare.com/privacypolicy/
 blocks, reports and leaderboard entry from the server, immediately. Your offline progress on the
 device is not affected.
 
-If you can no longer open the game (for example, after uninstalling it), the account cannot be
-linked to you and is never associated with your identity. You can still write to us and we will
-help where we can.
+If you can no longer open the game, see https://_(deletion page URL)_ for how to ask us to delete
+your account instead. The account is anonymous and is never linked to your identity, so we will
+ask you for your display name with its four-digit number, or your friend code, to find it.
 
-## 4. Advertising (Google AdMob)
+## 5. Advertising (Google AdMob)
 
 The free version of Critical Count shows ads through Google AdMob, a service of Google LLC. Ads
 are only requested when your device is online; without a connection the game simply plays
@@ -134,7 +163,7 @@ categories such as gambling.
 - How Google uses this information: https://policies.google.com/technologies/partner-sites
 - Google Privacy Policy: https://policies.google.com/privacy
 
-## 5. Your choices
+## 6. Your choices
 
 - **Consent (EEA, UK and Switzerland):** before any ad is requested, Google's consent form asks
   whether you agree to personalized advertising. You may decline.
@@ -145,26 +174,31 @@ categories such as gambling.
 - **No ads at all:** buy Remove Ads.
 - **No online account at all:** don't use the online features; the rest of the game works
   without one.
+- **No cloud copy:** leave cloud save off (the default), or turn it off and delete the copy in
+  Google Play Games.
+- **No play log:** leave Keep a play log off (the default). Turning it off stops new entries;
+  uninstalling removes the log.
 
-## 6. In-app purchases (Google Play)
+## 7. In-app purchases (Google Play)
 
 Remove Ads is sold through Google Play Billing. Google processes the payment; we never see your
 payment details, name or email address.
 
-## 7. Children
+## 8. Children
 
 Critical Count is not directed at children under 13, and we do not knowingly collect personal
 information from children under 13. If you believe a child under 13 has created an online
 account, contact us and we will delete it.
 
-## 8. Security and retention
+## 9. Security and retention
 
 - Online account data is kept until you delete the account.
 - Name reports are cleared when the name they were about is reset.
 - Data on your device stays there until you uninstall the game.
+- A cloud save stays in your Google Play Games account until you delete it there.
 - Information collected by Google or Cloudflare is kept according to their own policies.
 
-## 9. Your rights
+## 10. Your rights
 
 Depending on where you live (for example under the GDPR or US state privacy laws), you may have
 the right to:
@@ -174,12 +208,12 @@ the right to:
 
 You can delete your online account yourself in the game, or contact us.
 
-## 10. Changes to this policy
+## 11. Changes to this policy
 
 We will update this policy, and the effective date above, before any change that affects your
 privacy ships.
 
-## 11. Contact
+## 12. Contact
 
 **cloudydaygamesllc@gmail.com**
 
@@ -196,6 +230,13 @@ privacy ships.
   App functionality and Account management.
 - **App activity → App interactions.** This covers friends and leaderboard: collected, purpose
   App functionality.
+- **Cloud save, decide before submitting.** The save goes to the player's own Play Games account
+  through Google's Saved Games API, and we never receive it. Play counts data an app sends off
+  the device, including to Google services, so the cautious answer is to declare it:
+  **App activity → Other actions** (game progress), optional, purpose App functionality, not
+  shared. Re-check Google's current Data safety help for Play Games Services before choosing.
+- **Play log: not collected.** It never leaves the device unless the player copies and pastes it
+  themselves.
 
 ### Security answers
 
@@ -203,6 +244,4 @@ privacy ships.
 - **Can users request deletion:** now **Yes**, from inside the app.
 - **Account creation:** the app creates an anonymous account. Google's account-deletion
   requirement is met in-app (Options → Online → Delete Online Account).
-  - Play also asks for a web link for deletion requests. Point it at a short page on the
-    developer site that explains in-app deletion, and offers email for anyone who has
-    uninstalled.
+- **Delete account URL:** the page from `server/ACCOUNT_DELETION.md`, once it is hosted.
