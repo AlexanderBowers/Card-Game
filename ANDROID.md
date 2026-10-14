@@ -37,6 +37,8 @@ There are two update loops. Use both:
 downloads Godot 4.7.2 .NET + templates, exports a debug APK, stamps `versionCode` with the run number, and publishes a GitHub Release tagged `android-v<N>` with `CriticalCount.apk` attached.
 
 ### 3a. Shared signing key (do this once — important)
+**Done 2026-10-10:** the secret holds the PC's own `%USERPROFILE%\.android\debug.keystore` (SHA-1 `27:30:E8:5E:47:08:0E:6A:2F:84:57:93:B4:62:EF:C7:05:FC:5F:BF`), the same key the Godot editor uses. Before this, every CI build was signed with a throwaway key: Obtainium could not update in place, and Google Play Games refused every test build. That SHA-1 with package `com.alexbowers.criticalcount` is registered as the "Test builds" OAuth client and Play Games credential, so cloud save signs in on test builds too.
+
 Android refuses to install an update unless it is signed with the same key as the installed app. Generate one key and store it as a repo secret so every CI build uses it:
 
 ```powershell

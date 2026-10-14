@@ -320,9 +320,18 @@ public partial class ShopOverlay : Control
         _subtitle = OverlayUi.MakeLabel("", 22, OverlayUi.Muted);
         top.AddChild(_subtitle);
 
-        // The offers fill everything between the header and the button, centred in it.
-        CenterContainer middle = new CenterContainer { SizeFlagsVertical = Control.SizeFlags.ExpandFill };
-        box.AddChild(middle);
+        // The offers fill everything between the header and the button, centred in it. Inside a
+        // DragScroll as a last resort: the layout below shrinks the cards until everything fits,
+        // but a phone's text-size setting can still outgrow that (tester feedback, 2026-10-12: a
+        // OnePlus 11 cut the rule text off), and scrolling beats clipping every time.
+        DragScroll scroll = new DragScroll { SizeFlagsVertical = Control.SizeFlags.ExpandFill };
+        box.AddChild(scroll);
+        CenterContainer middle = new CenterContainer
+        {
+            SizeFlagsVertical = Control.SizeFlags.ExpandFill,
+            SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+        };
+        scroll.AddChild(middle);
         _offerGrid = new GridContainer { Columns = 2 };
         _offerGrid.AddThemeConstantOverride("h_separation", CellGap);
         _offerGrid.AddThemeConstantOverride("v_separation", CellGap);
@@ -442,8 +451,35 @@ public partial class ShopOverlay : Control
         float width = Mathf.Clamp(Mathf.Min(byWidth, byHeight), 60f, 360f);
         _cardSize = new Vector2(Mathf.Floor(width), Mathf.Floor(width * aspect));
         _offerGrid.Columns = _columns;
+        _roomHeight = room.Y;
+        _rows = rows;
+        _fitPasses = 0;
 
         Refresh();
+        CallDeferred(nameof(FitOffers));
+    }
+
+    private float _roomHeight;
+    private int _rows = 1;
+    private int _fitPasses;
+
+    /// The fixed allowance for the text under a card (`below`) is a guess, and on some phones it is
+    /// a bad one: a larger system text size, or a narrow cell that wraps a rule onto four lines,
+    /// and the bottom row ran off the panel (tester feedback, 2026-10-12, OnePlus 11). So once the
+    /// offers have been built and measured, shrink the cards by whatever the grid overran and build
+    /// again - a few passes at most, then the scroll takes whatever is left.
+    private void FitOffers()
+    {
+        if (!Visible || _offerGrid == null || _fitPasses >= 4) return;
+        float over = _offerGrid.GetCombinedMinimumSize().Y - _roomHeight;
+        if (over <= 2f || _cardSize.X <= 60f) return;
+        _fitPasses++;
+
+        float aspect = TableUi.BaseCardSize.Y / TableUi.BaseCardSize.X;
+        float width = Mathf.Max(60f, _cardSize.X - Mathf.Ceil(over / Math.Max(1, _rows) / aspect) - 2f);
+        _cardSize = new Vector2(Mathf.Floor(width), Mathf.Floor(width * aspect));
+        Refresh();
+        CallDeferred(nameof(FitOffers));
     }
 
     // ------------------------------------------------------------------

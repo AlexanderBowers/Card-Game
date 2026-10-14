@@ -7,6 +7,8 @@
   <!-- tests/ is its own project (dotnet test tests/AimFor20.Tests); keep it out of the game. -->
   <ItemGroup>
     <Compile Remove="tests/**" />
+    <!-- server/ is the online server (its own projects; see server/DEPLOY.md). -->
+    <Compile Remove="server/**" />
     <!-- The AdMob plugin ships sample scenes; they were deleted, and this keeps a plugin update from compiling them back in. -->
     <Compile Remove="addons/admob/csharp/sample/**" />
   </ItemGroup>

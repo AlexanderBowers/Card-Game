@@ -130,6 +130,24 @@ public partial class TableWorld3D : Node3D
         _mat.CastShadow = GeometryInstance3D.ShadowCastingSetting.Off;
         AddChild(_mat);
 
+        // The target, written into the board's emblem (2026-10-08: the art's disc is empty now, see
+        // TableUi.UpdateEmblem). It lies flat on the board a hair above it, so it tilts with the
+        // table and every card lands on top of it. Drawn before other see-through pieces, which
+        // all sit higher.
+        _emblem = new Label3D
+        {
+            Shaded = false,
+            DoubleSided = false,
+            FontSize = EmblemFontSize,
+            OutlineSize = 0,
+            RenderPriority = -1,
+            CastShadow = GeometryInstance3D.ShadowCastingSetting.Off,
+            RotationDegrees = new Vector3(-90f, 0f, 0f), // face up, text upright to the camera
+            Position = new Vector3(0f, 0.002f, 0f),
+        };
+        if (TableUi.EmblemFont != null) _emblem.Font = TableUi.EmblemFont;
+        AddChild(_emblem);
+
         // The room: a flat, unlit near-white floor the same colour as the background, so there is
         // no horizon - the board just sits in a bright space.
         StandardMaterial3D floorMaterial = new StandardMaterial3D
@@ -412,7 +430,23 @@ public partial class TableWorld3D : Node3D
             _matSize = size;
             _mat.Mesh = BuildBoard(size.X, size.Y);
             _boardMaterial.SetShaderParameter("board_size", size);
+
+            // The emblem's number scales with the board, exactly as the painted "20" did.
+            float shortSide = Mathf.Min(size.X, size.Y);
+            _emblem.PixelSize = TableUi.EmblemEm * shortSide / EmblemFontSize;
+            _emblem.Position = new Vector3(0f, 0.002f, TableUi.EmblemDrop * shortSide); // +Z is down the screen
         }
+    }
+
+    private Label3D _emblem;
+    private const int EmblemFontSize = 160; // the glyphs' texture size; PixelSize sets the drawn size
+
+    /// What the board's emblem says (empty for a plain disc) and in what colour (TableUi decides).
+    public void SetEmblem(string text, Color ink)
+    {
+        if (_emblem == null) return;
+        if (_emblem.Text != text) _emblem.Text = text;
+        if (_emblem.Modulate != ink) _emblem.Modulate = ink;
     }
 
     /// The board: a rounded rectangle (MatCorner) with a rounded top edge (EdgeRadius) and straight

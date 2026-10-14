@@ -132,11 +132,24 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
                 if (arg == "--autostart=solo") autoRun = true;
                 if (arg == "--autostart=local") autoLocal2P = true;
                 if (arg == "--mirror") _mirrorToggle.SetPressedNoSignal(true);
+                if (arg == "--online-autoqueue") Menus.PendingOnlineQueue = true; // straight onto Quick Match
+                // "--target=23": local 2-player's target, to look at the board's emblem off 20.
+                if (arg.StartsWith("--target=") && int.TryParse(arg["--target=".Length..], out int target))
+                    Menus.Local2PlayerTarget = target;
+                if (arg == "--hidden-cards") _debugHiddenCards = true;
+                if (arg == "--autoplay") StartDebugAutoplay();
+                // "--stage=34": the solo autostart plays that rung (the debug row's jump, by number).
+                if (arg.StartsWith("--stage=") && int.TryParse(arg["--stage=".Length..], out int stage))
+                    RunData.Instance?.DebugJumpToStep(stage - 1);
             }
         }
 
         if (autoRun || autoLocal2P) Callable.From(() => StartMatch(local2Player: autoLocal2P)).CallDeferred();
         else _menus.ShowStartMenu();
+
+        // "--options": open Options over the start menu (Movie Maker screenshots of that screen).
+        if (OS.IsDebugBuild() && System.Array.IndexOf(OS.GetCmdlineUserArgs(), "--options") >= 0)
+            Callable.From(() => OpenOptions()).CallDeferred();
     }
 
     public override void _ExitTree()
@@ -144,6 +157,7 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
         if (GetTree() != null) GetTree().Root.SizeChanged -= _ui.ApplyResponsiveLayout;
         // A static event outlives the scene; a Restart would otherwise leave it calling a freed table.
         GameSettings.Changed -= OnSettingsChanged;
+        DetachOnline(); // the Online autoload outlives this scene
     }
 
     // ------------------------------------------------------------------
@@ -189,6 +203,14 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
 
     private void RestartScene(bool sameMatch)
     {
+        // An online match cannot be restarted from here: leaving it is a forfeit, and the way back
+        // in is the Online menu (which Play Again opens straight onto the queue).
+        if (_online)
+        {
+            OnlineLeave();
+            sameMatch = false;
+        }
+
         // Reloading the scene rebuilds GameManager, GameState and both Players from scratch,
         // so this fully resets the match (set wins, scores, hands).
         if (sameMatch && _isGameStarted)
@@ -255,6 +277,17 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
 
         _table.DealMatchHands(); // the hand has to last all three sets of the match
 
+        if (PlayLog.Enabled)
+        {
+            RunData logRun = _inRun ? RunData.Instance : null;
+            string mode = !_isVsBot ? "local2p" : logRun == null ? "solo" : logRun.Endless ? "endless" : "ladder";
+            string rules = logRun == null ? null : logRun.Endless ? logRun.FinaleRulesLine(" ") : Ladder.RulesLines(logRun.StepIndex);
+            PlayLog.MatchStart(mode, logRun?.MatchNumber ?? 0, _gameState.TargetScore, _player2.PlayerName, rules);
+            PlayLog.Event("hands",
+                ("you", _player1.Modifiers.ConvertAll(PlayLog.Name)),
+                ("them", _player2.Modifiers.ConvertAll(PlayLog.Name)));
+        }
+
         StartNewSet(); // UpdateUI enables the Draw Card / Hold buttons
 
         if (tutorial) _teaching.StartTutorial();
@@ -280,7 +313,21 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
         }
 
         string title = run.Endless ? $"Endless Match {run.EndlessStreak + 1}" : $"Stage {run.MatchNumber}";
-        StageIntro.Play(this, title, $"Target: {_gameState.TargetScore}{run.FinaleRulesLine("\n")}", () =>
+        // A target that changes quietly is the game changing its own rules behind the player's back,
+        // so a move is said here, once (it was a line in the middle of the table all stage until
+        // 2026-10-08, when the target went into the board's emblem and that line would cover it).
+        string moved = (run.TargetMovedThisStage && !run.CurrentStep.Randomised)
+            ? $"  ({(run.CurrentTarget > run.PreviousTarget ? "up" : "down")} from {run.PreviousTarget})"
+            : string.Empty;
+        // The rung's rules are said where the target is (no full stop: tutorial style) - face down,
+        // the deck's shape, refill, a moving target. Endless plays stage 10's: face down only.
+        string rules = run.Endless
+            ? (_gameState.HiddenOpponent ? "Face down after two cards" : string.Empty)
+            : Ladder.RulesLines(run.StepIndex);
+        if (!run.Endless && _debugHiddenCards && !run.CurrentStep.HidesOpponentCards)
+            rules = string.IsNullOrEmpty(rules) ? "Face down after two cards" : rules;
+        if (rules.Length > 0) rules = "\n" + rules;
+        StageIntro.Play(this, title, $"Target: {_gameState.TargetScore}{moved}{run.FinaleRulesLine("\n")}{rules}", () =>
         {
             _arrivalPending = false;
             _ui.DeferRefresh();
@@ -311,8 +358,33 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
 
         _inRun = true;
         _gameState.TargetScore = run.CurrentTarget;
+        // The rung's rules. Endless plays on stage 10's (face down, standard deck, no refill).
+        LadderStep step = run.CurrentStep;
+        _gameState.HiddenOpponent = step.HidesOpponentCards || _debugHiddenCards;
+        _gameState.FaceUpCards = step.FaceUpCards;
+        _gameState.Deck = step.Deck;
+        _gameState.DeckChangesEachSet = step.DeckChangesEachSet;
+        _gameState.RefillHands = step.Refill;
+        _gameState.TargetMovesEachSet = step.TargetMovesEachSet;
         _player2.PlayerName = run.CurrentOpponent;
         _ui.ApplyRankTheme();
+    }
+
+    /// Debug builds: "-- --hidden-cards" plays any rung face down, for looking at the rule.
+    private static bool _debugHiddenCards;
+
+    /// Debug builds: "-- --autoplay" presses your Draw Card / Hold in a solo match (Draw below 16,
+    /// Hold from there), so a Movie Maker run plays whole turns with nobody at the table. It stops
+    /// at the set-end panel, which is usually the picture wanted.
+    private void StartDebugAutoplay()
+    {
+        Timer timer = new Timer { WaitTime = 1.6, Autostart = true };
+        AddChild(timer);
+        timer.Timeout += () =>
+        {
+            if (_online || !_isVsBot || TableArriving || _ui.Moments.Busy || !HumanCanActFor(_player1)) return;
+            FinishTurn(_player1, hold: _player1.CurrentScore >= 16);
+        };
     }
 
 
@@ -328,6 +400,14 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
         _ui.FillBoardWithSlots(_p2BoardContainer);
 
         _table.StartSet(); // a fresh forty, and the next turn is this set's opening one
+
+        // Stages 30 and 41-50: a rule that moved between sets is said as the set starts - the
+        // emblem shows a moved target too, but a number changing quietly is the game changing its
+        // own rules behind the player's back.
+        List<string> news = new List<string>();
+        if (_table.TargetMovedThisSet) news.Add($"New target: {_gameState.TargetScore}");
+        if (_table.DeckChangedThisSet) news.Add(DeckShapes.Label(_gameState.Deck));
+        if (news.Count > 0) _ui.Toasts.ShowEffectBanner(string.Join("   -   ", news));
 
         DealCards();
     }
@@ -348,6 +428,7 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
     {
         _bot.ResetForTurn();  // the bot's re-opening is the bot's, not the deck's
         _table.DealTurn();    // ...and everything the cards do is the table's
+        PlayLog.TurnDealt(_player1.CurrentScore, _player2.CurrentScore);
         _ui.Refresh();
 
         if (_isVsBot) _bot.ProcessTurn();
@@ -357,6 +438,13 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
     /// Does nothing until BOTH players are done; then either ends the set or deals again.
     private void ResolveTurn()
     {
+        // Online, the server decides every turn and every set; this phone only draws what it says.
+        // (TableMoments.Idle still calls here after an animation - online that is just a repaint.)
+        if (_online)
+        {
+            _ui.Refresh();
+            return;
+        }
         if (!_isGameStarted || _gameState.IsGameOver || _setOverPending) return;
 
         // Paint first: a Hold that has just happened starts its padlock from this refresh. Then,
@@ -366,6 +454,10 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
         if (_ui.Moments.Busy) return;
 
         if (_player1.CanAct || _player2.CanAct) return; // one side is still deciding
+
+        PlayLog.Event("turn_end",
+            ("you", _player1.CurrentScore), ("you_holding", _player1.IsHolding),
+            ("them", _player2.CurrentScore), ("them_holding", _player2.IsHolding));
 
         if (SetRules.IsSetOver(_player1, _player2, _gameState.TargetScore))
         {
@@ -412,7 +504,7 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
     bool ITeachingHost.InRun => _inRun;
     bool ITeachingHost.SetOverPending => _setOverPending;
     bool ITeachingHost.PromptShowing => _prompts.Showing;
-    void ITeachingHost.ReleaseBot() => _bot.ProcessTurn();
+    void ITeachingHost.ReleaseBot() { if (!_online) _bot.ProcessTurn(); } // online there is no bot
     Card ITeachingHost.SelectedFor(Player player) => SelectedFor(player);
     void ITeachingHost.CollectionComplete() => AnnounceCollectionComplete();
 
@@ -455,17 +547,37 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
     GameState ITableUiHost.State => _gameState;
     Table ITableUiHost.Table => _table;
     bool ITableUiHost.GameStarted => _isGameStarted;
-    bool ITableUiHost.VsBot => _isVsBot;
+    // Online looks like a match against the bot: one set of buttons, the opponent across the table.
+    bool ITableUiHost.VsBot => _isVsBot || _online;
+    bool ITableUiHost.IsOnlineMatch => _online;
     bool ITableUiHost.InRun => _inRun;
     bool ITableUiHost.SetOverPending => _setOverPending;
 
     Card ITableUiHost.SelectedFor(Player player) => SelectedFor(player);
     bool ITableUiHost.CanAct(Player player) => HumanCanActFor(player);
     bool ITableUiHost.CanPlayEffect(Player owner, Card card) => CanPlayEffect(owner, card);
+    bool ITableUiHost.HitsTarget(Player player, Card card) => HitsTarget(player, card);
+
+    /// Would playing this hand card put the player exactly on the target, right now? The table
+    /// pulses it the way the tutorial pulses its one right answer (2026-10-08).
+    ///
+    /// Only for a person playing alone - vs the bot or online. In local 2-player both hands are on
+    /// one screen, and a pulsing card would tell the player opposite what you are holding. Not
+    /// during a lesson, which points at its own cards.
+    private bool HitsTarget(Player player, Card card)
+    {
+        if (player != _player1 || !(_isVsBot || _online) || _teaching.Running) return false;
+        if (!CanPlayModifierNow(player, card) || !HumanCanActFor(player)) return false;
+
+        int needed = _gameState.TargetScore - player.CurrentScore;
+        if (needed == 0) return false; // already there: Hold is the move, not another card
+        return card.Value == needed || (card.CanFlipValue && -card.Value == needed);
+    }
     string ITableUiHost.StatusFor(Player player) => StatusFor(player);
     // Pass 33: the stage line only. Whose move it is was said three times over ("Both players: play
     // or draw" here, "Your move" on each side) - the buttons say it now, by reading "Waiting...".
     string ITableUiHost.SetInfoLine() => RunHeader();
+    bool ITableUiHost.SetInfoIsTarget => !_online;
     void ITableUiHost.ValidateSelections() => ValidateSelections();
     void ITableUiHost.ModifierPressed(Player player, Card card) => OnModifierCardPressed(player, card);
     void ITableUiHost.PlayPressed(Player player) => PlaySelectedCard(player);
@@ -516,8 +628,15 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
     List<CardEffect> ITableHost.UnlockedLocalSpecials() => Menus.UnlockedLocalSpecials();
     void ITableHost.DealBotHand() => _bot.DealHand();
 
-    void ITableHost.ShowDrawnCard(Player player, Card card, float delay) =>
+    void ITableHost.ShowDrawnCard(Player player, Card card, float delay)
+    {
+        PlayLog.Event("draw", ("side", SideOf(player)), ("card", PlayLog.Name(card)),
+            ("hidden", card.IsHidden ? (object)true : null), ("score", player.CurrentScore));
         _ui.InstantiateCardView(card, BoardOf(player), delay);
+    }
+
+    /// "you" / "them" (or "p1" / "p2" in local 2-player), for the play log.
+    private string SideOf(Player player) => PlayLog.Side(player == _player1, _isVsBot);
 
     void ITableHost.HandsDealt(bool introduceCards)
     {
@@ -561,19 +680,31 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
 
     void IBotTable.PlayBotModifier(Card card)
     {
+        int before = _player2.CurrentScore;
         _player2.PlayModifierCard(card, _gameState);
-        NoteModifierMet(card); // played at you, so you have met it
+        PlayLog.Event("modifier", ("side", SideOf(_player2)), ("card", PlayLog.Name(card)),
+            ("value", card.Value), ("hidden", card.IsHidden ? (object)true : null),
+            ("before", before), ("after", _player2.CurrentScore));
+        if (!card.IsHidden) NoteModifierMet(card); // played at you, so you have met it - unless face down
         _ui.InstantiateCardView(card, _p2BoardContainer);
     }
 
     async Task<bool> IBotTable.Pause(double seconds)
     {
+        // Nothing happens until the table has arrived: the camera's swing-in and the stage banner
+        // (playtest, 2026-10-07: the bot played a Modifier and held while the camera was still
+        // panning). Waited out BEFORE the thinking time, so the bot still takes its usual beat
+        // after the banner leaves instead of acting the frame it goes.
+        while (IsInsideTree() && TableArriving)
+            await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+        if (!IsInsideTree()) return false;
+
         await ToSignal(GetTree().CreateTimer(seconds), SceneTreeTimer.SignalName.Timeout);
         // The bot does not act half way through a big moment (yours or its own): it waits for
         // the picture to catch up, as you have to.
         // Nor while a coach mark is explaining a card: the player is reading, not playing
         // (2026-10-06: the bot held under a Copy coach mark).
-        while (IsInsideTree() && (_ui.Moments.Busy || _teaching.CoachShowing))
+        while (IsInsideTree() && (_ui.Moments.Busy || _teaching.CoachShowing || TableArriving))
             await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
         return IsInsideTree(); // false: the scene was restarted or exited while it waited
     }
@@ -588,22 +719,68 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
     /// Can this player play this ORDINARY modifier right now? The only rule is the Recall lock -
     /// everything else about a plain card is decided by the player's own arithmetic.
     private bool CanPlayModifierNow(Player owner, Card card) =>
-        card != null && card.Effect == CardEffect.None && !_table.IsRecallLocked(owner, card);
+        card != null && card.Effect == CardEffect.None && !IsRecallLocked(owner, card);
 
-    private bool CanPlayEffect(Player owner, Card card) => _table.CanPlayEffect(owner, card);
+    private bool IsRecallLocked(Player owner, Card card) =>
+        _online ? OnlineRecallLocked(card) : _table.IsRecallLocked(owner, card);
+
+    private bool CanPlayEffect(Player owner, Card card) =>
+        _online ? OnlineCanPlayEffect(owner, card) : _table.CanPlayEffect(owner, card);
     private string EffectRefusal(Player owner, Card card) => _table.EffectRefusal(owner, card);
 
     /// Plays an effect card (Table.TryPlayEffect decides what it does) and shows it: the vetoed
     /// card burning, the effect card landing, any redrawn faces, the banner and the coach mark.
     private bool PlayEffectCard(Player owner, Card card, Card chosen = null)
     {
+        // Online, the server plays it; the next state shows what it did.
+        if (_online)
+        {
+            if (!OnlineCanPlayEffect(owner, card)) return false;
+            OnlinePlay(card, chosen);
+            return true;
+        }
+
         // The numbers as they were, for the moments that tick a score over on impact.
         Player opponent = _table.OpponentOf(owner);
         int ownerBefore = owner.CurrentScore;
         int opponentBefore = opponent.CurrentScore;
 
-        if (!_table.TryPlayEffect(owner, card, chosen, out Table.EffectPlay play)) return false;
+        if (!_table.TryPlayEffect(owner, card, chosen, out Table.EffectPlay play))
+        {
+            PlayLog.Event("special_refused", ("side", SideOf(owner)), ("card", PlayLog.Name(card)),
+                ("reason", EffectRefusal(owner, card) ?? "resolve did nothing"),
+                ("you", _player1.CurrentScore), ("them", _player2.CurrentScore),
+                ("their_last_modifier", PlayLog.Name(opponent.LastPlayedModifier)),
+                ("their_special_this_turn", _table.EffectPlayedThisTurn(opponent)?.ToString()));
+            return false;
+        }
         Player target = play.Target;
+        PlayLog.Event("special", ("side", SideOf(owner)), ("card", PlayLog.Name(card)),
+            ("chosen", PlayLog.Name(chosen)), ("destroyed", PlayLog.Name(play.Destroyed)),
+            ("owner_before", ownerBefore), ("owner_after", owner.CurrentScore),
+            ("target_before", opponentBefore), ("target_after", target.CurrentScore),
+            ("reopened", play.Reopened), ("said", play.Narration));
+
+        // Simultaneous play's one race (tester feedback, 2026-10-12): you pick up a Copy, its line
+        // says "your 4 becomes a 6: 18 to 24", and the bot's Trade Totals lands before your tap -
+        // so the tap plays a card whose preview described a score you no longer have. A special
+        // that changed YOUR score or hand puts whatever you were holding back in your hand; the
+        // banner says what happened, and the next pick-up previews the table as it is now.
+        bool touchedTarget = card.Effect == CardEffect.TradeTotals || card.Effect == CardEffect.TradeHands
+                          || card.Effect == CardEffect.Shave || card.Effect == CardEffect.Veto;
+        if (touchedTarget && target != owner && SelectedFor(target) != null)
+        {
+            PlayLog.Event("selection_dropped", ("side", SideOf(target)), ("card", PlayLog.Name(SelectedFor(target))),
+                ("because", PlayLog.Name(card)));
+            SetSelection(target, null);
+        }
+
+        // Face-down cards this play named turn over (the hidden-card rule). Two are left to the
+        // effect's own picture: a burned Veto card changes face at once and then burns, and the
+        // bot's drawn card under its own Copy turns as the Copy flips it.
+        List<Card> flip = play.Revealed;
+        if (card.Effect == CardEffect.Copy && owner == _player2) flip = flip.FindAll(c => c != owner.LastDrawnCard);
+        _ui.RevealCards(flip, instant: play.Destroyed);
 
         // The vetoed card leaves the table. Burn it BEFORE the Veto card drops, so the eye follows
         // the card being destroyed rather than the one arriving - a score that ticks down on its
@@ -638,10 +815,11 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
         if (CardEffects.RewritesDrawnCards(card.Effect))
         {
             _ui.PlayCopy(owner, ownerBefore, target, BoardOf(owner), BoardOf(target));
-            _ui.RefreshCardFace(CardEffects.CopySource(target), BoardOf(target));
+            Card source = CardEffects.CopySource(target);
+            if (!play.Revealed.Contains(source)) _ui.RefreshCardFace(source, BoardOf(target)); // a revealed one is mid-flip
         }
 
-        _ui.Toasts.ShowEffectBanner(play.Result.Narration); // the player has to SEE it
+        _ui.Toasts.ShowEffectBanner(play.Narration); // the player has to SEE it
 
         // The ladder's promise, kept: you meet a card when it is used on you, and the game says
         // once what it was. Only the bot's cards - your own were introduced when you were dealt them.
@@ -672,6 +850,7 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
     /// True when this particular player can be driven by a person right now.
     private bool HumanCanActFor(Player player)
     {
+        if (_online) return OnlineCanAct(player); // the server says whose move it is
         if (!HumanCanAct() || !player.CanAct) return false;
         if (_isVsBot && player == _player2) return false; // the bot drives itself
         return true;
@@ -686,6 +865,11 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
     /// out for the rest of the set. Nothing is decided until the other player is done too.
     private void FinishTurn(Player player, bool hold)
     {
+        if (_online)
+        {
+            OnlineFinishTurn(hold);
+            return;
+        }
         if (!HumanCanActFor(player)) return;
 
         SetSelection(player, null); // a card that was only picked up is put back, not spent
@@ -717,6 +901,10 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
     {
         // A rescue card lasts the set it was given in, played or not (monetization-spec.md §3.4).
         _player1.DiscardRescueCards();
+
+        // The hidden-card rule: the set is decided, so the bot's board turns over and the result
+        // can be read off the table. Before the refresh below, so the scores are whole numbers again.
+        _ui.RevealCards(_table.RevealOpponentBoard());
 
         SetRules.Outcome outcome = SetRules.Describe(_player1.PlayerName, _player1.CurrentScore,
                                                      _player2.PlayerName, _player2.CurrentScore,
@@ -763,7 +951,8 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
             else if (run != null)
             {
                 bool wasEndless = run.Endless;
-                buttonText = "Start New Run";
+                // A loss above stage 10 restarts at the tier's first stage, and the button says where.
+                buttonText = (!wasEndless && run.CheckpointStep > 0) ? $"Restart at Stage {run.CheckpointStep + 1}" : "Start New Run";
                 next = () =>
                 {
                     if (wasEndless) RunData.Instance.StartEndless();
@@ -802,6 +991,9 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
 
         string whyOneLine = why.Replace('\n', ' ');
         GD.Print($"Set over: {title} ({whyOneLine})");
+        PlayLog.Event(matchOver ? "match_end" : "set_end", ("result", title), ("why", whyOneLine),
+            ("you", _player1.CurrentScore), ("them", _player2.CurrentScore),
+            ("sets_you", _gameState.SetsWonPlayer1), ("sets_them", _gameState.SetsWonPlayer2));
 
         _setOverPending = true;
         _ui.Refresh(); // locks every button and Modifier; sides show Bust! / Holding
@@ -818,12 +1010,13 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
 
     private string RunHeader()
     {
-        RunData run = _inRun ? RunData.Instance : null;
-        if (run == null) return string.Empty;
+        if (_online) return OnlineHeader(); // the turn clock
         // Alexander, 2026-09-30: the middle of the table shows the TARGET, not the stage - "if it's
         // 20, just say 20". The stage is announced once, by the slide-in at the start of the match.
-        int target = _gameState.TargetScore;
-        return target == 20 ? "20" : $"Target\u00A0{target}"; // never wrapped as "Targe" / "t 23"
+        // 2026-10-08 (Chuck's playtest): the target is now written INTO the board's emblem, under the
+        // cards (TableUi.UpdateEmblem), in every offline mode - so this line has nothing left to say
+        // mid-set. It is still where a set's end is announced (EndSet) and, online, the clock.
+        return string.Empty;
     }
 
     /// Drops the run one rung either way and walks straight into that match (the debug row).
@@ -897,7 +1090,7 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
         if (picked != null)
         {
             if (picked.Effect != CardEffect.None) return _table.EffectPreview(player, picked);
-            if (_table.IsRecallLocked(player, picked)) return "Just recalled - playable from your next turn";
+            if (IsRecallLocked(player, picked)) return "Just recalled - playable from your next turn";
             // A plain Modifier says nothing here: its result is shown on the score itself.
         }
 
@@ -958,15 +1151,26 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
         }
 
         // A card that came back this turn through a Recall is not playable until the next one.
-        if (_table.IsRecallLocked(player, card))
+        if (IsRecallLocked(player, card))
         {
+            PlayLog.Event("modifier_refused", ("side", SideOf(player)), ("card", PlayLog.Name(card)),
+                ("reason", "recalled this turn"));
             SetSelection(player, card); // keep it under their finger so the status line explains
             _ui.Refresh();
             return;
         }
 
+        if (_online)
+        {
+            OnlinePlay(card); // the server plays it; the next state puts it on the board
+            return;
+        }
+
+        int before = player.CurrentScore;
         if (player.PlayModifierCard(card, _gameState))
         {
+            PlayLog.Event("modifier", ("side", SideOf(player)), ("card", PlayLog.Name(card)),
+                ("value", card.Value), ("before", before), ("after", player.CurrentScore));
             _ui.InstantiateCardView(card, BoardOf(player));
         }
 
@@ -998,6 +1202,14 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
         }
 
         SetSelection(player, card);
+        // A special that cannot be played right now says why on the status line - and the play
+        // log keeps that sentence, since "it told me no" is most of what testers report.
+        if (card.Effect != CardEffect.None && !_online)
+        {
+            string refusal = EffectRefusal(player, card);
+            if (refusal != null)
+                PlayLog.Event("refusal_shown", ("side", SideOf(player)), ("card", PlayLog.Name(card)), ("reason", refusal));
+        }
         _ui.SoundSlide();
         _ui.Refresh();
     }

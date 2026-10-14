@@ -55,6 +55,12 @@ LOOKS = {
     "classic":  dict(face="#f7fffb", panel="#e2f7ec", rim="#5ccf95", ink="#17805a"),
     # Endless: its own set - a deep night frame with an iridescent (thin-film) trim.
     "endless":  dict(face="#f4f2ff", panel="#e8e4ff", rim="#2a1670", ink="#4b2bb8", iridescent=True),
+    # The tier sets (2026-10-09): one per tier of ten above stage 10, bought in Customizations once
+    # that tier's boss is beaten. Jade (stage 20), Sapphire (30), Pearl (40), Diamond (50).
+    "jade":     dict(face="#f2fbf6", panel="#ddf3e8", rim="#2f9a6e", ink="#145c40"),
+    "sapphire": dict(face="#f1f5ff", panel="#dfe8fd", rim="#1f4fb3", ink="#173c85"),
+    "pearl":    dict(face="#fffdf8", panel="#f5eee2", rim="#d8c6a8", ink="#6b5640"),
+    "diamond":  dict(face="#f6fbff", panel="#e4f3fb", rim="#7fc4e6", ink="#1d4f7a", iridescent=True),
     # Modifiers.
     "plus":     dict(face="#eef5ff", panel="#dbe9ff", rim="#3f7fe0", ink="#1f4fa8"),
     "minus":    dict(face="#fff0f0", panel="#ffdede", rim="#d8474f", ink="#a51f2c"),
@@ -360,7 +366,10 @@ def iridescent(m, thickness=520.0):
         e.color = srgb(c)
     nt.links.new(wrap.outputs[0], ramp.inputs["Fac"])
     nt.links.new(ramp.outputs["Color"], p.inputs["Base Color"])
-    p.inputs["Thin Film Thickness"].default_value = thickness
+    # Thin film arrived in Blender 4.2. Older Blender (4.0 on the msi PC) renders everything else
+    # the same, just without the film's sheen - fine for a disc-only re-render, not for a final rim.
+    if "Thin Film Thickness" in p.inputs:
+        p.inputs["Thin Film Thickness"].default_value = thickness
     return m
 
 
@@ -479,6 +488,10 @@ BACK_LOOKS = {
     "ruby":     dict(face="#3a1018", rim="#b3263a", metal="#e7b25a"),
     "obsidian": dict(face="#1a1428", rim="#3d2f5c", metal="#b89cf0"),
     "endless":  dict(face="#150e3e", rim="#2a1670", metal="#e8e8f0", iridescent=True),
+    "jade":     dict(face="#123a2e", rim="#2f9a6e", metal="#e8c766"),
+    "sapphire": dict(face="#0f1f4a", rim="#1f4fb3", metal="#d8e2ea"),
+    "pearl":    dict(face="#3a3340", rim="#e8dcc8", metal="#f4ece0"),
+    "diamond":  dict(face="#0e2236", rim="#7fc4e6", metal="#e8f4ff", iridescent=True),
 }
 
 
@@ -488,6 +501,20 @@ def build_back(style="default"):
     LOOKS["back"]["iridescent"] = B.get("iridescent", False)
     L = base_card("back")
     gold = mat("Gold", srgb(B["metal"]), rough=0.25, metal=1.0)
+    if B.get("iridescent") and style != "endless":
+        # Diamond (the stage 50 set): the usual ring and diamond, in iridescent metal, with a
+        # second, smaller diamond set inside the first so the set's own name is its emblem.
+        iri = iridescent(mat("Iri", srgb(B["metal"]), rough=0.14, metal=1.0), 560.0)
+        slab("EmblemRing", 2.9, 2.9, 1.45, THICK, 0.03, iri, bevel=0.01, hole=(2.5, 2.5, 1.25))
+        outer = slab("Diamond", 1.3, 1.3, 0.08, THICK + 0.012, 0.05, iri, bevel=0.02,
+                     hole=(0.86, 0.86, 0.05))
+        outer.rotation_euler.z = math.pi / 4
+        inner = slab("Diamond2", 0.62, 0.62, 0.05, THICK + 0.02, 0.05, iri, bevel=0.02)
+        inner.rotation_euler.z = math.pi / 4
+        for sx in (-1, 1):
+            for sy in (-1, 1):
+                pip((sx * 1.9, sy * 2.85, THICK + 0.02), 0.13, iri)
+        return
     if B.get("iridescent"):
         # Endless: the ring and an infinity sign, in iridescent metal.
         iri = iridescent(mat("Iri", srgb(B["metal"]), rough=0.14, metal=1.0), 560.0)
@@ -497,9 +524,12 @@ def build_back(style="default"):
             for sy in (-1, 1):
                 pip((sx * 1.9, sy * 2.85, THICK + 0.02), 0.13, iri)
         return
-    # Emblem: a ring with "20" inside.
+    # Emblem: a ring with a diamond inside. No number on a back (2026-10-08): a "20" read as the
+    # deck's card count, or as the target on a stage where the target isn't 20.
     ring = slab("EmblemRing", 2.9, 2.9, 1.45, THICK, 0.03, gold, bevel=0.01, hole=(2.5, 2.5, 1.25))
-    text("Twenty", "20", 1.45, (0, 0, THICK + 0.012), gold)
+    d = 1.15
+    ob = slab("Diamond", d, d, 0.08, THICK + 0.012, 0.05, gold, bevel=0.02)
+    ob.rotation_euler.z = math.pi / 4
     for sx in (-1, 1):
         for sy in (-1, 1):
             pip((sx * 1.9, sy * 2.85, THICK + 0.02), 0.13, gold)
@@ -540,9 +570,12 @@ def build_back_classic():
          hole=(2 * r_in, 2 * r_in, r_in))
     disc = mat("Disc", srgb("#3a4659"), rough=0.6)
     slab("Disc", 2 * r_in, 2 * r_in, r_in, THICK, 0.012, disc, bevel=0.004)
-    # The mark in the middle is the game's "20" (2026-10-02; it was a gold diamond).
-    gold = mat("Twenty", srgb("#ffc86e"), rough=0.3, coat=0.5)
-    text("Twenty", "20", 1.5, (0, -0.02, THICK + 0.012), gold, extrude=0.04)
+    # The gold diamond again (2026-10-08). It was "20" from 2026-10-02, which testers read as the
+    # card count or as the target.
+    gold = mat("Diamond", srgb("#ffc86e"), rough=0.3, coat=0.5)
+    d = 0.95
+    ob = slab("Diamond", d, d, 0.07, THICK + 0.012, 0.05, gold, bevel=0.02)
+    ob.rotation_euler.z = math.pi / 4
 
 
 # ----------------------------------------------------------------------------------------------
@@ -753,6 +786,10 @@ MATS = {
     "ruby":     ("#f9e3e6", "#df8797"),
     "obsidian": ("#ebe5f6", "#9a82d3"),
     "endless":  ("#e6e3f8", "#b3a9ea"),
+    "jade":     ("#e0f3e9", "#5fbf95"),
+    "sapphire": ("#e1eafb", "#6f93e0"),
+    "pearl":    ("#f8f3eb", "#d8c6a8"),
+    "diamond":  ("#eaf6fc", "#8fd0ee"),
 }
 
 
@@ -796,7 +833,7 @@ def build_playmat(rank, portrait):
     corner = BOARD_CORNER * short
     band = BOARD_RIM * short
     rim_mat = mat("Rim", srgb(rim), rough=0.35, coat=0.4)
-    if rank == "endless":
+    if rank in ("endless", "diamond"):
         rim_mat = iridescent(rim_mat, 480.0)
     slab("Board", w, h, corner, -0.3, 0.3, rim_mat, bevel=0.16)
 
@@ -851,7 +888,9 @@ def build_playmat(rank, portrait):
     r2_out, r2_in = disc, disc - 0.004 * short
     slab("Ring2", 2 * r2_out, 2 * r2_out, r2_out, z + 0.003, 0.002, line_mat, bevel=0.0,
          hole=(2 * r2_in, 2 * r2_in, r2_in))
-    text("Twenty", "20", 0.36 * short, (0, -0.012 * short, z + 0.003), line_mat, extrude=0.002)
+    # The disc is left empty (2026-10-08): the game writes the CURRENT target into it (the middle
+    # line, TableUi / RunHeader). A painted "20" read as the target even on stages where the target
+    # is 23 (Chuck's playtest), so the number has to be live, not baked into the art.
 
     # Soft light: a broad pool from above, and a low key from the top left that puts a gloss on
     # the rim's rounded edge.
@@ -879,6 +918,9 @@ def build_playmat(rank, portrait):
 RANKS = ["bronze", "silver", "gold", "ruby", "obsidian"]
 # classic is the default deck and board everyone owns; endless is the Endless mode's own set.
 THEMES = ["classic"] + RANKS + ["endless"]
+# The tier sets (stages 11-50): a reward per tier boss. Render them alone with --set tiers.
+TIERS = ["jade", "sapphire", "pearl", "diamond"]
+THEMES = THEMES + TIERS
 
 
 def cards(which):
@@ -909,6 +951,16 @@ def cards(which):
         for r in THEMES:
             build = build_back_classic if r == "classic" else (lambda r=r: build_back(r))
             out.append((f"backs/card_back_{r}", build))
+    if which == "tiers":
+        # Only the four tier sets: each one's back first (quick to check), then its boards and cards.
+        for r in TIERS:
+            out.append((f"backs/card_back_{r}", lambda r=r: build_back(r)))
+        for r in TIERS:
+            for portrait in (True, False):
+                orient = "portrait" if portrait else "landscape"
+                out.append((f"playmats/playmat_{r}_{orient}", lambda r=r, p=portrait: build_playmat(r, p)))
+            for v in range(1, 11):
+                out.append((f"cards/main/main_{v}_{r}", lambda v=v, r=r: build_main(v, r)))
     return out
 
 

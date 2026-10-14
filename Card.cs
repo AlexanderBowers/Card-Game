@@ -11,8 +11,9 @@ public class Card
 	/// A stable handle for this card, unique for the lifetime of the process. The board holds
 	/// VIEWS, not cards, and an effect that rewrites a card in place (Copy, and Trade Draw when it
 	/// lands) has to find the view showing it so the face can be redrawn. Godot is single
-	/// threaded, so a plain counter is enough.
-	public int Id { get; } = ++_nextId;
+	/// threaded, but the online server is not - it runs many matches at once - so the counter is
+	/// bumped atomically.
+	public int Id { get; } = System.Threading.Interlocked.Increment(ref _nextId);
 
 	/// The value this card is worth right now. For a flip card this changes sign when it is flipped.
 	public int Value { get; set; }
@@ -32,6 +33,10 @@ public class Card
 	/// rest of the set only: never saved, never spent into the Recall pile, never traded away, never
 	/// logged in the collection. Its value can be beyond the normal -6, so it has its own tint.
 	public bool IsRescue { get; set; }
+
+	/// A card whose face this player may not see: the opponent's hand in an online match. The
+	/// server never sends those cards' values, so the phone holds a stand-in drawn face down.
+	public bool IsHidden { get; set; }
 
 	public Card(int value, CardType type, string cardName = "", bool canFlipValue = false, CardEffect effect = CardEffect.None)
 	{

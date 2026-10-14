@@ -17,6 +17,8 @@ public interface ITableUiHost
 
     bool GameStarted { get; }
     bool VsBot { get; }
+    /// An online match: the opponent is a person choosing at the same time as you.
+    bool IsOnlineMatch { get; }
     bool InRun { get; }
 
     /// The set-end explanation is up and owns the middle label; nothing else may write to it.
@@ -30,10 +32,15 @@ public interface ITableUiHost
     bool CanAct(Player player);
     bool CanPlayEffect(Player owner, Card card);
 
+    /// This hand card would land the player exactly on the target now - the table pulses it.
+    bool HitsTarget(Player player, Card card);
+
     /// The words for the status line and the middle panel. Both are readings of the rules, so the
     /// rules write them; the table only decides how big they are and what colour.
     string StatusFor(Player player);
     string SetInfoLine();
+    /// The middle line is the target (offline), not the turn clock (online).
+    bool SetInfoIsTarget { get; }
 
     /// A picked-up card that can no longer be played is dropped before anything is drawn, so the
     /// status line and the buttons agree. First thing in every refresh.
@@ -221,6 +228,103 @@ public sealed class TableUi
     /// The ink for words printed straight onto the board (the target, the stage line). Dark,
     /// because the boards are light (2026-10-02); it was gold on dark felt.
     private static readonly Color BoardInk = new Color(0.2f, 0.27f, 0.36f);
+
+    // ------------------------------------------------------------------
+    // The board's emblem: the live target (2026-10-08, Chuck's playtest)
+    // ------------------------------------------------------------------
+    // The painted "20" in the board's disc read as the target even on a stage where the target was
+    // 23, so the art's disc is empty now (cardgen build_playmat) and the game writes the CURRENT
+    // target into it - ON the board, under the cards, like the paint was: a Label behind the canvas
+    // on the flat table, a Label3D lying on the 3D table (TableWorld3D.SetEmblem).
+
+    /// The number's size as a fraction of the board's short side, in the painted "20"'s font
+    /// (Fredoka Bold). Godot's em runs larger than Blender's text size, so 0.31 here matches the
+    /// width the art's 0.36 had and leaves the disc a margin round two digits.
+    public const float EmblemEm = 0.31f;
+    /// Nudged down by this much of the short side (0: centred reads right on the tilted table).
+    public const float EmblemDrop = 0f;
+    public static readonly Font EmblemFont = ResourceLoader.Exists("res://assets/fonts/Fredoka-Bold.ttf")
+        ? GD.Load<Font>("res://assets/fonts/Fredoka-Bold.ttf") : null;
+    private const string EmblemNodeName = "EmblemNumber";
+
+    /// What the emblem says right now: the target, offline, while the middle of the table is not
+    /// using the space for words (a set ending, the finale's rules) - empty otherwise. Online the
+    /// middle is the turn clock, so the emblem stays plain there.
+    private void UpdateEmblem()
+    {
+        bool middleBusy = (_setInfoLabel != null && _setInfoLabel.Visible)
+                          || (_targetLabel != null && _targetLabel.Visible);
+        bool show = _host.SetInfoIsTarget && !State.IsGameOver && !_host.SetOverPending && !middleBusy;
+        string text = show ? $"{State.TargetScore}" : string.Empty;
+        Color ink = EmblemInk;
+
+        Label flat = EmblemLabel();
+        if (flat != null)
+        {
+            flat.Text = text;
+            flat.AddThemeColorOverride("font_color", ink);
+            FitEmblem(flat);
+        }
+        World3D?.SetEmblem(text, ink);
+    }
+
+    /// The flat table's emblem label, made on first use as a child of the board's own picture, so it
+    /// draws above the art and below everything on the canvas (and hides with it on the 3D table).
+    private Label EmblemLabel()
+    {
+        TextureRect board = L?.Background;
+        if (board == null) return null;
+        if (board.GetNodeOrNull<Label>(EmblemNodeName) is Label existing) return existing;
+
+        Label label = new Label
+        {
+            Name = EmblemNodeName,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center,
+            MouseFilter = Control.MouseFilterEnum.Ignore,
+            UseParentMaterial = false,
+        };
+        if (EmblemFont != null) label.AddThemeFontOverride("font", EmblemFont);
+        // Printed into the board, not stuck on it: none of the theme's label shadow or outline.
+        label.AddThemeColorOverride("font_shadow_color", Colors.Transparent);
+        label.AddThemeConstantOverride("outline_size", 0);
+        label.SetAnchorsPreset(Control.LayoutPreset.FullRect);
+        board.AddChild(label);
+        board.Resized += () => FitEmblem(label);
+        return label;
+    }
+
+    private static void FitEmblem(Label label)
+    {
+        if (label.GetParent() is not Control board) return;
+        float shortSide = Mathf.Min(board.Size.X, board.Size.Y);
+        if (shortSide <= 0f) return;
+        label.AddThemeFontSizeOverride("font_size", Mathf.RoundToInt(EmblemEm * shortSide));
+        float drop = EmblemDrop * shortSide;
+        label.OffsetTop = drop;
+        label.OffsetBottom = drop;
+    }
+
+    // Each board's rim colour (cardgen MATS - keep in step), so the number reads as part of the
+    // board it sits on. Nudged a little toward BoardInk so the pale boards (Gold, Silver) still
+    // read it at a glance.
+    private static readonly Dictionary<string, Color> BoardRims = new Dictionary<string, Color>
+    {
+        ["classic"] = new Color("7cbdea"),
+        ["bronze"] = new Color("86bf98"),
+        ["silver"] = new Color("a3b5c6"),
+        ["gold"] = new Color("e9c055"),
+        ["ruby"] = new Color("df8797"),
+        ["obsidian"] = new Color("9a82d3"),
+        ["endless"] = new Color("b3a9ea"),
+    };
+    private string _boardKey; // the painted board on show, or null for the old tinted mat
+
+    private Color EmblemInk =>
+        (_boardKey != null && BoardRims.TryGetValue(_boardKey, out Color rim))
+            ? rim.Lerp(BoardInk, 0.12f)
+            : BoardInk;
+
     /// An empty win chip, inked so its outline reads on a light board.
     private static readonly Color EmptyChipInk = new Color(0.29f, 0.37f, 0.47f, 0.75f);
 
@@ -620,9 +724,13 @@ public sealed class TableUi
     // free slot, so the grid never grows or shifts. Their size in the scene is the board card
     // size.
     //
-    // Portrait shows two rows of three (pass 32). The seventh card opens the third row, and every
+    // Portrait shows two rows of three (pass 32). The SIXTH card opens the third row, and every
     // card on THAT board shrinks so three rows fill exactly the height two did - so nothing else
     // on the table moves mid-set. The board goes back to two rows when it is cleared.
+    //
+    // Sixth, not seventh (playtest, 2026-10-08: "it wasn't clear you can play more than 6
+    // cards"). A full two-row board read as a full board; opening the row as the last of the six
+    // slots fills shows three empty slots waiting, so the board itself says there is room.
     // ------------------------------------------------------------------
     private const int PortraitRows = 2;
 
@@ -638,7 +746,7 @@ public sealed class TableUi
         int i = 0;
         foreach (Node child in board.GetChildren())
         {
-            if (i++ >= PortraitSlots && child.GetChildCount() > 0) return true;
+            if (i++ >= PortraitSlots - 1 && child.GetChildCount() > 0) return true;
         }
         return false;
     }
@@ -794,6 +902,7 @@ public sealed class TableUi
         // has no stage line, and the target line only speaks when the target moved).
         HideIfEmpty(_setInfoLabel);
         HideIfEmpty(_targetLabel);
+        UpdateEmblem();
 
         // Both sides act at once: each player's row stays live until THAT player has ended the
         // turn or is holding. Everything is locked while a set-end explanation is waiting.
@@ -888,14 +997,15 @@ public sealed class TableUi
         {
             L.P1Hand.AddChild(CreateModifierButton(
                 card, !p1Can, card == p1Picked, p1Picked != null,
-                () => _host.ModifierPressed(P1, card), p1Size, p1Lift));
+                () => _host.ModifierPressed(P1, card), p1Size, p1Lift,
+                pulse: card == TutorialPulseCard || _host.HitsTarget(P1, card)));
         }
 
         foreach (Card card in P2.Modifiers)
         {
             L.P2Hand.AddChild(CreateModifierButton(
                 card, !p2Can, card == p2Picked, p2Picked != null,
-                () => _host.ModifierPressed(P2, card), p2Size, p2Lift));
+                () => _host.ModifierPressed(P2, card), p2Size, p2Lift, opponentSide: true));
         }
     }
 
@@ -955,6 +1065,7 @@ public sealed class TableUi
             string boardKey = Cards.RankKey ?? RunData.Instance?.SelectedBoard ?? Cosmetics.Default;
             Texture2D mat = Cards.Art($"playmats/playmat_{boardKey}_{(L.Portrait ? "portrait" : "landscape")}.png");
             L.Background.Texture = mat ?? authored;
+            _boardKey = mat != null ? boardKey : null;
             L.Background.SelfModulate = mat != null ? Colors.White : _playmatTint;
             ApplyBoardFx(L.Background, mat != null);
         }
@@ -1082,53 +1193,23 @@ public sealed class TableUi
     // The middle panel
     // ------------------------------------------------------------------
 
+    /// The middle line under the target: empty now. It once read "TARGET 20" (pass 33 took it out
+    /// as clutter), then "Target 23 (up from 20)" all stage, then the finale's specials all match;
+    /// since the target went into the board's emblem (2026-10-08) and every stage above 10 rolls
+    /// its own specials (2026-10-09), each of those is said once by the stage banner instead, and a
+    /// line here would only sit over the emblem. Kept as a label so a layout can still hold one.
     private void UpdateTargetLabel()
     {
         if (_targetLabel == null) return;
-
-        if (!_host.GameStarted)
-        {
-            _targetLabel.Text = string.Empty;
-            _targetLabel.RemoveThemeColorOverride("font_color");
-            return;
-        }
-
-        // The target lives on each player's own score line now ("17 / 20"), so this banner is no
-        // longer where the target is READ - it is where the game says the target has MOVED. A
-        // permanent "TARGET 20" here as well was one line of the clutter the playtest complained
-        // about, and it said nothing the score line does not say closer to the number it governs.
-        RunData run = _host.InRun ? RunData.Instance : null;
-
-        // The finale's rules were rolled, so they are news every time - say them whether or not
-        // the target happens to have moved.
-        if (run != null && run.CurrentRolledEffects != null)
-        {
-            string heading = run.Endless ? "ENDLESS" : "FINAL";
-            _targetLabel.Text = $"{heading}  -  Target {State.TargetScore}{run.FinaleRulesLine("\n")}";
-            _targetLabel.AddThemeColorOverride("font_color", BoardInk);
-            return;
-        }
-
-        if (run == null || !run.TargetMovedThisStage)
-        {
-            _targetLabel.Text = string.Empty;
-            _targetLabel.RemoveThemeColorOverride("font_color");
-            return;
-        }
-
-        // A target that changes quietly is the game changing its own rules behind the player's back.
-        string direction = run.CurrentTarget > run.PreviousTarget ? "up" : "down";
-        // Non-breaking spaces inside each half: if it has to wrap, it wraps as "Target 23" over
-        // "(up from 20)", never "Targe" over "t 23" or "(up" over "from 20)".
-        _targetLabel.Text = $"Target\u00A0{State.TargetScore}  ({direction}\u00A0from\u00A0{run.PreviousTarget})";
-        _targetLabel.AddThemeColorOverride("font_color", BoardInk);
+        _targetLabel.Text = string.Empty;
+        _targetLabel.RemoveThemeColorOverride("font_color");
     }
 
     /// A tappable modifier card: an invisible Button (so the theme's touch-friendly hit area
     /// and focus handling still apply) with the card art drawn on top. A picked-up card is lifted
     /// and the rest of the hand dims, so which card is in play is obvious without reading anything.
     private Button CreateModifierButton(Card card, bool disabled, bool selected, bool anySelected, Action onPressed,
-                                        Vector2 size, float lift)
+                                        Vector2 size, float lift, bool pulse = false, bool opponentSide = false)
     {
         Button button = new Button
         {
@@ -1142,7 +1223,8 @@ public sealed class TableUi
             button.AddThemeStyleboxOverride(state, empty);
         button.Pressed += onPressed;
 
-        TextureRect view = Cards.CreateCardView(card, size);
+        // opponentSide only matters face down: whose deck's back it wears (CardViews.PaintBack).
+        TextureRect view = Cards.CreateCardView(card, size, opponentSide);
         view.MouseFilter = Control.MouseFilterEnum.Ignore;
 
         if (disabled) view.Modulate = new Color(0.55f, 0.55f, 0.55f);
@@ -1152,10 +1234,11 @@ public sealed class TableUi
         button.AddChild(view);
         view.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
 
-        // Pass 49: the tutorial's card pulses until it is picked up. The art is scaled, not the
+        // Pass 49: the tutorial's card pulses until it is picked up - and since 2026-10-08, so
+        // does any card that would land you exactly on the target. The art is scaled, not the
         // Button, for the same reason as the pick-up below.
         // A tween needs the tree, and this button is not in it yet: start once it arrives.
-        if (!selected && !disabled && card == TutorialPulseCard)
+        if (!selected && !disabled && pulse)
         {
             view.PivotOffset = size / 2f;
             view.TreeEntered += () => StartPulse(view);
@@ -1243,6 +1326,42 @@ public sealed class TableUi
         TextureRect view = FindCardView(card, board);
         if (view == null) return;
         Cards.Redraw(view, card, BoardCardSizeFor(board), board == L?.P2Board);
+    }
+
+    private const float RevealHalfSeconds = 0.14f;
+    private const float RevealStagger = 0.08f;
+
+    /// Face-down cards that have just turned face up in the model (the hidden-card rule: the set's
+    /// end, or an effect that named them) flip over where they sit: edge-on, the new face, back
+    /// out - one after another, left to right, so a board turning over reads as cards being turned
+    /// rather than a picture swapping. `instant` (Veto's burned card) just changes face, because it
+    /// already has an animation of its own to play. Hand cards need nothing: the refresh redraws
+    /// the hands.
+    public void RevealCards(IReadOnlyList<Card> cards, Card instant = null)
+    {
+        if (cards == null) return;
+        int order = 0;
+        foreach (Card card in cards)
+        {
+            Control board = FindCardView(card, L?.P2Board) != null ? L?.P2Board : L?.P1Board;
+            TextureRect view = FindCardView(card, board);
+            if (view == null) continue;
+
+            if (card == instant || !GameSettings.CardAnimations || !view.IsInsideTree())
+            {
+                RefreshCardFace(card, board);
+                continue;
+            }
+
+            view.PivotOffset = view.Size / 2f;
+            Tween flip = view.CreateTween();
+            flip.TweenInterval(order++ * RevealStagger);
+            flip.TweenProperty(view, "scale:x", 0f, RevealHalfSeconds)
+                .SetTrans(Tween.TransitionType.Sine).SetEase(Tween.EaseType.In);
+            flip.TweenCallback(Callable.From(() => RefreshCardFace(card, board)));
+            flip.TweenProperty(view, "scale:x", 1f, RevealHalfSeconds)
+                .SetTrans(Tween.TransitionType.Sine).SetEase(Tween.EaseType.Out);
+        }
     }
 
     // ------------------------------------------------------------------
@@ -1382,7 +1501,7 @@ public sealed class TableUi
         TextureRect cardNode = Cards.CreateCardView(card, BoardCardSizeFor(parentContainer), parentContainer == L?.P2Board);
 
         // Drop the card into the next empty slot; if the board is somehow full, let the grid grow.
-        // In portrait the seventh card opens the third row, and RefreshBoardSlots below re-sizes
+        // In portrait the sixth card opens the third row, and RefreshBoardSlots below re-sizes
         // every card on the board for it - this one included.
         Control slot = FindFreeSlot(parentContainer);
         cardNode.Modulate = new Color(1, 1, 1, 0); // invisible until the turn animation lands

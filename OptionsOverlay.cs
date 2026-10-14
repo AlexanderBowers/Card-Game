@@ -13,14 +13,47 @@ using System;
 /// </summary>
 public partial class OptionsOverlay : Control
 {
-    private static readonly Color PanelStone = new Color(0.16f, 0.15f, 0.14f, 0.98f);
-    private static readonly Color PanelEdge = new Color(0.05f, 0.05f, 0.05f);
 
     private CheckButton _animations;
     private CheckButton _batterySaver;
+    private CheckButton _highFrameRate;
+    private VBoxContainer _onlineSection;
+    private Button _deleteAccount;
+    private Label _onlineNote;
+    private bool _deleteArmed;
+
+    /// Two taps, like New Run: the second one deletes, immediately and for good.
+    private async void OnDeleteAccountPressed()
+    {
+        if (!_deleteArmed)
+        {
+            _deleteArmed = true;
+            _deleteAccount.Text = "Tap again to delete for good";
+            return;
+        }
+        _deleteAccount.Disabled = true;
+        _deleteAccount.Text = "Deleting...";
+        string problem = OnlineService.Instance == null ? "Not available" : await OnlineService.Instance.DeleteAccount();
+        if (!IsInstanceValid(this)) return;
+        if (problem != null)
+        {
+            _deleteArmed = false;
+            _deleteAccount.Disabled = false;
+            _deleteAccount.Text = "Delete Online Account";
+            _onlineNote.Text = problem;
+            return;
+        }
+        _deleteAccount.Text = "Deleted";
+        _onlineNote.Text = "Your online account is gone. Opening Online again starts a new one.";
+    }
     private CheckButton _table3D;
+    private VBoxContainer _cloudSection;
+    private CheckButton _cloudToggle;
+    private Label _cloudNote;
     private CheckButton _showFps;
     private CheckButton _debugButtons;
+    private CheckButton _playLog;
+    private Button _copyPlayLog;
     private Button _closeButton;
     private Control _storeSection;      // the heading and the row, so both hide when there is no store
     private VBoxContainer _storeRows;   // refilled on every Open: what it says depends on what is owned
@@ -70,14 +103,24 @@ public partial class OptionsOverlay : Control
         colB.AddThemeConstantOverride("separation", 10);
         _columns.AddChild(colB);
 
-        // --- Sound: the RuneScape-style block, on its own dark stone plate.
+        // --- Sound: icon + notched slider per channel, on a card styled like the menu buttons.
         colA.AddChild(SectionLabel("Sound"));
         PanelContainer plate = new PanelContainer();
-        StyleBoxFlat stone = new StyleBoxFlat { BgColor = PanelStone, BorderColor = PanelEdge };
-        stone.SetBorderWidthAll(2);
-        stone.SetCornerRadiusAll(4);
-        stone.SetContentMarginAll(10);
-        plate.AddThemeStyleboxOverride("panel", stone);
+        StyleBoxFlat card = new StyleBoxFlat
+        {
+            BgColor = OverlayUi.Surface,
+            BorderColor = OverlayUi.SurfaceEdge,
+            ShadowColor = OverlayUi.Shadow,
+            ShadowSize = 8,
+            ShadowOffset = new Vector2(0, 3),
+            AntiAliasingSize = 1.2f,
+        };
+        card.SetCornerRadiusAll(20);
+        card.SetBorderWidthAll(1);
+        card.BorderWidthBottom = 5;
+        card.ContentMarginLeft = card.ContentMarginRight = 16;
+        card.ContentMarginTop = card.ContentMarginBottom = 10;
+        plate.AddThemeStyleboxOverride("panel", card);
         colA.AddChild(plate);
 
         VBoxContainer rows = new VBoxContainer();
@@ -121,6 +164,66 @@ public partial class OptionsOverlay : Control
         colB.AddChild(_animations);
         _batterySaver = Toggle("Battery saver (30 fps)", GameSettings.SetBatterySaver);
         colB.AddChild(_batterySaver);
+        _highFrameRate = Toggle("High frame rate (up to 120 fps)", GameSettings.SetHighFrameRate);
+        colB.AddChild(_highFrameRate);
+
+        // --- Cloud Save (2026-10-09). Only where it can work: an Android build with Play Games set
+        // up (CloudSave.Available). Off until the player turns it on.
+        _cloudSection = new VBoxContainer();
+        _cloudSection.AddThemeConstantOverride("separation", 6);
+        _cloudSection.AddChild(SectionLabel("Cloud Save"));
+        _cloudToggle = Toggle("Save progress to Google Play Games", on =>
+        {
+            DebugLog.Write("Options", $"Cloud Save switch -> {on}");
+            if (CloudSave.Instance == null) return;
+            if (on) CloudSave.Instance.Enable(); else CloudSave.Instance.Disable();
+            DebugLog.Write("Options", "cloud switch handled");
+            RefreshCloud();
+            DebugLog.Write("Options", "cloud note refreshed");
+        });
+        _cloudSection.AddChild(_cloudToggle);
+        _cloudNote = new Label { AutowrapMode = TextServer.AutowrapMode.WordSmart, CustomMinimumSize = new Vector2(260, 0) };
+        _cloudNote.AddThemeFontSizeOverride("font_size", OverlayUi.Readable(14));
+        _cloudNote.AddThemeColorOverride("font_color", OverlayUi.Muted);
+        _cloudSection.AddChild(_cloudNote);
+        colB.AddChild(_cloudSection);
+
+        // --- Online. Only once an online account exists (Google Play requires in-app deletion).
+        _onlineSection = new VBoxContainer();
+        _onlineSection.AddChild(SectionLabel("Online"));
+        _deleteAccount = new Button { Text = "Delete Online Account" };
+        _deleteAccount.AddThemeFontSizeOverride("font_size", ButtonFont);
+        _deleteAccount.Pressed += OnDeleteAccountPressed;
+        _onlineSection.AddChild(_deleteAccount);
+        _onlineNote = new Label { AutowrapMode = TextServer.AutowrapMode.WordSmart, CustomMinimumSize = new Vector2(260, 0) };
+        _onlineNote.AddThemeFontSizeOverride("font_size", OverlayUi.Readable(14));
+        _onlineNote.AddThemeColorOverride("font_color", OverlayUi.Muted);
+        _onlineSection.AddChild(_onlineNote);
+        colB.AddChild(_onlineSection);
+
+        // --- Bug reports (tester feedback, 2026-10-12). In every build: the play log is how a
+        // tester on a release build shows what the game did, without a cable or logcat. Test builds
+        // always log, so the switch is shown on and cannot be turned off there - a switch that
+        // looked off while logging carried on would be a switch that does nothing.
+        colB.AddChild(SectionLabel("Bug reports"));
+        _playLog = Toggle("Keep a play log", GameSettings.SetPlayLog);
+        if (OS.IsDebugBuild()) _playLog.Disabled = true;
+        colB.AddChild(_playLog);
+        _copyPlayLog = new Button { Text = "Copy play log", CustomMinimumSize = WideButton };
+        _copyPlayLog.AddThemeFontSizeOverride("font_size", ButtonFont);
+        _copyPlayLog.Pressed += () =>
+            _copyPlayLog.Text = PlayLog.CopyToClipboard() ? "Copied - paste it in a message" : "Nothing logged yet";
+        colB.AddChild(_copyPlayLog);
+        Label playLogNote = new Label
+        {
+            Text = "Records your matches on this device only: cards, scores and why a card could not be played. "
+                 + "Copy it and paste it into a message when you report a bug.",
+            AutowrapMode = TextServer.AutowrapMode.WordSmart,
+            CustomMinimumSize = new Vector2(260, 0),
+        };
+        playLogNote.AddThemeFontSizeOverride("font_size", OverlayUi.Readable(14));
+        playLogNote.AddThemeColorOverride("font_color", OverlayUi.Muted);
+        colB.AddChild(playLogNote);
 
         // --- Debug. An exported build has no debug rows to show, so it gets no switch either.
         if (OS.IsDebugBuild())
@@ -128,6 +231,19 @@ public partial class OptionsOverlay : Control
             colB.AddChild(SectionLabel("Debug"));
             _debugButtons = Toggle("Show debug buttons", GameSettings.SetShowDebugButtons);
             colB.AddChild(_debugButtons);
+
+            // Test builds keep a log file (DebugLog); this hands it over without a cable.
+            Button copyLog = new Button { Text = "Copy debug log", CustomMinimumSize = WideButton };
+            copyLog.AddThemeFontSizeOverride("font_size", ButtonFont);
+            copyLog.Pressed += () =>
+            {
+                DebugLog.Write("Options", "Copy debug log pressed");
+                bool ok = DebugLog.CopyToClipboard();
+                DebugLog.Write("Options", $"copied to clipboard: {ok}");
+                copyLog.Text = ok ? "Copied - paste it in a message" : "No log yet";
+                DebugLog.Write("Options", "button text changed");
+            };
+            colB.AddChild(copyLog);
         }
 
         _closeButton = new Button { Text = "Close" };
@@ -145,14 +261,32 @@ public partial class OptionsOverlay : Control
 
         _animations.SetPressedNoSignal(GameSettings.CardAnimations);
         _batterySaver.SetPressedNoSignal(GameSettings.BatterySaver);
+        _highFrameRate.SetPressedNoSignal(GameSettings.HighFrameRate);
+        _deleteArmed = false;
+        _deleteAccount.Text = "Delete Online Account";
+        _deleteAccount.Disabled = false;
+        _onlineNote.Text = "Deletes your name, friends and leaderboard entry from the server. Your progress on this device stays.";
+        _onlineSection.Visible = OnlineService.Instance?.HasAccount ?? false;
         _table3D.SetPressedNoSignal(GameSettings.Table3D);
         _showFps.SetPressedNoSignal(GameSettings.ShowFps);
         _debugButtons?.SetPressedNoSignal(GameSettings.ShowDebugButtons);
+        _playLog?.SetPressedNoSignal(PlayLog.Enabled);
+        if (_copyPlayLog != null)
+        {
+            _copyPlayLog.Text = "Copy play log";
+            _copyPlayLog.CustomMinimumSize = WideButton;
+        }
         Vector2 view = OverlayUi.ViewSize(this);
         if (_columns != null) _columns.Vertical = view.X <= view.Y * 1.25f;
         if (_closeButton != null) _closeButton.CustomMinimumSize = WideButton;
         FillStore(); // sized here too, because WideButton follows the viewport
         if (_privacySection != null) _privacySection.Visible = AdService.PrivacyOptionsRequired;
+        RefreshCloud();
+        if (CloudSave.Instance != null)
+        {
+            CloudSave.Instance.Changed -= RefreshCloud;
+            CloudSave.Instance.Changed += RefreshCloud;
+        }
 
         Node parent = GetParent();
         if (parent != null) OverlayUi.BringToFront(this);
@@ -161,10 +295,26 @@ public partial class OptionsOverlay : Control
 
     private void Close()
     {
+        if (CloudSave.Instance != null) CloudSave.Instance.Changed -= RefreshCloud;
         Visible = false;
         Action done = _onClosed;
         _onClosed = null;
         done?.Invoke();
+    }
+
+    /// The Cloud Save switch and the line under it: what it does when off, how it is doing when on.
+    private void RefreshCloud()
+    {
+        DebugLog.Count("Options.RefreshCloud");
+        if (_cloudSection == null || !GodotObject.IsInstanceValid(_cloudSection)) return;
+        _cloudSection.Visible = CloudSave.Available && CloudSave.Instance != null;
+        if (!_cloudSection.Visible) return;
+
+        _cloudToggle.SetPressedNoSignal(GameSettings.CloudSave);
+        string status = CloudSave.Instance.StatusText;
+        _cloudNote.Text = !GameSettings.CloudSave
+            ? "Keeps your cards, decks, medals and climb in your Google Play Games account, so a new phone picks up where this one left off."
+            : string.IsNullOrEmpty(status) ? "On" : status;
     }
 
     /// Rebuilt every time the screen opens: buying No Ads replaces the button with a thank-you,

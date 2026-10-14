@@ -123,6 +123,12 @@ public static class OverlayUi
     }
 
     /// Where an overlay goes: the scene's overlay layer (UiScaler), not the scene root.
+    /// Draw layer for everything that must be read before the table: every overlay (the
+    /// set-end and match-end panels, menus, Options...) and the tutorial's spotlight. Above
+    /// anything the table raises for itself - the effect banner and status toasts sit at 20 - so
+    /// a "You won the set!" banner can never cover "You Win!" (S25, 2026-10-10).
+    public const int PopupZ = 100;
+
     public static Control Host(Node root) => UiScaler.For(root);
 
     /// The size an overlay has to lay itself out in: its overlay layer's, or the viewport's for
@@ -211,6 +217,7 @@ public static class OverlayUi
         void Fit()
         {
             if (fitting || !GodotObject.IsInstanceValid(panel) || !panel.IsInsideTree()) return;
+            DebugLog.Count("KeepOnScreen.Fit", panel.GetParent()?.GetType().Name);
             fitting = true;
             try { FitNow(); }
             finally { fitting = false; }
@@ -341,6 +348,7 @@ public static class OverlayUi
 
         Vector2I window = DisplayServer.WindowGetSize();
         if (window.X <= 0 || window.Y <= 0) return (0f, 0f);
+        DebugLog.Count("SafeInsets");
         Rect2I safe = DisplayServer.GetDisplaySafeArea();
         float scale = ViewSize(anyControl).Y / window.Y; // window px -> canvas units
 

@@ -75,13 +75,13 @@ public class SaveFormatTests
         run.CompleteMatch(3, won: true);
         run.CompleteMatch(0, won: false);    // banks a streak of 2
         run.StartNewRun();
-        run.DebugJumpToStep(Ladder.Length - 1); // the finale, rolled
+        run.DebugJumpToStep(Ladder.EndlessStepIndex); // the finale, rolled
         run.AddToInventory(new ModifierDef(0, false, CardEffect.Veto));
         run.AddToInventory(new ModifierDef(5, canFlipValue: true));
         run.SetSideDeck(Enumerable.Range(3, RunData.SideDeckSize));
-        run.CompleteMatch(3, won: true);      // clears the ladder: medals, endless unlocked
+        run.CompleteMatch(3, won: true);      // beats stage 10: medals, endless unlocked
         run.StartNewRun();
-        run.DebugJumpToStep(Ladder.Length - 1);
+        run.DebugJumpToStep(Ladder.EndlessStepIndex);
         run.BuyCosmetic("bronze", board: true);
         run.UseMatchRescue();
         return run;
@@ -170,10 +170,10 @@ public class SaveFormatTests
     }
 
     [Fact]
-    public void An_endless_save_is_parked_on_the_last_rung()
+    public void An_endless_save_is_parked_on_stage_ten()
     {
         RunData run = Load("{\"endless\":true,\"step\":2,\"endlessStreak\":4}");
-        Assert.Equal(Ladder.Length - 1, run.StepIndex);
+        Assert.Equal(Ladder.EndlessStepIndex, run.StepIndex);
         Assert.Equal(4, run.EndlessStreak);
     }
 

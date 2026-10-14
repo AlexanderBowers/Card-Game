@@ -34,6 +34,12 @@ public static class GameSettings
     /// A card game spends most of its life waiting for a tap, so this is where the battery goes.
     public static bool BatterySaver { get; private set; }
 
+    /// Off (the default) = capped at 60 fps. On = uncapped, so a 120 Hz phone draws at 120.
+    /// Default off since the Pixel 11 playtest (2026-10-08): it ran at 120 and the phone got hot,
+    /// and a card game gains next to nothing from the extra frames. Battery saver wins over this.
+    public static bool HighFrameRate { get; private set; }
+    public const int DefaultMaxFps = 60;
+
     /// The debug rows on the table. Only offered in debug builds; an exported build never builds
     /// those rows, so this setting cannot turn them on there.
     public static bool ShowDebugButtons { get; private set; } = true;
@@ -43,6 +49,14 @@ public static class GameSettings
 
     /// The frame-rate readout in the corner (FpsCounter), for testing on a phone.
     public static bool ShowFps { get; private set; }
+
+    /// Opt-in cloud save (2026-10-09): progress is kept in the player's Google Play Games account
+    /// as well as on the phone (CloudSave). Off until the player turns it on.
+    public static bool CloudSave { get; private set; }
+
+    /// Keep a play log on this device for bug reports (tester feedback, 2026-10-12). Off until the
+    /// player turns it on; test builds log regardless (see PlayLog.Enabled).
+    public static bool PlayLog { get; private set; }
 
     /// Raised after any change, so open screens can react (the table shows or hides debug rows).
     public static event Action Changed;
@@ -65,9 +79,12 @@ public static class GameSettings
             }
             CardAnimations = cfg.GetValue("battery", "card_animations", true).AsBool();
             BatterySaver = cfg.GetValue("battery", "battery_saver", false).AsBool();
+            HighFrameRate = cfg.GetValue("battery", "high_frame_rate", false).AsBool();
             ShowDebugButtons = cfg.GetValue("debug", "show_buttons", true).AsBool();
             Table3D = cfg.GetValue("graphics", "table_3d", true).AsBool();
             ShowFps = cfg.GetValue("graphics", "show_fps", false).AsBool();
+            CloudSave = cfg.GetValue("cloud", "enabled", false).AsBool();
+            PlayLog = cfg.GetValue("diagnostics", "play_log", false).AsBool();
         }
 
         Apply();
@@ -95,9 +112,12 @@ public static class GameSettings
 
     public static void SetCardAnimations(bool on) { EnsureLoaded(); CardAnimations = on; Commit(); }
     public static void SetBatterySaver(bool on) { EnsureLoaded(); BatterySaver = on; Commit(); }
+    public static void SetHighFrameRate(bool on) { EnsureLoaded(); HighFrameRate = on; Commit(); }
     public static void SetShowDebugButtons(bool on) { EnsureLoaded(); ShowDebugButtons = on; Commit(); }
     public static void SetTable3D(bool on) { EnsureLoaded(); Table3D = on; Commit(); }
     public static void SetShowFps(bool on) { EnsureLoaded(); ShowFps = on; Commit(); }
+    public static void SetCloudSave(bool on) { EnsureLoaded(); CloudSave = on; Commit(); }
+    public static void SetPlayLog(bool on) { EnsureLoaded(); PlayLog = on; Commit(); }
 
     private static void Commit()
     {
@@ -112,7 +132,7 @@ public static class GameSettings
         ApplyBus(MusicBus, Channel.Music);
         ApplyBus(SfxBus, Channel.Sfx);
 
-        Engine.MaxFps = BatterySaver ? 30 : 0;
+        Engine.MaxFps = BatterySaver ? 30 : HighFrameRate ? 0 : DefaultMaxFps;
         OS.LowProcessorUsageMode = BatterySaver;
     }
 
@@ -149,9 +169,12 @@ public static class GameSettings
         }
         cfg.SetValue("battery", "card_animations", CardAnimations);
         cfg.SetValue("battery", "battery_saver", BatterySaver);
+        cfg.SetValue("battery", "high_frame_rate", HighFrameRate);
         cfg.SetValue("debug", "show_buttons", ShowDebugButtons);
         cfg.SetValue("graphics", "table_3d", Table3D);
         cfg.SetValue("graphics", "show_fps", ShowFps);
+        cfg.SetValue("cloud", "enabled", CloudSave);
+        cfg.SetValue("diagnostics", "play_log", PlayLog);
         // "debug/grid_board" (pass 22's stacked-board switch) is no longer written; an old
         // settings file keeps the stale key and nothing reads it.
 

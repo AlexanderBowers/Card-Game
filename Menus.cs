@@ -20,6 +20,9 @@ public interface IMenusHost
     void ReplayTutorial();
 
     void OpenOptions(Action onClosed = null);
+
+    /// The server has paired this phone with an opponent ("matchStart"): put the table up for it.
+    void StartOnlineMatch(System.Text.Json.JsonElement start);
 }
 
 /// Every screen that covers the table: the start menu and its sub-pages (local 2-player setup, the
@@ -32,7 +35,7 @@ public interface IMenusHost
 /// Three pieces of state are static on purpose: they have to survive the scene reload that
 /// starting a match performs, and none of them belongs in a save file, because each describes THIS
 /// reload rather than the run.
-public sealed class Menus
+public sealed partial class Menus
 {
     /// The nodes the menus borrow from the table beneath them - hidden while a menu is up, and in
     /// the table menu's case moved into it outright.
@@ -298,7 +301,13 @@ public sealed class Menus
     {
         if (_startMenuOverlay == null) return;
 
-        FillStartMenu();
+        // "Play Again" after an online match lands back here, straight onto the queue.
+        if (PendingOnlineQueue)
+        {
+            PendingOnlineQueue = false;
+            FillOnlineQuickMatch();
+        }
+        else FillStartMenu();
         _startMenuOverlay.Visible = true;
 
     }
@@ -366,15 +375,20 @@ public sealed class Menus
         }
         else if (runInProgress)
         {
-            continueButton = AddMenuButton($"Continue - Match {run.MatchNumber} of {Ladder.Length}",
+            // "Match 3 of 10" read as a best-of-ten with no score kept (tester feedback, 2026-10-12).
+            // The table and the banner call a rung a Stage, so the menu does too.
+            // "Stage 3" is the player's level - no "of 10" for it to be mistaken for.
+            continueButton = AddMenuButton($"Continue - Stage {run.MatchNumber}",
                           $"{run.CurrentOpponent}   -   target {run.CurrentTarget}",
                           () => MenuStartRun(fresh: false));
         }
 
         // Over an unfinished climb this button throws the climb away, so it asks twice. A second
         // tap is the cheapest confirmation there is and it costs no second overlay.
+        // A new run starts at the highest tier checkpoint (stages 11-50), and the button says where.
+        int startStage = (run?.CheckpointStep ?? 0) + 1;
         _newRunButton = AddMenuButton(
-            runInProgress ? "New Run" : "Start a Run",
+            runInProgress ? "New Run" : startStage > 1 ? $"Start at Stage {startStage}" : "Start a Run",
             runInProgress ? "Gives up the climb above. Your cards and medals stay." : null,
             () =>
             {
@@ -421,6 +435,7 @@ public sealed class Menus
         }
 
         AddMenuButton("Local 2-Player", null, FillLocal2PlayerSetup);
+        AddMenuButton("Online", null, FillOnline);
 
         _startMenuBox.AddChild(MenuSpacer());
 
@@ -468,7 +483,25 @@ public sealed class Menus
             banked.CustomMinimumSize = new Vector2(MenuButtonWidth, 0);
             _startMenuBox.AddChild(banked);
         }
+
+        // The build's version, so a tester can tell they have the latest one (Chuck's playtest,
+        // 2026-10-08). CI stamps application/config/version with the same name as the store
+        // build ("0.9.<run>"); an editor run reads "dev".
+        _startMenuBox.AddChild(MenuSpacer());
+        _startMenuBox.AddChild(OverlayUi.MakeLabel(BuildVersion, MenuVersionFont, OverlayUi.Muted));
     }
+
+    /// "v0.9.14" on a CI build; "dev build" when run from the editor (project.godot says "dev").
+    private static string BuildVersion
+    {
+        get
+        {
+            string v = ProjectSettings.GetSetting("application/config/version").AsString();
+            return (string.IsNullOrWhiteSpace(v) || v == "dev") ? "dev build" : $"v{v}";
+        }
+    }
+
+    private const int MenuVersionFont = 14;
 
     /// One row of the menu: a wide button, and optionally a line under it saying what it does. The
     /// note is a separate label rather than a second line inside the button so that arming the New

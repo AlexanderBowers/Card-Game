@@ -19,13 +19,22 @@ compatibility/default_parent_skeleton_in_mesh_instance_3d=true
 [application]
 
 config/name="Critical Count"
+config/version="dev"
 run/main_scene="uid://b7qn5xyxoj23q"
 config/features=PackedStringArray("4.7", "C#", "Mobile")
 config/icon="res://assets/aimfor20_art/icon_1024.png"
+run/flush_stdout_on_print.debug=true
 
 [autoload]
 
 RunStore="*res://RunStore.cs"
+Online="*res://OnlineService.cs"
+GodotPlayGameServices="*res://addons/GodotPlayGameServices/scripts/autoloads/godot_play_game_services.gd"
+CloudSave="*res://CloudSave.cs"
+
+[critical_count]
+
+play_games/game_id="633434549646"
 
 [display]
 
@@ -37,13 +46,17 @@ window/stretch/mode="canvas_items"
 window/stretch/aspect="expand"
 window/handheld/orientation=6
 
+[debug]
+
+file_logging/enable_file_logging.debug=true
+
 [dotnet]
 
 project/assembly_name="AimFor20"
 
 [editor_plugins]
 
-enabled=PackedStringArray("res://addons/admob/plugin.cfg")
+enabled=PackedStringArray("res://addons/admob/plugin.cfg", "res://addons/GodotPlayGameServices/plugin.cfg")
 
 [gui]
 

@@ -96,6 +96,9 @@ jobs:
           mkdir -p build
           sed -i "s|^version/code=.*|version/code=${GITHUB_RUN_NUMBER}|" export_presets.cfg
           sed -i "s|^version/name=.*|version/name=\"0.9.${GITHUB_RUN_NUMBER}\"|" export_presets.cfg
+          # The start menu shows this, so testers can see which build they have.
+          sed -i "s|^config/version=.*|config/version=\"0.9.${GITHUB_RUN_NUMBER}\"|" project.godot
+          grep -E '^config/version=' project.godot
           grep -E '^version/' export_presets.cfg
 
       - name: Pin dotnet CLI to the 9.0 SDK for this build (runner also ships .NET 10)

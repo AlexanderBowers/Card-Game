@@ -40,6 +40,16 @@ public sealed class ScoreDisplay
     private int Shown(Player player) =>
         player != null && _shownOverride.TryGetValue(player, out int value) ? value : player?.CurrentScore ?? 0;
 
+    /// The score as written on the table. With face-down cards on the board (the hidden-card rule)
+    /// it is only what the face-up cards add up to, and "+?" for the rest - "14+?" - so the player
+    /// can see how much they know and that there is more they don't.
+    private string ScoreText(Player player)
+    {
+        if (!_host.GameStarted || player == null) return "-";
+        if (!player.HasHiddenCards) return Shown(player).ToString();
+        return $"{Shown(player) - player.HiddenTotal}+?";
+    }
+
     /// Keep showing `value` for this player until ReleaseShown.
     public void HoldShown(Player player, int value)
     {
@@ -90,6 +100,7 @@ public sealed class ScoreDisplay
         ApplyScoreDanger(L.P2OpponentBox, P1);
         UpdateHoldLock(L.P1ScoreBox, P1);
         UpdateHoldLock(L.P2ScoreBox, P2);
+        UpdateReadyBadge(L.P2ScoreBox, P2);
         _scoreFeedbackPrimed = true; // from here on, changes animate and make their sound
     }
 
@@ -135,8 +146,8 @@ public sealed class ScoreDisplay
     /// left empty there rather than repeating your score across the table.
     private void RefreshOpponentLines()
     {
-        string p1 = _host.GameStarted ? Shown(P1).ToString() : "-";
-        string p2 = _host.GameStarted ? Shown(P2).ToString() : "-";
+        string p1 = ScoreText(P1);
+        string p2 = ScoreText(P2);
 
         if (L.ScoreBadges)
         {
@@ -238,7 +249,9 @@ public sealed class ScoreDisplay
         // The opponent boxes show the real score, so they never use the preview.
         int? previewed = preview ? PreviewedScore(player) : null;
         int shown = previewed ?? Shown(player);
-        bool started = _host.GameStarted;
+        // A score with face-down cards in it is neither red nor green: either would tell the
+        // player what the hidden cards add up to.
+        bool started = _host.GameStarted && !player.HasHiddenCards;
         bool over = started && shown > State.TargetScore;
         bool onTarget = started && previewed.HasValue && previewed.Value == State.TargetScore;
 
@@ -285,6 +298,7 @@ public sealed class ScoreDisplay
         _authoredBoxStyle.Clear();
         _dangerBoxStyle.Clear();
         _holdLocks.Clear(); // the old layout's locks went with its nodes
+        _readyBadges.Clear();
     }
 
     private void CelebrateOnTarget(Control box)
@@ -329,6 +343,59 @@ public sealed class ScoreDisplay
         Player holder = box == L.P1ScoreBox ? P1 : P2;
         Control board = holder == P1 ? _ui.P1Board : _ui.P2Board;
         _ui.Moments.PlayHold(box, padlock, board, BuildPadlock, LockSize, _sfxLock);
+    }
+
+    // ------------------------------------------------------------------
+    // "Ready" (online, 2026-10-10). Both players choose at once and the turn resolves when the
+    // second one does, so without this you can't tell whether the other player has already
+    // chosen. A green Ready badge pops onto their score box's top-right corner once they have, and
+    // leaves when the turn plays out. Holding shows the padlock there instead - never both.
+    // ------------------------------------------------------------------
+    private readonly Dictionary<Control, Control> _readyBadges = new Dictionary<Control, Control>();
+    private static readonly Color ReadyGreen = new Color(0.13f, 0.62f, 0.33f);
+
+    private void UpdateReadyBadge(Control box, Player player)
+    {
+        if (box == null || player == null || box.GetParent() is not Control parent) return;
+        bool ready = _host.IsOnlineMatch && _host.GameStarted && !State.IsGameOver
+                     && player.HasEndedTurn && !player.IsHolding;
+
+        if (!_readyBadges.TryGetValue(box, out Control badge) || !GodotObject.IsInstanceValid(badge))
+        {
+            if (!ready) return; // built the first time it is needed
+            badge = BuildReadyBadge();
+            parent.AddChild(badge);
+            parent.MoveChild(badge, box.GetIndex() + 1);
+            _readyBadges[box] = badge;
+        }
+
+        badge.Position = box.Position + new Vector2(box.Size.X - badge.Size.X * 0.6f, -badge.Size.Y * 0.5f);
+        if (ready == badge.Visible) return;
+        badge.Visible = ready;
+        if (!ready) return;
+
+        badge.PivotOffset = badge.Size / 2f;
+        badge.Scale = new Vector2(0.4f, 0.4f);
+        Tween pop = badge.CreateTween();
+        pop.TweenProperty(badge, "scale", new Vector2(1.15f, 1.15f), 0.12f).SetTrans(Tween.TransitionType.Back).SetEase(Tween.EaseType.Out);
+        pop.TweenProperty(badge, "scale", Vector2.One, 0.10f);
+    }
+
+    private static Control BuildReadyBadge()
+    {
+        PanelContainer badge = new PanelContainer { Name = "ReadyBadge", MouseFilter = Control.MouseFilterEnum.Ignore, Visible = false };
+        StyleBoxFlat style = new StyleBoxFlat { BgColor = ReadyGreen, BorderColor = Colors.White, AntiAliasingSize = 1.2f };
+        style.SetBorderWidthAll(2);
+        style.SetCornerRadiusAll(14);
+        style.ContentMarginLeft = style.ContentMarginRight = 14;
+        style.ContentMarginTop = style.ContentMarginBottom = 2;
+        badge.AddThemeStyleboxOverride("panel", style);
+        Label text = new Label { Text = "Ready", MouseFilter = Control.MouseFilterEnum.Ignore };
+        text.AddThemeFontSizeOverride("font_size", 26);
+        text.AddThemeColorOverride("font_color", Colors.White);
+        badge.AddChild(text);
+        badge.ResetSize();
+        return badge;
     }
 
     /// A padlock from three flat shapes - a shackle (an arch of border only), a body and a
@@ -435,7 +502,7 @@ public sealed class ScoreDisplay
         if (player == null) return;
         bool started = _host.GameStarted;
         string targetText = started && withTarget ? $"/{State.TargetScore}" : string.Empty;
-        string scoreText = started ? Shown(player).ToString() : "-";
+        string scoreText = ScoreText(player);
 
         if (value != null)
         {
@@ -521,8 +588,7 @@ public sealed class ScoreDisplay
         }
         else
         {
-            lines.YouValue.Text = withTarget ? ScoreOf(player)
-                                             : (_host.GameStarted ? Shown(player).ToString() : "-");
+            lines.YouValue.Text = withTarget ? ScoreOf(player) : ScoreText(player);
             lines.YouValue.RemoveThemeColorOverride("font_color");
         }
 
@@ -539,11 +605,17 @@ public sealed class ScoreDisplay
     {
         Card picked = _host.SelectedFor(player);
         if (picked == null || picked.Effect != CardEffect.None || _host.Table.IsRecallLocked(player, picked)) return null;
-        return Shown(player) + picked.Value;
+        // While an effect moment holds this score at its OLD number (HoldShown), a preview built
+        // on it is a lie: the card would land on the real, already-changed score. Tester feedback
+        // (2026-10-12): a +/-4 preview read 20 while the bot's Trade Totals was still flying, and
+        // playing it landed somewhere else entirely. No preview until the real number is showing;
+        // ReleaseShown refreshes the boxes, which brings it back built on the right score.
+        if (_shownOverride.ContainsKey(player)) return null;
+        return player.CurrentScore + picked.Value;
     }
 
     /// A player's score with the target behind it - "17/20" - so "how close am I" is one glance
     /// rather than arithmetic against a number somewhere else on the screen.
     private string ScoreOf(Player player) =>
-        _host.GameStarted ? $"{Shown(player)}/{State.TargetScore}" : "-";
+        _host.GameStarted ? $"{ScoreText(player)}/{State.TargetScore}" : "-";
 }
