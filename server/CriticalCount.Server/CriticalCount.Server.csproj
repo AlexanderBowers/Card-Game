@@ -43,10 +43,19 @@
 
   <ItemGroup>
     <EmbeddedResource Include="Data/blocked_words_en.txt" LogicalName="blocked_words_en.txt" />
+    <!-- The developer site at cloudydaygames.com (Site.cs). The two legal pages are the repo's own
+         markdown, so the site and the policy in the repo can never disagree. -->
+    <EmbeddedResource Include="Site/layout.html" LogicalName="site.layout.html" />
+    <EmbeddedResource Include="Site/home.html" LogicalName="site.home.html" />
+    <EmbeddedResource Include="Site/legal.html" LogicalName="site.legal.html" />
+    <EmbeddedResource Include="Site/logo.png" LogicalName="site.logo.png" />
+    <EmbeddedResource Include="../../PRIVACY.md" LogicalName="site.PRIVACY.md" />
+    <EmbeddedResource Include="../../ACCOUNT_DELETION.md" LogicalName="site.ACCOUNT_DELETION.md" />
   </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="Microsoft.Data.Sqlite" Version="8.0.10" />
+    <PackageReference Include="Markdig" Version="0.37.0" />
   </ItemGroup>
 
   <ItemGroup>

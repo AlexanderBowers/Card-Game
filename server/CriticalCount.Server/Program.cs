@@ -71,6 +71,9 @@ log.LogInformation("Critical Count server starting (online specials: {Specials})
 
 app.MapGet("/v1/health", () => Results.Ok(new { ok = true }));
 
+// The developer site at cloudydaygames.com: home, privacy policy, account deletion, app-ads.txt.
+Site.Map(app);
+
 app.MapPost("/v1/accounts", () =>
 {
     var (id, secret) = store.CreateAccount();
