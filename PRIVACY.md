@@ -119,7 +119,7 @@ its own privacy policy: https://www.cloudflare.com/privacypolicy/
 blocks, reports and leaderboard entry from the server, immediately. Your offline progress on the
 device is not affected.
 
-If you can no longer open the game, see https://github.com/AlexanderBowers/Card-Game/blob/master/ACCOUNT_DELETION.md for how to ask us to delete
+If you can no longer open the game, see https://cloudydaygames.com/delete-account for how to ask us to delete
 your account instead. The account is anonymous and is never linked to your identity, so we will
 ask you for your display name with its four-digit number, or your friend code, to find it.
 

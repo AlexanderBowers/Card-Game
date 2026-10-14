@@ -32,6 +32,6 @@ will delete it within 30 days and reply to confirm.
   Play Games account. Delete it from your Google Play Games settings or your Google Account's
   data and privacy settings.
 
-Full privacy policy: https://github.com/AlexanderBowers/Card-Game/blob/master/PRIVACY.md
+Full privacy policy: https://cloudydaygames.com/privacy
 
 Cloudy Day Games

@@ -4,8 +4,8 @@ The online privacy policy was published as `PRIVACY.md` on 2026-10-13 (online pl
 already in testers' hands through the master builds). The account deletion page is `ACCOUNT_DELETION.md`
 in the repo root:
 
-- Privacy policy URL (unchanged in Play and AdMob): https://github.com/AlexanderBowers/Card-Game/blob/master/PRIVACY.md
-- Delete account URL (for Play Console → App content → Data safety): https://github.com/AlexanderBowers/Card-Game/blob/master/ACCOUNT_DELETION.md
+- Privacy policy URL (set in Play and AdMob on 2026-10-14): https://cloudydaygames.com/privacy
+- Delete account URL (for Play Console → App content → Data safety, set 2026-10-14): https://cloudydaygames.com/delete-account
 
 What is left is the Play Console form, in the same submission as the next release:
 
@@ -32,4 +32,4 @@ What is left is the Play Console form, in the same submission as the next releas
 - **Can users request deletion:** now **Yes**, from inside the app.
 - **Account creation:** the app creates an anonymous account. Google's account-deletion
   requirement is met in-app (Options → Online → Delete Online Account).
-- **Delete account URL:** https://github.com/AlexanderBowers/Card-Game/blob/master/ACCOUNT_DELETION.md
+- **Delete account URL:** https://cloudydaygames.com/delete-account

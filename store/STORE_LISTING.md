@@ -7,11 +7,11 @@ Package: `com.cloudydaygames.criticalcount` (permanent from the first upload).
 
 ## 1. Privacy policy URL
 
-`https://github.com/AlexanderBowers/Card-Game/blob/master/PRIVACY.md`
+`https://cloudydaygames.com/privacy`
 
-Public, not a PDF, not geofenced — what Play and AdMob need. (The repository is public, so the
-game's source is too. If that's not intended, host PRIVACY.md somewhere else first — a GitHub Pages
-site from a separate small public repo, or Google Sites — then make this repo private.)
+Public, not a PDF, not geofenced — what Play and AdMob need. The game server renders it from the
+repo's `PRIVACY.md` (see `server/CriticalCount.Server/Site.cs`), so the repo no longer has to stay
+public for the policy to be reachable. Set in Play and the AdMob EU message on 2026-10-14.
 
 ## 2. AdMob → Privacy & messaging
 
