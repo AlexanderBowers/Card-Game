@@ -15,6 +15,7 @@ public partial class OptionsOverlay : Control
 {
 
     private CheckButton _animations;
+    private CheckButton _haptics;
     private CheckButton _batterySaver;
     private CheckButton _highFrameRate;
     private VBoxContainer _onlineSection;
@@ -130,6 +131,13 @@ public partial class OptionsOverlay : Control
         rows.AddChild(VolumeRow(GameSettings.Channel.Music));
         rows.AddChild(VolumeRow(GameSettings.Channel.Sfx));
         colA.AddChild(OverlayUi.MakeLabel("Tap an icon to mute it.", NoteFont, OverlayUi.Muted));
+        // Only where a phone can buzz (2026-10-22, Feedback): a switch that does nothing on a PC
+        // would be a switch that does nothing.
+        if (OS.HasFeature("android") || OS.HasFeature("ios") || OS.IsDebugBuild())
+        {
+            _haptics = Toggle("Vibration", GameSettings.SetHaptics);
+            colA.AddChild(_haptics);
+        }
 
         // --- Purchases (monetization-spec.md §4). Only where there is a store to talk to: no ads
         // on this platform means nothing to remove, and the stub store only exists in debug builds.
@@ -260,6 +268,7 @@ public partial class OptionsOverlay : Control
         _onClosed = onClosed;
 
         _animations.SetPressedNoSignal(GameSettings.CardAnimations);
+        _haptics?.SetPressedNoSignal(GameSettings.Haptics);
         _batterySaver.SetPressedNoSignal(GameSettings.BatterySaver);
         _highFrameRate.SetPressedNoSignal(GameSettings.HighFrameRate);
         _deleteArmed = false;

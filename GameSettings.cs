@@ -58,6 +58,9 @@ public static class GameSettings
     /// player turns it on; test builds log regardless (see PlayLog.Enabled).
     public static bool PlayLog { get; private set; }
 
+    /// Little vibrations on a tap, a Modifier landing, a win (2026-10-22, Feedback). On by default.
+    public static bool Haptics { get; private set; } = true;
+
     /// Raised after any change, so open screens can react (the table shows or hides debug rows).
     public static event Action Changed;
 
@@ -85,6 +88,7 @@ public static class GameSettings
             ShowFps = cfg.GetValue("graphics", "show_fps", false).AsBool();
             CloudSave = cfg.GetValue("cloud", "enabled", false).AsBool();
             PlayLog = cfg.GetValue("diagnostics", "play_log", false).AsBool();
+            Haptics = cfg.GetValue("feel", "haptics", true).AsBool();
         }
 
         Apply();
@@ -118,6 +122,7 @@ public static class GameSettings
     public static void SetShowFps(bool on) { EnsureLoaded(); ShowFps = on; Commit(); }
     public static void SetCloudSave(bool on) { EnsureLoaded(); CloudSave = on; Commit(); }
     public static void SetPlayLog(bool on) { EnsureLoaded(); PlayLog = on; Commit(); }
+    public static void SetHaptics(bool on) { EnsureLoaded(); Haptics = on; Commit(); }
 
     private static void Commit()
     {
@@ -175,6 +180,7 @@ public static class GameSettings
         cfg.SetValue("graphics", "show_fps", ShowFps);
         cfg.SetValue("cloud", "enabled", CloudSave);
         cfg.SetValue("diagnostics", "play_log", PlayLog);
+        cfg.SetValue("feel", "haptics", Haptics);
         // "debug/grid_board" (pass 22's stacked-board switch) is no longer written; an old
         // settings file keeps the stale key and nothing reads it.
 

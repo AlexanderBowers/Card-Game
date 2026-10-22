@@ -162,6 +162,8 @@ public sealed class CardMotion
             flier.QueueFree();
             _sfxPlace?.Play();
             _sfxImpact?.Play();
+            // Felt as well as heard - your own card only; the bot's lands on its side of the table.
+            if (board != L?.P2Board) Feedback.Buzz(effect ? Feedback.Haptic.Medium : Feedback.Haptic.Light);
             if (!GodotObject.IsInstanceValid(realCard)) return;
             realCard.Modulate = Colors.White;
             realCard.PivotOffset = realCard.Size / 2f;

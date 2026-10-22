@@ -41,7 +41,6 @@ public class TierTests
         LadderStep first = Ladder.At(0), again = Ladder.At(20);
         Assert.Equal(first.Rank, again.Rank);
         Assert.Equal("Bronze Challenger III", again.Opponent);
-        Assert.Equal(first.TargetScore, again.TargetScore);
         Assert.Equal(first.MedalReward + 4, again.MedalReward);
         Assert.Equal("Obsidian Champion V", Ladder.At(49).Opponent);
     }
@@ -97,11 +96,192 @@ public class TierTests
     {
         Assert.Equal(string.Empty, Ladder.RulesLines(3));
         Assert.Equal("Face down after two cards", Ladder.RulesLines(9));
+        Assert.Contains("after one card", Ladder.RulesLines(19, 30)); // a boss below the head start
         string fifty = Ladder.RulesLines(49);
-        Assert.Contains("after one card", fifty);
+        Assert.Contains("Face down near the target", fifty);
+        Assert.Contains("dealt to within 20", fifty);
         Assert.Contains("Decks change every set", fifty);
         Assert.Contains("refill from your deck", fifty);
         Assert.Contains("Target changes every set", fifty);
+    }
+
+    // ------------------------------------------------------------------
+    // Climb and swing (2026-10-22)
+    // ------------------------------------------------------------------
+
+    [Fact]
+    public void Each_tier_above_the_first_climbs_higher_and_swings_low()
+    {
+        int lastTop = 25;
+        for (int tier = 1; tier < Ladder.TierCount; tier++)
+        {
+            List<int> targets = Enumerable.Range(tier * 10, 9).Select(i => Ladder.At(i).TargetScore).ToList();
+            Assert.True(targets.Max() > lastTop, $"tier {tier + 1} climbs past the tier below");
+            Assert.True(targets.Count(t => t <= 16) >= 3, $"tier {tier + 1} has low stages");
+            lastTop = targets.Max();
+        }
+        Assert.InRange(lastTop, 70, 80);
+        Assert.Equal(20, Ladder.At(0).TargetScore); // tier 1 is untouched
+        Assert.Equal(22, Ladder.At(8).TargetScore);
+    }
+
+    [Fact]
+    public void A_tier_boss_rolls_its_target_in_the_tiers_top_range()
+    {
+        for (int seed = 1; seed < 8; seed++)
+        {
+            RunData run = NewRun(seed);
+            ClimbTo(run, 49);
+            Assert.InRange(run.CurrentTarget, 70, 80);
+        }
+        RunData twenty = NewRun();
+        ClimbTo(twenty, 19);
+        Assert.InRange(twenty.CurrentTarget, 36, 42);
+    }
+
+    [Fact]
+    public void Reveal_distance_grows_with_the_target_and_is_off_at_thirty_or_less()
+    {
+        Assert.Equal(0, Ladder.RevealDistanceFor(30, false));
+        Assert.Equal(10, Ladder.RevealDistanceFor(35, false));
+        Assert.Equal(10, Ladder.RevealDistanceFor(40, false));
+        Assert.Equal(15, Ladder.RevealDistanceFor(60, false));
+        Assert.Equal(20, Ladder.RevealDistanceFor(80, false));
+        Assert.Equal(25, Ladder.RevealDistanceFor(80, true));
+    }
+
+    [Fact]
+    public void Above_thirty_both_players_are_dealt_to_within_twenty_of_the_target()
+    {
+        for (int seed = 1; seed < 20; seed++)
+        {
+            var host = new FakeTableHost();
+            host.Rng = new Random(seed);
+            host.State.TargetScore = 70;
+            var table = new Table(host);
+            table.StartSet();
+            table.DealTurn();
+            Assert.InRange(host.Player1.CurrentScore, 50, 59); // never a bust: the last card is 10 at most
+            Assert.InRange(host.Player2.CurrentScore, 50, 59);
+        }
+    }
+
+    [Fact]
+    public void At_thirty_or_less_the_opening_is_still_two_cards()
+    {
+        var (host, table) = NewTable(target: 30);
+        table.StartSet();
+        table.DealTurn();
+        Assert.Equal(2, host.Player1.ActiveCardsOnBoard.Count);
+    }
+
+    [Fact]
+    public void At_a_high_target_the_bots_cards_stay_face_up_until_it_nears_the_target()
+    {
+        for (int seed = 1; seed < 20; seed++)
+        {
+            var host = new FakeTableHost { VsBot = true };
+            host.Rng = new Random(seed);
+            host.State.TargetScore = 60;        // distance 15: face down from 45
+            host.State.HiddenOpponent = true;
+            var table = new Table(host);
+            table.StartSet();
+            table.DealTurn();
+            Player bot = host.Player2;
+            Assert.DoesNotContain(bot.ActiveCardsOnBoard, c => c.IsHidden); // the head start is face up
+
+            while (bot.CurrentScore < 45) { table.DealTurn(); }
+            // Every card drawn once it was at 45 or more is face down, and none before.
+            int running = 0;
+            foreach (Card card in bot.ActiveCardsOnBoard)
+            {
+                Assert.Equal(running >= 45, card.IsHidden);
+                running += card.Value;
+            }
+            if (bot.CurrentScore < 60) { table.DealTurn(); Assert.True(bot.ActiveCardsOnBoard[^1].IsHidden); }
+        }
+    }
+
+    [Fact]
+    public void Once_a_card_is_face_down_the_rest_of_the_set_stays_face_down()
+    {
+        var (host, table) = NewTable(target: 60);
+        host.VsBot = true;
+        host.State.HiddenOpponent = true;
+        Player bot = host.Player2;
+        bot.ActiveCardsOnBoard.Add(new Card(5, CardType.Main) { IsHidden = true });
+        Assert.True(table.LandsFaceDown(bot, scoreBefore: 10, cardsBefore: 1));
+        Assert.False(table.LandsFaceDown(host.Player1, scoreBefore: 55, cardsBefore: 1)); // never yours
+    }
+
+    [Fact]
+    public void A_moving_target_moves_around_the_stages_own_number()
+    {
+        Assert.Equal((Table.MovingTargetMin, Table.MovingTargetMax), Table.MovingTargetRange(0));
+        Assert.Equal((64, 84), Table.MovingTargetRange(74));
+        Assert.Equal((11, 17), Table.MovingTargetRange(14));
+
+        var (host, table) = NewTable(target: 74);
+        host.State.BaseTarget = 74;
+        host.State.TargetMovesEachSet = true;
+        table.StartSet();
+        for (int set = 0; set < 8; set++)
+        {
+            table.StartSet();
+            Assert.InRange(host.State.TargetScore, 64, 84);
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // Choosing where a run starts (2026-10-22)
+    // ------------------------------------------------------------------
+
+    [Fact]
+    public void A_player_past_stage_ten_can_start_again_from_stage_one_and_keep_their_progress()
+    {
+        RunData run = NewRun();
+        ClimbTo(run, 24);
+        run.CompleteMatch(1, won: false);
+        Assert.Equal(new List<int> { 0, 10, 20 }, run.StartableSteps());
+
+        run.StartNewRun(0);
+        Assert.Equal(0, run.StepIndex);
+        Assert.Equal(0, run.RunStartStep);
+        Assert.Equal(20, run.CheckpointStep);   // the tiers stay open
+        Assert.Equal(24, run.FurthestStep);
+
+        // A loss on the replay goes back to where the replay began, not to the checkpoint.
+        ClimbTo(run, 4);
+        run.CompleteMatch(0, won: false);
+        run.StartNewRun(run.RunStartStep);
+        Assert.Equal(0, run.StepIndex);
+    }
+
+    [Fact]
+    public void A_start_beyond_the_checkpoint_or_mid_tier_is_snapped_back()
+    {
+        RunData run = NewRun();
+        ClimbTo(run, 12);
+        run.StartNewRun(35);
+        Assert.Equal(10, run.StepIndex);
+        run.StartNewRun(7);
+        Assert.Equal(0, run.StepIndex);
+    }
+
+    [Fact]
+    public void Where_the_run_began_survives_a_save()
+    {
+        RunData run = NewRun();
+        ClimbTo(run, 21);
+        run.StartNewRun(10);
+        RunData loaded = new RunData(new Random(2));
+        loaded.LoadSaveJson(run.ToSaveJson());
+        Assert.Equal(10, loaded.RunStartStep);
+
+        string old = run.ToSaveJson().Replace("\"runStart\":10,", string.Empty);
+        RunData migrated = new RunData(new Random(3));
+        migrated.LoadSaveJson(old);
+        Assert.Equal(20, migrated.RunStartStep); // an old save began its run at the checkpoint
     }
 
     [Fact]

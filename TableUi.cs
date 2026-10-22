@@ -124,8 +124,10 @@ public sealed class TableUi
         Cards = new CardViews(() => _host.InRun);
         _chipWon = GD.Load<Texture2D>(CardViews.ArtDir + "ui/chip_won.png");
         _chipEmpty = GD.Load<Texture2D>(CardViews.ArtDir + "ui/chip_empty.png");
-        _sfxSlide = CreateSfx("res://assets/kenney/sfx/cardSlide1.ogg");
-        _sfxPlace = CreateSfx("res://assets/kenney/sfx/cardPlace1.ogg");
+        // The draw is two sounds, each on its own moment (Ian, 2026-10-22: "the slap part of the sound
+        // happens late ... swish when the card starts moving and slap when it hits the table").
+        _sfxSlide = CreateSfx("res://assets/sfx/card_swish.wav");
+        _sfxPlace = CreateSfx("res://assets/sfx/card_slap.wav");
         _sfxLock = CreateSfx("res://assets/sfx/hold_lock.wav");
         _sfxOnTarget = CreateSfx("res://assets/sfx/on_target.wav");
         _sfxImpact = CreateSfx("res://assets/sfx/modifier_impact.wav");
@@ -355,7 +357,12 @@ public sealed class TableUi
     {
         AudioStream stream = GD.Load<AudioStream>(path);
         if (stream == null) return null;
-        AudioStreamPlayer player = new AudioStreamPlayer { Stream = stream, VolumeDb = -4f, Bus = GameSettings.SfxBus };
+        // Several at once: the head start deals a dozen cards, and each slap should be heard rather
+        // than cut off by the next.
+        AudioStreamPlayer player = new AudioStreamPlayer
+        {
+            Stream = stream, VolumeDb = -4f, Bus = GameSettings.SfxBus, MaxPolyphony = 4,
+        };
         _root.AddChild(player);
         return player;
     }
@@ -837,6 +844,7 @@ public sealed class TableUi
         foreach (Card card in player.ActiveCardsOnBoard)
         {
             Control slot = FindFreeSlot(board);
+            if (slot == null && FoldOldest(board)) slot = FindFreeSlot(board); // a full board stacks
             if (slot == null) break;
             TextureRect view = Cards.CreateCardView(card, BoardCardSizeFor(board), board == L?.P2Board);
             slot.AddChild(view);
@@ -844,6 +852,110 @@ public sealed class TableUi
             RefreshBoardSlots(board);
         }
         ResizeBoard(board); // one size for every card, now the row count is known
+        RefreshStack(board);
+    }
+
+    // ------------------------------------------------------------------
+    // The stack (2026-10-22)
+    //
+    // Above a target of 30 a set can put a dozen cards or more on one board, and a board has nine
+    // slots. When the next card has nowhere to go, the board's oldest cards fold into a pile in the
+    // FIRST slot - one view showing their total and how many there are (CardViews.CreateStackView)
+    // - and every other card slides one slot left, which frees the last slot for the new one.
+    //
+    // The folded cards' own views are not freed: they move into the first slot, hidden, under the
+    // pile. That keeps every card's view alive for anything still holding it - a flight that has
+    // not started yet (the head start deals a dozen cards in one frame) simply flies into the pile,
+    // which is what it looks like it should do - and it is what the pile reads its total from.
+    // ------------------------------------------------------------------
+    private static TextureRect StackViewOf(Control slot)
+    {
+        if (slot == null) return null;
+        foreach (Node child in slot.GetChildren())
+            if (child is TextureRect view && view.HasMeta(CardViews.StackMeta)) return view;
+        return null;
+    }
+
+    private static List<Control> SlotsOf(Control board)
+    {
+        List<Control> slots = new List<Control>();
+        if (board == null) return slots;
+        foreach (Node child in board.GetChildren())
+            if (child is Control slot) slots.Add(slot);
+        return slots;
+    }
+
+    /// Folds the board's oldest card into the pile in its first slot (starting one if there is
+    /// none) and slides the rest one slot left, so the last slot is free. False if the board is
+    /// too small to stack.
+    private bool FoldOldest(Control board)
+    {
+        List<Control> slots = SlotsOf(board);
+        if (slots.Count < 3) return false;
+
+        Control first = slots[0];
+        if (StackViewOf(first) == null)
+        {
+            foreach (Node child in first.GetChildren())
+                if (child is CanvasItem item) item.Visible = false;
+            TextureRect pile = Cards.CreateStackView(BoardCardSizeFor(board), board == L?.P2Board);
+            first.AddChild(pile);
+            first.MoveChild(pile, 0);
+            pile.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
+            Pop(pile);
+        }
+
+        MoveViews(slots[1], first, hide: true);
+        for (int i = 2; i < slots.Count; i++) MoveViews(slots[i], slots[i - 1], hide: false);
+        RefreshStack(board);
+        return true;
+    }
+
+    private static void MoveViews(Control from, Control to, bool hide)
+    {
+        foreach (Node child in from.GetChildren())
+        {
+            if (child is not Control view) continue;
+            view.Reparent(to, false);
+            view.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
+            if (hide) view.Visible = false;
+        }
+    }
+
+    /// The pile takes a card: a quick swell, so the eye catches the fold.
+    private static void Pop(Control pile)
+    {
+        if (!GameSettings.CardAnimations || !pile.IsInsideTree()) return;
+        pile.PivotOffset = pile.Size / 2f;
+        pile.Scale = new Vector2(1.1f, 1.1f);
+        Tween t = pile.CreateTween();
+        t.TweenProperty(pile, "scale", Vector2.One, 0.2f).SetTrans(Tween.TransitionType.Back).SetEase(Tween.EaseType.Out);
+    }
+
+    /// Re-adds the pile's total from the cards under it: "34", or "34+?" while some of them are
+    /// face down (the hidden-card rule), and how many there are.
+    private void RefreshStack(Control board)
+    {
+        List<Control> slots = SlotsOf(board);
+        if (slots.Count == 0) return;
+        TextureRect pile = StackViewOf(slots[0]);
+        if (pile == null) return;
+
+        Player owner = board == L?.P2Board ? P2 : P1;
+        if (owner == null) return;
+        int total = 0, count = 0;
+        bool hidden = false;
+        foreach (Node child in slots[0].GetChildren())
+        {
+            if (child == pile || child is not TextureRect view || !view.HasMeta("cardId")) continue;
+            int id = view.GetMeta("cardId").AsInt32();
+            Card card = owner.ActiveCardsOnBoard.Find(c => c.Id == id);
+            if (card == null) continue;
+            count++;
+            if (card.IsHidden) hidden = true;
+            else total += card.Value;
+        }
+        Cards.SetStackText(pile, hidden ? $"{total}+?" : $"{total}", count);
     }
 
     private Control FindFreeSlot(Control board)
@@ -927,6 +1039,8 @@ public sealed class TableUi
         RefreshModifiersUI();
         RefreshBoardSlots(L.P1Board);
         RefreshBoardSlots(L.P2Board);
+        RefreshStack(L.P1Board);   // a face-down card under a pile may have turned over
+        RefreshStack(L.P2Board);
         _host.AfterRefresh();
 
         ApplyMirror(); // only does anything when the mirror has just changed
@@ -1504,6 +1618,8 @@ public sealed class TableUi
         // In portrait the sixth card opens the third row, and RefreshBoardSlots below re-sizes
         // every card on the board for it - this one included.
         Control slot = FindFreeSlot(parentContainer);
+        // A full board folds its oldest cards into a pile (2026-10-22) rather than overflowing.
+        if (slot == null && FoldOldest(parentContainer)) slot = FindFreeSlot(parentContainer);
         cardNode.Modulate = new Color(1, 1, 1, 0); // invisible until the turn animation lands
         if (slot != null)
         {

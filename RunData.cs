@@ -329,7 +329,11 @@ public partial class RunData
         }
         else
         {
-            rolled = Ruleset.Roll(_random, count: Math.Max(1, CurrentStep.RolledSpecials));
+            // A tier boss rolls inside its tier's top range (2026-10-22); stage 10 keeps 18-25.
+            LadderStep step = CurrentStep;
+            rolled = step.TargetMin > 0
+                ? Ruleset.Roll(_random, step.TargetMin, step.TargetMax, Math.Max(1, step.RolledSpecials))
+                : Ruleset.Roll(_random, count: Math.Max(1, step.RolledSpecials));
         }
         RolledStep = StepIndex;
         // Only a randomised rung (a boss) plays to the rolled target; the others keep their rank's.
@@ -355,12 +359,32 @@ public partial class RunData
     /// Losing must not wipe singleplayer progress (Alexander, 2026-09-07): every card the player
     /// has unlocked, the deck they built out of it, and their banked medals all survive a lost run
     /// and carry into the next one. What a loss costs is the climb, not the cards.
-    public void StartNewRun()
+    public void StartNewRun() => StartNewRun(CheckpointStep);
+
+    /// The stages a new run may start on: stage 1, and the first stage of every tier the player
+    /// has opened by beating its boss (2026-10-22: "I am unable to restart the game at Match 1 ...
+    /// I would like to retain my progress and start from the beginning"). Starting lower keeps
+    /// every card, medal and the checkpoint itself - a replay of tier 1 never takes tier 2 away.
+    public List<int> StartableSteps()
+    {
+        List<int> steps = new List<int>();
+        for (int step = 0; step <= CheckpointStep; step += Ladder.TierSize) steps.Add(step);
+        return steps;
+    }
+
+    /// Where the run in progress (or the one just lost) began, so a loss restarts it there: a
+    /// player replaying stages 1-10 who loses at stage 6 goes back to stage 1, not to stage 11.
+    public int RunStartStep { get; private set; }
+
+    /// Starts a run on `startStep`, which is snapped to a tier's first stage no higher than the
+    /// checkpoint - so a stale or hand-edited value can never skip a tier.
+    public void StartNewRun(int startStep)
     {
         BankEndlessRun();       // an endless run being given up still earned its place
         RunActive = true;
         EndlessRunBanked = false;
-        StepIndex = CheckpointStep; // the start of the highest tier reached - see CheckpointStep
+        StepIndex = Ladder.TierStart(Math.Clamp(startStep, 0, CheckpointStep));
+        RunStartStep = StepIndex;
         Endless = false;
         EndlessStreak = 0;
         MatchRescueUsed = false;
@@ -408,10 +432,23 @@ public partial class RunData
         Save();
     }
 
+    /// The medals the last won match paid, for the Modifier Shop to count up in front of the player
+    /// (2026-10-22). Not saved: it is about the screen that follows the match, not about the run.
+    public int LastMedalsEarned { get; private set; }
+
+    /// Hands the count over once, so leaving and reopening a screen does not count it again.
+    public int TakeMedalsEarned()
+    {
+        int earned = LastMedalsEarned;
+        LastMedalsEarned = 0;
+        return earned;
+    }
+
     /// Banks the medals for a won match and moves the player up one rung.
     public void CompleteMatch(int setsWon, bool won)
     {
         if (!RunActive) return;
+        LastMedalsEarned = won ? setsWon + CurrentStep.MedalReward : 0;
 
         MatchRescueUsed = false; // the next match gets its own rescue
 
@@ -675,6 +712,7 @@ public partial class RunData
         StepIndex = 0;
         FurthestStep = 0;
         CheckpointStep = 0;
+        RunStartStep = 0;
         Endless = false;
         EndlessStreak = 0;
         EndlessBest = 0;

@@ -34,6 +34,15 @@ public class GameState
 
 	/// A new target every set after the first (Table.StartSet).
 	public bool TargetMovesEachSet { get; set; }
+
+	/// The stage's own target, which a moving target moves around (2026-10-22: the tier 5 targets
+	/// run from 12 to 80, so the target moves near the stage's number rather than within 17-26).
+	/// 0 = the moving target's old fixed range.
+	public int BaseTarget { get; set; }
+
+	/// How close to the target the bot's cards stay face up (Ladder.RevealDistanceFor). 0 = the
+	/// count rule above (FaceUpCards). Recomputed from TargetScore, so a moving target moves it too.
+	public int RevealDistance => HiddenOpponent ? Ladder.RevealDistanceFor(TargetScore, FaceUpCards == 1) : 0;
 	public int SetsWonPlayer1 { get; set; } = 0;
 	public int SetsWonPlayer2 { get; set; } = 0;
 
