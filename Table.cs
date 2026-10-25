@@ -89,6 +89,11 @@ public sealed class Table
     /// How long the second opening card waits behind the first, so the pair reads as two cards.
     private const float OpeningDealStagger = 0.18f;
 
+    /// The head start's deal (DealTurn): cards fly a little quicker than the two-card opening, and
+    /// there is a ceiling so no deck shape can deal forever (a Low deck to 60 is about 15 cards).
+    private const float HeadStartStagger = 0.14f;
+    private const int MaxHeadStartCards = 24;
+
     /// The next turn is this set's opening one - see DealTurn.
     private bool _firstTurnOfSet;
 
@@ -179,6 +184,21 @@ public sealed class Table
 
     /// This match hides the bot's cards. Never in local 2-player, whatever the state says.
     public bool HidesOpponent => _host.VsBot && _host.State.HiddenOpponent;
+
+    /// Should the bot's next card - a draw, or a plain Modifier out of its face-down hand - land face
+    /// down? `scoreBefore` is its score before the card counts.
+    ///
+    /// At a target of 30 or less: after its first FaceUpCards cards this set (the count rule).
+    /// Above 30 (2026-10-22): once its score is within GameState.RevealDistance of the target, and
+    /// from then on for the rest of the set - a minus card that takes it back out of the zone does
+    /// not turn the next one face up again, or the change of face would give the total away.
+    public bool LandsFaceDown(Player player, int scoreBefore, int cardsBefore)
+    {
+        if (!HidesOpponent || player != P2) return false;
+        int distance = _host.State.RevealDistance;
+        if (distance <= 0) return cardsBefore + 1 > _host.State.FaceUpCards;
+        return player.HasHiddenCards || scoreBefore >= _host.State.TargetScore - distance;
+    }
 
     /// The set is over: the bot's board turns face up so the result can be read. Its hand stays
     /// face down - those cards are still to be played this match. Returns the cards that turned.
@@ -462,15 +482,25 @@ public sealed class Table
     public bool TargetMovedThisSet { get; private set; }
     public bool DeckChangedThisSet { get; private set; }
 
-    /// A moving target's range: the tier ladder's own spread (18 to 25) and a step either side, so
-    /// it still reads as "the target moved", never as a different game. Never the same twice running.
+    /// A moving target's range when no stage target is set: 17 to 26. Never the same twice running.
     public const int MovingTargetMin = 17;
     public const int MovingTargetMax = 26;
 
+    /// Since 2026-10-22 the stages 41-50 targets run from 12 to 80, so a moving target moves AROUND
+    /// the stage's own number - a seventh of it either way, and at least 3 - so it still reads as
+    /// "the target moved", never as a different stage.
+    public static (int Min, int Max) MovingTargetRange(int baseTarget)
+    {
+        if (baseTarget <= 0) return (MovingTargetMin, MovingTargetMax);
+        int spread = Math.Max(3, baseTarget / 7);
+        return (Math.Max(10, baseTarget - spread), baseTarget + spread);
+    }
+
     private int RollSetTarget(int previous)
     {
+        (int min, int max) = MovingTargetRange(_host.State.BaseTarget);
         int target;
-        do target = _host.Rng.Next(MovingTargetMin, MovingTargetMax + 1); while (target == previous);
+        do target = _host.Rng.Next(min, max + 1); while (target == previous && min < max);
         return target;
     }
 
@@ -739,7 +769,28 @@ public sealed class Table
         // dropped.
         bool opening = _firstTurnOfSet;
         _firstTurnOfSet = false;
-        int cards = (opening && _host.State.TargetScore >= OpeningDoubleDealTarget) ? 2 : 1;
+        int target = _host.State.TargetScore;
+
+        // The head start (2026-10-22). Above a target of 30 the opening deal keeps dealing each
+        // player until they are within 20 of it, so a set at 70 is the same handful of decisions a
+        // set at 20 is, rather than a dozen turns of drawing with nothing to decide. Each player is
+        // dealt to their own line, so the two may start a few apart - which is the point: at a high
+        // target the question is who finishes closer.
+        if (opening && target > Ladder.HeadStartAbove)
+        {
+            int line = target - Ladder.HeadStartGap;
+            int dealt = 0;
+            while (dealt < MaxHeadStartCards && (P1.CurrentScore < line || P2.CurrentScore < line))
+            {
+                float delay = dealt * HeadStartStagger;
+                if (P1.CurrentScore < line) DrawFor(P1, delay, opening);
+                if (P2.CurrentScore < line) DrawFor(P2, delay, opening);
+                dealt++;
+            }
+            return;
+        }
+
+        int cards = (opening && target >= OpeningDoubleDealTarget) ? 2 : 1;
 
         for (int i = 0; i < cards; i++)
         {
@@ -756,14 +807,15 @@ public sealed class Table
         if (player.IsHolding) return;
 
         int cardValue = DrawValue(player, opening);
+        bool faceDown = LandsFaceDown(player, player.CurrentScore, player.ActiveCardsOnBoard.Count);
         player.CurrentScore += cardValue;
 
         Card drawnMainCard = new Card(cardValue, CardType.Main, cardValue.ToString());
         player.ActiveCardsOnBoard.Add(drawnMainCard);
 
-        // The hidden-card rule: past the bot's first two cards this set, its draws land face down.
-        if (HidesOpponent && player == P2 && player.ActiveCardsOnBoard.Count > _host.State.FaceUpCards)
-            drawnMainCard.IsHidden = true;
+        // The hidden-card rule: past the bot's first two cards this set (or, above a target of 30,
+        // once it is near the target), its draws land face down.
+        if (faceDown) drawnMainCard.IsHidden = true;
 
         // Copy names this exact card. On a two-card opening deal that is the SECOND one, because
         // this runs once per card and the last write wins - which is the right answer (it is the

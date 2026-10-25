@@ -403,6 +403,67 @@ public partial class ShopOverlay : Control
         _laidOutFor = Vector2.Zero;
         LayoutForSize();
         CallDeferred(nameof(LayoutForSize)); // again once the header and footer have measured
+        CountUpMedals(run);
+    }
+
+    // ------------------------------------------------------------------
+    // The medal count-up (2026-10-22, Ian: "if you have a counter that goes up ... have it animate
+    // the number and give you little haptic taps, then some sound effects as it's going, and a
+    // celebration sound effect at the end")
+    //
+    // The shop opens on the medals you had BEFORE the match and counts the new ones in, one tick
+    // and one tap each, the ticks climbing in pitch, and lands on a chime. A big purse counts
+    // faster, so it never takes much more than a second.
+    // ------------------------------------------------------------------
+    private int _medalShown = -1; // the number on the label while counting; -1 = show the real one
+    private Tween _medalCount;
+
+    private void CountUpMedals(RunData run)
+    {
+        int earned = run.TakeMedalsEarned();
+        if (earned <= 0 || _medalLabel == null) return;
+
+        _medalCount?.Kill();
+        int from = Math.Max(0, run.Medals - earned);
+        _medalShown = from;
+        _medalLabel.Text = $"Current Medals: {from}";
+
+        float step = Mathf.Clamp(1.2f / earned, 0.045f, 0.11f);
+        _medalCount = CreateTween();
+        _medalCount.TweenInterval(0.35f); // let the screen land first
+        for (int i = 1; i <= earned; i++)
+        {
+            int shown = from + i;
+            float pitch = 1f + 0.5f * i / earned;
+            _medalCount.TweenCallback(Callable.From(() =>
+            {
+                _medalShown = shown;
+                _medalLabel.Text = $"Current Medals: {shown}";
+                Feedback.Play(Feedback.Sound.MedalTick, pitch);
+                Feedback.Buzz(Feedback.Haptic.Tap);
+            }));
+            _medalCount.TweenInterval(step);
+        }
+        _medalCount.TweenCallback(Callable.From(() =>
+        {
+            _medalShown = -1;
+            Feedback.Play(Feedback.Sound.MedalDone);
+            Feedback.Buzz(Feedback.Haptic.Medium);
+            _medalLabel.PivotOffset = _medalLabel.Size / 2f;
+            _medalLabel.Scale = new Vector2(1.18f, 1.18f);
+            Tween pop = _medalLabel.CreateTween();
+            pop.TweenProperty(_medalLabel, "scale", Vector2.One, 0.25f)
+               .SetTrans(Tween.TransitionType.Back).SetEase(Tween.EaseType.Out);
+            Refresh(); // prices the player can now afford light up as the count lands
+        }));
+    }
+
+    /// Spending stops the count: the label shows what is really there.
+    private void StopMedalCount()
+    {
+        _medalCount?.Kill();
+        _medalCount = null;
+        _medalShown = -1;
     }
 
     private void Close()
@@ -490,7 +551,7 @@ public partial class ShopOverlay : Control
         RunData run = RunData.Instance;
         if (run == null) return;
 
-        _medalLabel.Text = $"Current Medals: {run.Medals}";
+        _medalLabel.Text = $"Current Medals: {(_medalShown >= 0 ? _medalShown : run.Medals)}";
         OverlayUi.ClearChildren(_offerGrid);
 
         float textWidth = Mathf.Max(_cardSize.X * 1.2f, _cellWidth - 12f);
@@ -548,6 +609,7 @@ public partial class ShopOverlay : Control
         RunData run = RunData.Instance;
         if (run == null || offer.Sold || run.Medals < offer.Price) return;
 
+        StopMedalCount();
         run.SpendMedals(offer.Price);
         bool wasComplete = run.CollectionComplete;
         int index = run.AddToInventory(offer.Def);

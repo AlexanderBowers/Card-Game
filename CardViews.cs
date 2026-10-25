@@ -1,4 +1,4 @@
-using Godot;
+﻿using Godot;
 using System;
 using System.Collections.Generic;
 
@@ -288,6 +288,103 @@ public sealed class CardViews
         if (!hadShine) AddShine(view, card);
         else if (view.GetNodeOrNull<ColorRect>("Shine")?.Material is ShaderMaterial shine)
             shine.SetShaderParameter("card_face", view.Texture);
+    }
+
+    // ------------------------------------------------------------------
+    // The board stack (2026-10-22)
+    //
+    // A board has nine slots, and a set at a target of 60-80 can put twelve or more cards on one.
+    // When the board is full its oldest cards fold into one pile in the first slot (TableUi), and
+    // this is that pile: a main-card face with two cards fanned behind it, the total of what it
+    // holds in big ink and how many cards are in it.
+    //
+    // It is drawn in a little SubViewport and shown as that viewport's texture, so the view is one
+    // finished picture like a pre-rendered card - which is what lets the 3D table lay it on the
+    // board with the other cards (TableWorld3D mirrors a card by its texture alone).
+    // ------------------------------------------------------------------
+    public const string StackMeta = "boardStack";
+
+    private static readonly Vector2I StackRender = new Vector2I(300, 400);
+    private const float StackInset = 14f; // room in the picture for the cards fanned behind
+    private static int _nextStackId = -1;
+
+    public TextureRect CreateStackView(Vector2 size, bool opponentSide)
+    {
+        TextureRect view = (TextureRect)_cardViewScene.Instantiate();
+        view.SetMeta(StackMeta, true);
+        view.SetMeta(PrerenderedMeta, true);       // one finished picture, label hidden
+        view.SetMeta("cardId", _nextStackId--);    // a card id no real card has, so 3D draws it
+
+        SubViewport vp = new SubViewport
+        {
+            Name = "StackPicture",
+            Size = StackRender,
+            TransparentBg = true,
+            Disable3D = true,
+            RenderTargetUpdateMode = SubViewport.UpdateMode.Once,
+        };
+        view.AddChild(vp);
+
+        Vector2 face = new Vector2(StackRender.X - 2f * StackInset, StackRender.Y - 2f * StackInset);
+        float lean = opponentSide ? 1f : -1f; // fanned toward the board's far edge
+        for (int i = 2; i >= 0; i--)
+        {
+            TextureRect card = new TextureRect
+            {
+                Texture = _faceMain,
+                ExpandMode = TextureRect.ExpandModeEnum.IgnoreSize,
+                StretchMode = TextureRect.StretchModeEnum.Scale,
+                Size = face,
+                Position = new Vector2(StackInset + lean * 6f * i, StackInset - 6f * i),
+                SelfModulate = i == 0 ? RankCardTint : RankCardTint.Darkened(0.14f * i),
+            };
+            vp.AddChild(card);
+        }
+
+        Label total = new Label
+        {
+            Name = "StackTotal",
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center,
+            Position = new Vector2(StackInset, StackInset),
+            Size = new Vector2(face.X, face.Y * 0.84f),
+        };
+        total.AddThemeColorOverride("font_color", InkMain);
+        if (TableUi.EmblemFont != null) total.AddThemeFontOverride("font", TableUi.EmblemFont);
+        vp.AddChild(total);
+
+        Label count = new Label
+        {
+            Name = "StackCount",
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center,
+            Position = new Vector2(StackInset, StackInset + face.Y * 0.74f),
+            Size = new Vector2(face.X, face.Y * 0.18f),
+        };
+        count.AddThemeColorOverride("font_color", InkMain);
+        count.AddThemeFontSizeOverride("font_size", Mathf.RoundToInt(face.Y * 0.12f));
+        vp.AddChild(count);
+
+        view.Texture = vp.GetTexture();
+        ApplyCardSize(view, size);
+        return view;
+    }
+
+    /// "34" (or "34+?" while face-down cards are in it) and "7 cards", redrawn into the picture.
+    public void SetStackText(TextureRect view, string total, int cards)
+    {
+        SubViewport vp = view.GetNodeOrNull<SubViewport>("StackPicture");
+        if (vp == null) return;
+        if (vp.GetNodeOrNull<Label>("StackTotal") is Label t)
+        {
+            if (t.Text == total && vp.GetNodeOrNull<Label>("StackCount")?.Text == $"{cards} cards") return;
+            t.Text = total;
+            float face = StackRender.Y - 2f * StackInset;
+            float scale = total.Length <= 2 ? 0.46f : total.Length == 3 ? 0.36f : 0.27f;
+            t.AddThemeFontSizeOverride("font_size", Mathf.RoundToInt(face * scale));
+        }
+        if (vp.GetNodeOrNull<Label>("StackCount") is Label c) c.Text = $"{cards} cards";
+        vp.RenderTargetUpdateMode = SubViewport.UpdateMode.Once;
     }
 
     /// A card face down: the back of the deck it came from - the stage's deck for the bot's cards

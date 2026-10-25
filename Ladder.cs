@@ -95,13 +95,20 @@ public readonly struct LadderStep
     /// A new target every set (stages 41+).
     public readonly bool TargetMovesEachSet;
 
+    /// A randomised rung's target range (the tier bosses, 2026-10-22). 0 = Ruleset.Roll's own 18-25.
+    public readonly int TargetMin;
+    public readonly int TargetMax;
+
     public LadderStep(int rank, string opponent, int targetScore, int medalReward,
                       bool aiHasFlipValueCards = true, CardEffect aiEffect = CardEffect.None,
                       bool randomised = false, bool hidesOpponentCards = false,
                       int rolledSpecials = 0, int faceUpCards = 2,
                       DeckShape deck = DeckShape.Standard, bool deckChangesEachSet = false,
-                      bool refill = false, bool botRefillsSpecials = false, bool targetMovesEachSet = false)
+                      bool refill = false, bool botRefillsSpecials = false, bool targetMovesEachSet = false,
+                      int targetMin = 0, int targetMax = 0)
     {
+        TargetMin = targetMin;
+        TargetMax = targetMax;
         Randomised = randomised;
         HidesOpponentCards = hidesOpponentCards;
         Rank = rank;
@@ -201,10 +208,62 @@ public static class Ladder
 
     private static readonly string[] TierNumerals = { "", " II", " III", " IV", " V" };
 
+    // ------------------------------------------------------------------
+    // Targets above stage 10: climb and swing (2026-10-22)
+    //
+    // Alexander: "you can replay stages 1-10 and have a deck that gets you to 50. We could
+    // continually raise the target more drastically so that people need to change their decks
+    // more frequently." Until now tiers 2-5 reused tier 1's 18-25, so one deck did for the lot.
+    //
+    // Each tier now CLIMBS (tier 2 into the 30s, tier 5 into the 70s) and also SWINGS: three
+    // rungs per tier drop to a low target of 12-16. A deck stacked with big plus cards for a
+    // target of 70 is the wrong deck at 14, where the minus cards are what save a set, so the deck
+    // screen between stages is a real decision again. At the high targets the danger changes too:
+    // with ten-odd cards each there is room to get close, so the set is lost by finishing further
+    // from the target than the opponent, more often than by going over.
+    //
+    // Long sets are kept short by the head start (Table: above a target of 30 both players are
+    // dealt to within 20 of it), and a board fuller than its nine slots folds its oldest cards
+    // into one stack (TableUi). The bosses roll their target inside the tier's top range.
+    // ------------------------------------------------------------------
+    private static readonly int[][] TierTargets =
+    {
+        null, // tier 1 keeps its own (TierOne)
+        new[] { 26, 30, 15, 33, 36, 14, 38, 40, 16 },
+        new[] { 35, 40, 14, 44, 46, 13, 48, 50, 15 },
+        new[] { 45, 50, 15, 55, 58, 13, 60, 64, 16 },
+        new[] { 55, 60, 14, 65, 70, 12, 74, 78, 15 },
+    };
+
+    private static readonly (int Min, int Max)[] BossTargets =
+    {
+        (18, 25), (36, 42), (44, 52), (56, 66), (70, 80),
+    };
+
+    /// Above this target the opening deal is a head start: each player is dealt cards until they
+    /// are within HeadStartGap of the target (Table.DealTurn).
+    public const int HeadStartAbove = 30;
+    public const int HeadStartGap = 20;
+
+    /// The face-down rule at a high target (2026-10-22, Alexander: "it may be helpful to have
+    /// higher scores initially start with the opponent's cards not hidden ... once the AI starts
+    /// getting within 10-20 of the target, then we hide the remaining cards").
+    ///
+    /// Above HeadStartAbove the opponent's cards stay face up until its score is within this many
+    /// of the target - 10 at a target of 40, growing to 20 at 80 - and everything from there on
+    /// lands face down. A tier boss that shows only one card hides 5 sooner. 0 = the old rule
+    /// (face down after the first two cards), which every target of 30 or less still plays.
+    public static int RevealDistanceFor(int target, bool tight)
+    {
+        if (target <= HeadStartAbove) return 0;
+        int distance = Math.Clamp(10 + (target - 40) / 4, 10, 20);
+        return tight ? distance + 5 : distance;
+    }
+
     private static readonly LadderStep[] Steps = Build();
 
-    /// Tiers 2-5, made from tier 1's rhythm: each rung keeps tier 1's rank, target and purse (the
-    /// purse two medals richer per tier), takes the tier's rules, and carries specials picked at
+    /// Tiers 2-5, made from tier 1's rhythm: each rung keeps tier 1's rank and purse (the purse two
+    /// medals richer per tier), takes the tier's target and rules, and carries specials picked at
     /// random - the whole table has been taught by now, so a rung no longer brings a card of its own.
     private static LadderStep[] Build()
     {
@@ -224,10 +283,11 @@ public static class Ladder
 
                 DeckShape deck = tier >= 2 ? DeckShapes.Shaped[i % DeckShapes.Shaped.Length] : DeckShape.Standard;
 
+                (int bossMin, int bossMax) = BossTargets[tier];
                 steps.Add(new LadderStep(
                     shape.Rank,
                     shape.Opponent + TierNumerals[tier],
-                    shape.TargetScore,
+                    boss ? (bossMin + bossMax) / 2 : TierTargets[tier][i],
                     shape.MedalReward + 2 * tier,
                     aiHasFlipValueCards: true,
                     randomised: boss,
@@ -238,7 +298,9 @@ public static class Ladder
                     deckChangesEachSet: boss && tier >= 2 && (stage == 30 || stage == 50),
                     refill: tier >= 3,
                     botRefillsSpecials: boss && tier >= 3,
-                    targetMovesEachSet: tier >= 4));
+                    targetMovesEachSet: tier >= 4,
+                    targetMin: boss ? bossMin : 0,
+                    targetMax: boss ? bossMax : 0));
             }
         }
         return steps.ToArray();
@@ -265,13 +327,24 @@ public static class Ladder
 
     /// The lines the stage banner adds for this rung's rules, each on its own line - empty for a
     /// rung with none. (No full stops: the tutorial's style.)
-    public static string RulesLines(int index)
+    public static string RulesLines(int index) => RulesLines(index, At(index).TargetScore);
+
+    /// The same, for the target actually being played (a boss's is rolled).
+    public static string RulesLines(int index, int target)
     {
         LadderStep step = At(index);
         List<string> lines = new List<string>();
+        int distance = RevealDistanceFor(target, step.FaceUpCards == 1);
         if (step.HidesOpponentCards)
-            lines.Add(step.FaceUpCards == 1 ? "Face down after one card"
-                                             : "Face down after two cards");
+        {
+            if (distance > 0)
+                lines.Add(step.TargetMovesEachSet ? "Face down near the target"
+                                                  : $"Face down within {distance} of the target");
+            else
+                lines.Add(step.FaceUpCards == 1 ? "Face down after one card"
+                                                 : "Face down after two cards");
+        }
+        if (target > HeadStartAbove) lines.Add($"Both are dealt to within {HeadStartGap} of the target");
         if (step.DeckChangesEachSet) lines.Add("Decks change every set");
         else if (step.Deck != DeckShape.Standard) lines.Add(DeckShapes.Label(step.Deck));
         if (step.Refill) lines.Add("Modifiers refill from your deck");

@@ -34,6 +34,7 @@ public partial class RunData
             w.WriteNumber("step", StepIndex);
             w.WriteNumber("furthest", FurthestStep);
             w.WriteNumber("checkpoint", CheckpointStep);
+            w.WriteNumber("runStart", RunStartStep);
             w.WriteBoolean("tutorialSeen", TutorialSeen);
             w.WriteBoolean("marketLessonSeen", MarketLessonSeen);
             w.WriteBoolean("flipLessonPending", FlipLessonPending);
@@ -179,6 +180,9 @@ public partial class RunData
         CheckpointStep = Math.Clamp(Int(data, "checkpoint", FurthestStep >= Ladder.TierSize ? Ladder.TierSize : 0),
                                     0, (Ladder.TierCount - 1) * Ladder.TierSize);
         CheckpointStep = Ladder.TierStart(CheckpointStep);
+        // Where this run began (2026-10-22). A save from before it began its run at the checkpoint,
+        // which is the only place a run could start then.
+        RunStartStep = Ladder.TierStart(Math.Clamp(Int(data, "runStart", CheckpointStep), 0, CheckpointStep));
         TutorialSeen = Bool(data, "tutorialSeen");
         MarketLessonSeen = Bool(data, "marketLessonSeen");
         FlipLessonPending = Bool(data, "flipLessonPending");

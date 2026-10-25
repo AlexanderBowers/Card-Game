@@ -353,8 +353,9 @@ public sealed partial class Menus
         // used to offer "Continue - Match 1 of 10" over a climb nobody had played. A climb only
         // counts as in progress once it has got somewhere - past the first rung, or into endless.
         // At match 1, continuing and starting afresh are the same thing, so nothing is lost.
+        // (Past the rung the run STARTED on, since 2026-10-22: a run can start on stage 11 or 21.)
         bool runInProgress = run != null && run.RunActive && !run.RunComplete
-                             && (run.StepIndex > 0 || run.Endless);
+                             && (run.StepIndex > run.RunStartStep || run.Endless);
 
         Label blurb = OverlayUi.MakeLabel(
             runInProgress ? "A climb is in progress." : "Climb the ladder, or play someone across the table.",
@@ -400,6 +401,11 @@ public sealed partial class Menus
                 }
                 MenuStartRun(fresh: true);
             });
+
+        // Any earlier tier, stage 1 included (2026-10-22). Progress is kept: the checkpoint, cards
+        // and medals all stay, so replaying the early stages to build a new deck costs nothing.
+        if (run != null && run.StartableSteps().Count > 1)
+            AddMenuButton("Choose a Starting Stage", null, () => FillChooseStart(runInProgress));
 
         // One accent per screen: the button a returning player came for.
         OverlayUi.StyleButton(continueButton ?? _newRunButton, primary: true);
@@ -477,7 +483,7 @@ public sealed partial class Menus
         {
             _startMenuBox.AddChild(MenuSpacer());
             Label banked = OverlayUi.MakeLabel(
-                $"{run.Medals} medals   -   {run.Inventory.Count} cards owned   -   best: match {run.FurthestStep + 1}",
+                $"{run.Medals} medals   -   {run.Inventory.Count} cards owned   -   best: stage {Math.Min(run.FurthestStep + 1, Ladder.Length)}",
                 MenuNoteFont, OverlayUi.Muted);
             banked.AutowrapMode = TextServer.AutowrapMode.WordSmart;
             banked.CustomMinimumSize = new Vector2(MenuButtonWidth, 0);
@@ -664,6 +670,50 @@ public sealed partial class Menus
 
         _startMenuBox.AddChild(MenuSpacer());
         AddMenuButton("Deal", null, MenuStartLocal2Player);
+        AddMenuButton("Back", null, FillStartMenu);
+    }
+
+    /// Where a new run starts: stage 1, or the first stage of any tier the player has opened
+    /// (2026-10-22). A page of the start menu, like Endless Scores. Over a climb in progress each
+    /// choice asks twice, exactly as New Run does.
+    private void FillChooseStart(bool runInProgress)
+    {
+        RunData run = RunData.Instance;
+        if (run == null) { FillStartMenu(); return; }
+
+        OverlayUi.ClearChildren(_startMenuBox);
+        _startMenuBox.AddChild(OverlayUi.MakeLabel("Starting Stage", MenuHeadingFont));
+        Label note = OverlayUi.MakeLabel(
+            runInProgress ? "Your cards, medals and unlocked stages stay\nStarting over gives up the climb in progress"
+                          : "Your cards, medals and unlocked stages stay",
+            MenuNoteFont, OverlayUi.Muted);
+        note.HorizontalAlignment = HorizontalAlignment.Center;
+        _startMenuBox.AddChild(note);
+        _startMenuBox.AddChild(MenuSpacer());
+
+        List<int> steps = run.StartableSteps();
+        for (int i = steps.Count - 1; i >= 0; i--)
+        {
+            int step = steps[i];
+            LadderStep rung = Ladder.At(step);
+            string label = $"Stage {step + 1}";
+            Button button = null;
+            bool armed = false;
+            button = AddMenuButton($"{label}   -   target {rung.TargetScore}", null, () =>
+            {
+                if (runInProgress && !armed)
+                {
+                    armed = true;
+                    button.Text = $"{label} - tap again to give up the climb";
+                    return;
+                }
+                RunData.Instance.StartNewRun(step);
+                MenuStartRun(fresh: false);
+            });
+            if (i == steps.Count - 1) OverlayUi.StyleButton(button, primary: true);
+        }
+
+        _startMenuBox.AddChild(MenuSpacer());
         AddMenuButton("Back", null, FillStartMenu);
     }
 

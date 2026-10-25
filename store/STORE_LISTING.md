@@ -29,32 +29,49 @@ public for the policy to be reachable. Set in Play and the AdMob EU message on 2
 
 **App name** (30): `Critical Count`
 
-**Short description** (80): `A quick, clever card duel: build your score to 20 without going over.`
+The live listing text below was copied from Play Console and updated on 2026-10-14 for the
+50-stage ladder and online play.
+
+**Short description** (80): `A fast-paced card game of luck and skill!`
 
 **Full description**:
 
 ```
-Critical Count is a fast, friendly card duel. Draw from your deck, play Modifiers from your hand,
-and land as close to 20 as you can - without going over.
+Critical Count is a fast-paced card duel where tactical deck-building meets the tension of the draw. Draw numbered cards toward the target, play game-changing Modifiers from your hand, and hit the count without busting.
 
-Every set is a little bet with yourself: draw one more card, or hold? Your Modifiers let you fix
-a bad draw or steal a win at the last moment, and your opponent has a hand of their own.
+Luck deals the hand, but your deck decides the outcome. Build a custom 12-card Deck of Modifiers to adjust totals, recover from devastating draws, flip polarity on the fly, or disrupt your opponent's board before they can lock in their score.
 
-- Climb ten stages, from Bronze to Obsidian, each with its own table, deck and rules
-- Collect and buy Modifiers, then build the twelve-card side deck you take into each match
-- Meet special cards that change the game: Copy, Trade Totals, Shave, Trade Hands, Recall, Veto
-- Clear the ladder to unlock Endless mode and chase your best streak
-- Unlock new decks and boards with the medals you win
-- Play a friend face to face on one phone in local 2-player
-- Plays fully offline. Matches take a few minutes.
+Features:
 
-Easy to learn in one match, with a short guided tutorial, and plenty to master.
+Offline Singleplayer and Local 2-Player: Jump into quick matches anytime with no connection needed. Everything takes just a few minutes, whether practicing solo or battling head-to-head on the couch.
+
+Face-to-Face Table Layout: Duel on a single phone or tablet using a dedicated mirrored interface. Lay the device flat between both players and play simultaneously with no passing required.
+
+Play Online: Jump into a Quick Match against players around the world, or add friends by friend code and challenge them directly. Your own Modifier deck comes with you, and the Endless leaderboard shows who has the longest streak.
+
+Craft Your Modifier Deck: Collect and buy unique Modifier cards between matches. Build a strategic 12-card Deck designed to challenge bad luck and take control of high-risk boards.
+
+Rule the Escalating Ladder: Battle through 50 stages in five tiers, from Bronze to Obsidian. Each tier adds a twist - face-down cards, shaped decks, Modifiers that refill, and targets that move every set - and checkpoints keep your progress.
+
+Master Game-Changing Effects: Deploy high-impact cards like Copy to turn a bust around, Trade Totals to steal a lead, or Shave to punish an opponent who held early.
+
+Unlock Custom Tables and Endless Mode: Win rounds to bank Medals, unlock stylish felts and card backs, and test your longest win streak in Endless Mode.
+
+Optional Cloud Save: Keep your progress in your own Google Play Games account when you change phones.
+
+Simple enough to learn in one hand, with the tactical depth to reward smart deck construction. Will you trust the draw, or bend the numbers in your favor?
 ```
 
 **Graphics**
 - App icon 512×512: `assets/aimfor20_art/store_icon_512.png` (the −1 card, Classic "20" card back and +2 card on cream; `tools/cardgen/logogen.py --square` then `icongen.py`)
 - Feature graphic 1024×500: `store/feature_graphic_1024x500.png` (the light Bronze board; rebuild with `python tools/cardgen/featuregen.py`)
-- Phone screenshots (2–8, exactly 9:16): `store/screenshots/` holds the beta set. Take new ones on the S25, then run
+- Phone screenshots (2–8, exactly 9:16): `store/screenshots/` holds the live set (2026-10-14):
+  eight captioned 1080×1920 shots, in upload order: Hit 20. Exactly / Over 20? Flip it / Read the
+  bluff / Climb the ladder / Wild special cards / Build your deck / Collect all 24 / Play the world.
+  They were captured from v0.9.11 on the S25 and framed with Poppins captions on the sky-blue
+  gradient. App Store sizes (1320×2868 and 1206×2622) and the preview/promo videos are kept outside
+  the repo, in `Pictures\CriticalCount-Marketing` on the msi PC.
+- Older approach, still usable for plain uncaptioned shots: take new ones on the S25, then run
   `python tools/cardgen/storeshots.py <folder>`. Play only accepts phone screenshots at exactly
   9:16 or 16:9, and the S25's 19.5:9 isn't; the script pads to an exact 9:16 with the
   game's near-white room colour (instead of cropping off the score or hand) and writes the results
