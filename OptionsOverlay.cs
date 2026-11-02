@@ -56,6 +56,7 @@ public partial class OptionsOverlay : Control
     private CheckButton _playLog;
     private Button _copyPlayLog;
     private Button _closeButton;
+    private Button _shareButton;
     private Control _storeSection;      // the heading and the row, so both hide when there is no store
     private VBoxContainer _storeRows;   // refilled on every Open: what it says depends on what is owned
     private Control _privacySection;    // "Privacy Choices": only where the consent SDK requires it
@@ -158,6 +159,21 @@ public partial class OptionsOverlay : Control
         _privacySection = privacy;
         privacy.AddChild(SectionLabel("Privacy"));
         privacy.AddChild(StoreButton("Privacy Choices", () => AdService.ShowPrivacyOptions(null)));
+
+        // --- Rate / Share (Testers Community report, 2026-10-31). Only where there is a store
+        // page to point at (StoreLinks.Available). Share copies a message with the link.
+        if (StoreLinks.Available)
+        {
+            colA.AddChild(SectionLabel("Enjoying it?"));
+            colA.AddChild(StoreButton("Rate Critical Count", StoreLinks.OpenRatePage));
+            _shareButton = StoreButton("Share Critical Count", null);
+            _shareButton.Pressed += () =>
+            {
+                StoreLinks.CopyShareText();
+                _shareButton.Text = "Link copied - paste it anywhere";
+            };
+            colA.AddChild(_shareButton);
+        }
 
         // --- Graphics. The 3D table (prototype); off is the flat table, and the lighter one.
         colB.AddChild(SectionLabel("Graphics"));
@@ -288,6 +304,11 @@ public partial class OptionsOverlay : Control
         Vector2 view = OverlayUi.ViewSize(this);
         if (_columns != null) _columns.Vertical = view.X <= view.Y * 1.25f;
         if (_closeButton != null) _closeButton.CustomMinimumSize = WideButton;
+        if (_shareButton != null)
+        {
+            _shareButton.Text = "Share Critical Count";
+            _shareButton.CustomMinimumSize = WideButton;
+        }
         FillStore(); // sized here too, because WideButton follows the viewport
         if (_privacySection != null) _privacySection.Visible = AdService.PrivacyOptionsRequired;
         RefreshCloud();
