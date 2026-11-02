@@ -32,7 +32,8 @@ public for the policy to be reachable. Set in Play and the AdMob EU message on 2
 The live listing text below was copied from Play Console and updated on 2026-10-14 for the
 50-stage ladder and online play.
 
-**Short description** (80): `A fast-paced card game of luck and skill!`
+**Short description** (80): `Strategy card game of chance and skill. Play solo, 2-player offline, or online.`
+(Changed 2026-11-01 from "A fast-paced card game of luck and skill!" after the closed-test report flagged it for search.)
 
 **Full description**:
 
