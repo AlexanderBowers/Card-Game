@@ -309,12 +309,15 @@ public sealed partial class Menus
         }
         else FillStartMenu();
         _startMenuOverlay.Visible = true;
+        Music.Instance?.SetMood(Music.Mood.Menu);
+        StoreLinks.AskForReviewIfDue();
 
     }
 
     public void HideStartMenu()
     {
         if (_startMenuOverlay != null) _startMenuOverlay.Visible = false;
+        Music.Instance?.SetMood(Music.Mood.Table);
     }
 
     /// Rebuilt on every show rather than once, because what it has to say changes: whether there is

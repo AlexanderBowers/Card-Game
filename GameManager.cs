@@ -255,6 +255,7 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
 	/// scene since pass 34, so this is a flag rather than a scene change.
 	private void StartMatch(bool local2Player)
 	{
+		Music.Instance?.SetMood(Music.Mood.Table);
 		_isGameStarted = true;
 		_isVsBot = !local2Player;
 		_player2.PlayerName = _isVsBot ? "AI Bot" : "Player 2";
@@ -1240,6 +1241,7 @@ public partial class GameManager : Node, IBotTable, ITableHost, ITableUiHost, IM
 		if (matchOver)
 		{
 			Feedback.Play(celebrate ? Feedback.Sound.MatchWin : Feedback.Sound.MatchLose);
+			if (setWinner == 1 && _isVsBot && !_online) StoreLinks.NoteMatchWon();
 			if (celebrate)
 				Feedback.BuzzPattern((0f, Feedback.Haptic.Light), (0.42f, Feedback.Haptic.Strong),
 									 (0.62f, Feedback.Haptic.Medium));

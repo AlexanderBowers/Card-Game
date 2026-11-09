@@ -166,6 +166,18 @@ jobs:
             -v:minimal \
             2>&1 | tee build/csharp-build.log
 
+      - name: Build the CloudyDayStore Android plugin (in-app review + share sheet)
+        # tools/android-plugin -> addons/CloudyDayStore/bin/CloudyDayStore-release.aar. Built here
+        # rather than committed: it is generated, and the PC shell can't run Gradle.
+        run: |
+          set -euo pipefail
+          cd tools/android-plugin
+          chmod +x gradlew
+          ./gradlew assembleRelease --no-daemon -q
+          mkdir -p ../../addons/CloudyDayStore/bin
+          cp build/outputs/aar/CloudyDayStore-release.aar ../../addons/CloudyDayStore/bin/
+          ls -la ../../addons/CloudyDayStore/bin
+
       - name: Import project (generates .godot cache)
         run: |
           set -o pipefail
