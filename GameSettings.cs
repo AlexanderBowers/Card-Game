@@ -18,8 +18,7 @@ public static class GameSettings
 
     public enum Channel { Master, Music, Sfx }
 
-    // The bus each channel drives. Music has no tracks yet; the bus exists so the slider is real
-    // the day a track is added.
+    // The bus each channel drives. Music carries the lounge loops (Music.cs).
     public const string MusicBus = "Music";
     public const string SfxBus = "SFX";
 

@@ -50,9 +50,13 @@ public partial class ShineDriver : Node
 
         bool boardLive = GameSettings.CardAnimations && !GameSettings.BatterySaver;
         _boardOn = Mathf.MoveToward(_boardOn, boardLive ? 1f : 0f, (float)delta * 2f);
-        if (_boardOn > 0f) _boardTime += delta;
-        // Wraps at 70 s, a whole number of every cycle in the shader (14 s laps, 5 s waves and rings).
-        RenderingServer.GlobalShaderParameterSet(BoardTimeParam, (float)(_boardTime % 70.0));
+        // The board keeps time with the music when it is playing (Music.Clock), so the emblem's
+        // ring leaves on the downbeat; without music it counts frames as before.
+        if (Music.Instance != null && Music.Instance.Running) _boardTime = Music.Instance.Clock;
+        else if (_boardOn > 0f) _boardTime += delta;
+        // Wraps at 60 s: the music's loop, and a whole number of every cycle in the shader
+        // (15 s laps, 5 s waves and rings).
+        RenderingServer.GlobalShaderParameterSet(BoardTimeParam, (float)(_boardTime % Music.LoopSeconds));
         RenderingServer.GlobalShaderParameterSet(BoardOnParam, _boardOn);
     }
 }

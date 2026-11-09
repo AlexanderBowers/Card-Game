@@ -10,7 +10,7 @@
 // Everything is measured in "board units", where the board's short side is 1, so it looks the
 // same on portrait and landscape boards of any size.
 
-global uniform float board_fx_time;   // seconds (wraps every 70: 14 s laps, 5 s waves), from ShineDriver
+global uniform float board_fx_time;   // seconds (wraps every 60: 15 s laps, 5 s waves), from ShineDriver = the music's clock
 global uniform float board_fx_on;     // 0..1: eases to 0 when card animations or battery saver say so
 
 uniform vec2 board_size = vec2(9.0, 19.5);   // any units; only the aspect matters
@@ -38,10 +38,10 @@ vec3 board_fx(vec3 base, vec2 uv, vec3 rim) {
 	float on = board_fx_on;
 	float r = length(p);
 
-	// Rim gleam: two soft highlights chasing each other round the border, one lap ~14 s.
+	// Rim gleam: two soft highlights chasing each other round the border, one lap 15 s (6 bars at 96 BPM).
 	float in_rim = 1.0 - smoothstep(rim_frac * 0.8, rim_frac * 1.05, inside);
 	float ang = atan(p.y, p.x);
-	float head = fract(t / 14.0) * TAU;
+	float head = fract(t / 15.0) * TAU;
 	float g = 0.0;
 	for (int k = 0; k < 2; k++) {
 		float d = abs(mod(ang - head - float(k) * PI + PI, TAU) - PI);
@@ -60,7 +60,8 @@ vec3 board_fx(vec3 base, vec2 uv, vec3 rim) {
 	float lattice = line * fade * (0.08 + 0.16 * wave * on);
 	base = mix(base, rim, clamp(lattice, 0.0, 1.0) * step(rim_frac, inside));
 
-	// Ripple: every 5 s a ring leaves the emblem's edge (0.30) and fades out by 0.58.
+	// Ripple: every 5 s (2 bars at 96 BPM, on the music's downbeat) a ring leaves the emblem's edge
+	// (0.30) and fades out by 0.58.
 	float life = fract(t / 5.0);
 	float rr = mix(0.30, 0.58, life);
 	float ring = exp(-pow((r - rr) / 0.010, 2.0)) * (1.0 - life) * (1.0 - life);

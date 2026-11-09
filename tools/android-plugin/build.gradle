@@ -1,0 +1,25 @@
+// Critical Count's small Android plugin (2026-11-08): Google Play's in-app review popup and
+// Android's share sheet, called from C# through Engine.GetSingleton("CloudyDayStore").
+//
+// Build: gradlew assembleRelease, then copy build/outputs/aar/CloudyDayStore-release.aar to
+// addons/CloudyDayStore/bin/. The Godot library is compileOnly: the game supplies it at runtime.
+plugins {
+    id 'com.android.library' version '8.6.1'
+}
+
+android {
+    namespace 'com.cloudydaygames.store'
+    compileSdk 36
+    defaultConfig {
+        minSdk 24
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
+
+dependencies {
+    compileOnly 'org.godotengine:godot:4.7.2.stable'
+    implementation 'com.google.android.play:review:2.0.2'
+}

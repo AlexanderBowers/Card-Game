@@ -166,12 +166,10 @@ public partial class OptionsOverlay : Control
         {
             colA.AddChild(SectionLabel("Enjoying it?"));
             colA.AddChild(StoreButton("Rate Critical Count", StoreLinks.OpenRatePage));
-            _shareButton = StoreButton("Share Critical Count", null);
-            _shareButton.Pressed += () =>
+            _shareButton = StoreButton("Share Critical Count", () =>
             {
-                StoreLinks.CopyShareText();
-                _shareButton.Text = "Link copied - paste it anywhere";
-            };
+                if (!StoreLinks.Share()) _shareButton.Text = "Link copied - paste it anywhere";
+            });
             colA.AddChild(_shareButton);
         }
 

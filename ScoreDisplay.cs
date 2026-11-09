@@ -185,7 +185,7 @@ public sealed class ScoreDisplay
                                   string score, string targetText, bool show)
     {
         Show(box, show);
-        if (value != null) value.Text = score;
+        CountUp.SetText(value, score);
         if (caption != null) caption.Text = "THEM";
         if (target != null)
         {
@@ -509,12 +509,12 @@ public sealed class ScoreDisplay
             int? previewed = preview ? PreviewedScore(player) : null;
             if (previewed.HasValue && started)
             {
-                value.Text = previewed.Value.ToString();
+                CountUp.SetText(value, previewed.Value.ToString(), animate: false);
                 value.AddThemeColorOverride("font_color", PreviewColorFor(previewed.Value));
             }
             else
             {
-                value.Text = scoreText;
+                CountUp.SetText(value, scoreText);
                 value.RemoveThemeColorOverride("font_color");
             }
         }
