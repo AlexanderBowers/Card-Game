@@ -51,6 +51,7 @@
     <EmbeddedResource Include="Site/logo.png" LogicalName="site.logo.png" />
     <EmbeddedResource Include="../../PRIVACY.md" LogicalName="site.PRIVACY.md" />
     <EmbeddedResource Include="../../ACCOUNT_DELETION.md" LogicalName="site.ACCOUNT_DELETION.md" />
+    <EmbeddedResource Include="../../TERMS.md" LogicalName="site.TERMS.md" />
   </ItemGroup>
 
   <ItemGroup>
