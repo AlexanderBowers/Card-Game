@@ -1,0 +1,20 @@
+01-luck-deals.png
+A Critical Count duel showing a player total of 20 and a hand of Modifier cards.
+
+02-smart-move.png
+A plus-or-minus 3 Modifier reduces a hand totaling 22 to 19 against a target of 20.
+
+03-read-your-rival.png
+The player holds at 19 while the rival has face-down cards concealing their total.
+
+04-two-rivals.png
+Local two-player gameplay with mirrored controls facing both sides of one screen.
+
+05-build-your-deck.png
+The Modifier Shop offers Shave, plus 3, plus-or-minus 2, and minus 2 cards for Medals.
+
+06-solo-stages.png
+Stage 11 introduces a target of 20, an opponent with Copy, and cards hidden after two draws.
+
+07-online-duels.png
+An online Critical Count match with number cards and a selected Shave Modifier.
