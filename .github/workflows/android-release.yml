@@ -92,12 +92,17 @@ jobs:
       - name: Stamp version code/name
         # Play needs a strictly higher versionCode on every upload. The run number of THIS
         # workflow only ever goes up; the debug workflow's numbers are a different package.
+        # The player-facing version name comes from the VERSION file at the repo root (1.0.0 for
+        # the production launch) - bump it there for each public release.
         run: |
           mkdir -p build
+          APP_VERSION="$(tr -d '[:space:]' < VERSION)"
+          test -n "$APP_VERSION"
+          echo "APP_VERSION=${APP_VERSION}" >> "$GITHUB_ENV"
           sed -i "s|^version/code=.*|version/code=${GITHUB_RUN_NUMBER}|" export_presets.cfg
-          sed -i "s|^version/name=.*|version/name=\"0.9.${GITHUB_RUN_NUMBER}\"|" export_presets.cfg
-          # The start menu shows this, so testers can see which build they have.
-          sed -i "s|^config/version=.*|config/version=\"0.9.${GITHUB_RUN_NUMBER}\"|" project.godot
+          sed -i "s|^version/name=.*|version/name=\"${APP_VERSION}\"|" export_presets.cfg
+          # The start menu shows this, so players can see which build they have.
+          sed -i "s|^config/version=.*|config/version=\"${APP_VERSION}\"|" project.godot
           grep -E '^config/version=' project.godot
           grep -E '^version/' export_presets.cfg
 
@@ -269,11 +274,11 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: release-v${{ github.run_number }}
-          name: Release build 0.9.${{ github.run_number }}
+          name: Release build ${{ env.APP_VERSION }} (${{ github.run_number }})
           prerelease: true
           make_latest: "false"
           body: |
-            Signed store build (com.cloudydaygames.criticalcount), version 0.9.${{ github.run_number }} (code ${{ github.run_number }}), from ${{ github.sha }}.
+            Signed store build (com.cloudydaygames.criticalcount), version ${{ env.APP_VERSION }} (code ${{ github.run_number }}), from ${{ github.sha }}.
             - CriticalCount-release.apk: install on a phone directly.
             - CriticalCount.aab: upload to Play Console.
             This build shows LIVE ads - don't tap them on your own phone (AdMob counts that as invalid clicks).
