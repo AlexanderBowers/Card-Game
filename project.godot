@@ -22,8 +22,10 @@ config/name="Critical Count"
 config/version="dev"
 run/main_scene="uid://b7qn5xyxoj23q"
 config/features=PackedStringArray("4.7", "C#", "Mobile")
+boot_splash/bg_color=Color(0.227451, 0.482353, 0.835294, 1)
+boot_splash/image="res://assets/branding/boot_splash.png"
 config/icon="res://assets/aimfor20_art/icon_1024.png"
-run/flush_stdout_on_print.debug=true
+boot_splash/minimum_display_time=1200
 
 [autoload]
 
@@ -38,6 +40,10 @@ CloudSave="*res://CloudSave.cs"
 
 play_games/game_id="633434549646"
 
+[debug]
+
+file_logging/enable_file_logging.debug=true
+
 [display]
 
 window/size/viewport_width=720
@@ -47,10 +53,6 @@ window/size/window_height_override=648
 window/stretch/mode="canvas_items"
 window/stretch/aspect="expand"
 window/handheld/orientation=6
-
-[debug]
-
-file_logging/enable_file_logging.debug=true
 
 [dotnet]
 
