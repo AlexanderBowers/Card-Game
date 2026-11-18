@@ -35,10 +35,13 @@ public static class Site
             Legal(legal, "Privacy", "Privacy Policy", Text("site.PRIVACY.md")));
         string deletePage = Page(layout, "Delete your account - Critical Count", "delete",
             Legal(legal, "Data safety", "Delete your account", Text("site.ACCOUNT_DELETION.md")));
+        string termsPage = Page(layout, "Terms of Service - Critical Count", "terms",
+            Legal(legal, "Terms", "Terms of Service", Text("site.TERMS.md")));
 
         app.MapGet("/", () => Html(homePage));
         app.MapGet("/privacy", () => Html(privacyPage));
         app.MapGet("/delete-account", () => Html(deletePage));
+        app.MapGet("/terms", () => Html(termsPage));
         app.MapGet("/app-ads.txt", () => Results.Text(AppAdsTxt, "text/plain; charset=utf-8"));
         app.MapGet("/logo.png", () => Results.Bytes(logo, "image/png"));
         app.MapGet("/robots.txt", () => Results.Text("User-agent: *\nAllow: /\nDisallow: /v1/\n", "text/plain; charset=utf-8"));
@@ -51,6 +54,7 @@ public static class Site
               .Replace("{{NAV_HOME}}", current == "home" ? "active" : "")
               .Replace("{{NAV_PRIVACY}}", current == "privacy" ? "active" : "")
               .Replace("{{NAV_DELETE}}", current == "delete" ? "active" : "")
+              .Replace("{{NAV_TERMS}}", current == "terms" ? "active" : "")
               .Replace("{{CONTENT}}", content);
 
     private static string Legal(string legal, string badge, string heading, string markdown) =>

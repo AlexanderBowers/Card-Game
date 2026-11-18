@@ -1,6 +1,6 @@
 # Privacy Policy - Critical Count
 
-**Effective date:** October 13, 2026
+**Effective date:** November 17, 2026
 **Developer:** Cloudy Day Games
 **Contact:** cloudydaygamesllc@gmail.com
 
@@ -23,7 +23,8 @@ package `com.cloudydaygames.criticalcount`), who handles it, and the choices you
 - **You can delete your online account at any time**, from inside the game.
 - **Ads:** the free version shows ads served by **Google AdMob**. Google collects device and
   usage information to show those ads, as described below.
-- **Purchases:** if you buy **Remove Ads**, the payment is handled entirely by **Google Play**.
+- **Purchases:** where **Remove Ads** is offered and you buy it, the payment is handled entirely
+  by **Google Play**.
 
 ## 2. Information stored on your device
 
@@ -140,7 +141,7 @@ When an ad is requested or shown, Google may collect and process:
 Google uses this information to serve and measure ads, limit how often you see the same ad, and
 detect fraud and abuse. Depending on your choices and where you live, ads may be personalized or
 non-personalized. We limit ads in Critical Count to content rated PG and block sensitive ad
-categories such as gambling.
+categories such as gambling, social casino games, alcohol and dating.
 
 - How Google uses this information: https://policies.google.com/technologies/partner-sites
 - Google Privacy Policy: https://policies.google.com/privacy
@@ -153,7 +154,7 @@ categories such as gambling.
   personal information for targeted advertising.
 - **Changing your mind:** open **Options → Privacy Choices** at any time.
 - **Advertising ID:** you can reset or delete it in your device settings.
-- **No ads at all:** buy Remove Ads.
+- **No ads at all:** buy Remove Ads, where it is offered.
 - **No online account at all:** don't use the online features; the rest of the game works
   without one.
 - **No cloud copy:** leave cloud save off (the default), or turn it off and delete the copy in
@@ -163,7 +164,7 @@ categories such as gambling.
 
 ## 7. In-app purchases (Google Play)
 
-Remove Ads is sold through Google Play Billing. Google processes the payment; we never see your
+Remove Ads, when it is offered, is sold through Google Play Billing. Google processes the payment; we never see your
 payment details, name or email address.
 
 ## 8. Children
@@ -174,7 +175,9 @@ account, contact us and we will delete it.
 
 ## 9. Security and retention
 
-- Online account data is kept until you delete the account.
+- Online account data is kept until you delete the account. The server's database is backed up
+  nightly, and each backup is overwritten within 7 days, so deleted data leaves the backups within
+  a week.
 - Name reports are cleared when the name they were about is reset.
 - Data on your device stays there until you uninstall the game.
 - A cloud save stays in your Google Play Games account until you delete it there.
@@ -195,6 +198,10 @@ You can delete your online account yourself in the game, or contact us.
 We will update this policy, and the effective date above, before any change that affects your
 privacy ships.
 
-## 12. Contact
+## 12. Terms of Service
+
+Use of the game is also covered by our Terms of Service: https://cloudydaygames.com/terms
+
+## 13. Contact
 
 **cloudydaygamesllc@gmail.com**
